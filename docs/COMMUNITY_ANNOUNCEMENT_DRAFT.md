@@ -37,7 +37,7 @@ All desktop UI surfaces run as isolated OS processes communicating via `zbus` D-
 A major goal of mine was integrating my standalone local AI project (**AURA-CORE**) directly into the desktop workspace with **zero Python/PyO3/FastAPI runtime dependencies**:
 * **`crates/vector` (`corten-vector` — 691 LOC):** In-process `Arc<RwLock<InnerState>>` vector database with a navigable small-world graph (`build_hnsw_index`), parallel Rayon cosine/L2 search, inverted metadata index (`==`, `!=`, `>`, `<`, `>=`, `<=`), tombstone deletion + `vacuum()`, and JSON-lines Write-Ahead Logging (`wal.rs`). Linked directly into `corten-launcher` and `corten-ai` for `<0.2ms` semantic file lookup.
 * **`crates/llm` (`corten-llm` — 1,961 LOC):** Zero-copy `memmap2::Mmap` GGUF file parser (`gguf.rs`), pure-Rust block dequantization kernels (`quant.rs`: `Q4_K`, `Q6_K`, `Q5_0`, `Q8_0`, `F16`), and Rayon-parallel `RMSNorm`, `RoPE`, `SwiGLU`, `KVCache`, and `MultiHeadAttention` (`ops.rs`, `engine/`).
-* **`corten-ai/src/aura.rs` (3,619 LOC total in `corten-ai`):** Implements persistent user profile & vector memory (`~/.local/share/corten/aura/user_profile.json` + `memory_vector.wal`), a 20-tool native Rust registry (recursive-descent math parser, `/proc` telemetry, Git/file inspection, 9 `cortenctl` Wayland automation tools), a multi-step ReAct (`Thought -> Action -> Observation`) executor, and a Human-In-The-Loop (`HITL`) gate that blocks destructive commands (`rm -rf`, `mkfs`, `sudo`) and logs to `hitl_audit.log`.
+* **`corten-ai/src/aura.rs` (3,619 LOC total in `corten-ai`):** Implements persistent user profile & vector memory (`~/.local/share/corten/aura/user_profile.json` + `memory_vector.wal`), a 20-tool native Rust registry (recursive-descent math parser, `/proc` telemetry, Git/file inspection, 9 `cortenctl` Wayland automation tools), a multi-step ReAct (`Thought -> Action -> Observation`) executor, and a Human-In-The-Loop (`HITL`) confirmation gate that intercepts privileged or destructive shell operations and records an audit trail (`hitl_audit.log`).
 
 ### 4. Engineering Trade-Offs & Current Limitations
 * **CPU SIMD (`corten-llm`) vs. GPU Offload:** The embedded `corten-llm` crate runs on CPU via Rayon and is designed for zero-dependency execution of compact (`0.5B–3B`) GGUF models. When you need CUDA/ROCm GPU offloading or Vision (`llava`/`qwen2-vl`) screen analysis (`corten-snipper --fullscreen` -> RFC 4648 Base64), `corten-ai` automatically bridges to local `Ollama` (`11434`) or `llama-server` (`8080`) over loopback TCP.
@@ -45,7 +45,7 @@ A major goal of mine was integrating my standalone local AI project (**AURA-CORE
 
 ### Building & Running Tests
 ```bash
-git clone https://github.com/Shura5800/corten-desktop.git
+git clone https://github.com/Shura5860/corten-desktop.git
 cd corten-desktop
 cargo test --workspace
 cargo clippy --workspace -- -D warnings
@@ -58,27 +58,38 @@ Feedback, code audits, and multi-GPU / DRM hardware reports are very welcome!
 
 ## 2. Hacker News (`Show HN`) Submission
 
-**Title:** *Show HN: Corten – A 68k-LOC Wayland desktop and in-process GGUF/vector engine in Rust*
+**Submit Page:** `https://news.ycombinator.com/submit`
 
-**First Comment:**
+**`title` (Max 80 chars):**
+```text
+Show HN: Corten – A 68k-LOC Wayland desktop and in-process GGUF/vector engine in Rust
+```
 
-> Hi HN,
->
-> Corten is an independent Wayland desktop environment written in Rust (`28` workspace crates, `~68.7k LOC`, `122` unit tests). It combines a `Smithay`-based DRM/KMS compositor with an `Iced` shell suite and an embedded local AI/vector subsystem.
->
-> A few concrete implementation details for those interested in graphics, Wayland, or local inference:
->
-> 1. **Compositor & DRM (`corten-compositor`):**
->    - Implements both Master-Stack and recursive BSP tree (`BspNode`) tiling with drag-to-split edge detection (`layout.rs`).
->    - Uses custom GLSL ES shaders (`glow_shader.rs`) for Dual-Kawase blur with an SDF rounded-rectangle mask (`GlassRegion`) so background blur never bleeds past rounded window corners.
->    - Supports `linux-drm-syncobj-v1` (explicit sync timeline semaphores), `wp_tearing_control_v1`, `zwp_tablet_manager_v2` (Wacom stylus pressure/tilt), and serializes 32-byte Linux `hdr_output_metadata` blobs (`ST.2084 PQ` / `BT.2020`) directly to DRM connectors (`color_management.rs`).
->
-> 2. **In-Process Vector & GGUF Engine (`crates/vector`, `crates/llm`, `corten-ai`):**
->    - Rather than requiring a Python/FastAPI background server, we embedded a pure-Rust HNSW-like vector index (`corten-vector`) with JSON-lines Write-Ahead Logging (`wal.rs`), tombstone compaction, and metadata filtering (`==, !=, >, <, >=, <=`), plus a zero-copy `memmap2` GGUF inference engine (`corten-llm`) supporting `Q4_K`, `Q6_K`, `Q5_0`, `Q8_0`, and `F16` quantized blocks.
->    - `corten-ai` layers a 20-tool ReAct loop (`aura.rs`), persistent vector memory (`user_profile.json` + `memory_vector.wal`), and a Human-In-The-Loop (`HITL`) security gate (`hitl_audit.log`) on top, while also supporting loopback fallback to `Ollama`/`llama.cpp` when GPU VRAM offloading is needed.
->
-> 3. **Trade-Offs:**
->    - Shell panels/applets (`corten-panel`, `corten-settings`, `corten-files`) use Iced's `tiny-skia` software rasterizer rather than per-process GL contexts to keep idle RAM at ~180 MB, while the compositor handles 60–240Hz GPU scanout.
->    - Built-in launcher file indexing uses deterministic 128-dim LSH character/word n-gram hashing (`<0.2ms`, zero model weights on disk) so `Super+Space` has zero cold-start latency.
->
-> Everything builds offline from a single workspace (`cargo test --workspace`). Happy to answer technical questions!
+**`url`:**
+```text
+https://github.com/Shura5860/corten-desktop
+```
+
+**`text` (veya gönderdikten sonra ilk yorum — Hacker News kalın/kod Markdown işaretlerini desteklemediği için HN'ye özel düz metin formatındadır):**
+```text
+Hi HN,
+
+Corten is an independent Wayland desktop environment written in Rust (28 workspace crates, ~68.7k LOC, 123 unit tests). It combines a Smithay-based DRM/KMS compositor with an Iced shell suite and an embedded local AI/vector subsystem.
+
+A few concrete implementation details for those interested in graphics, Wayland, or local inference:
+
+1. Compositor & DRM (corten-compositor):
+- Implements both Master-Stack and recursive BSP tree (BspNode) tiling with drag-to-split edge detection (layout.rs).
+- Uses custom GLSL ES shaders (glow_shader.rs) for Dual-Kawase blur with an SDF rounded-rectangle mask (GlassRegion) so background blur never bleeds past rounded window corners.
+- Supports linux-drm-syncobj-v1 (explicit sync timeline semaphores), wp_tearing_control_v1, zwp_tablet_manager_v2 (Wacom stylus pressure/tilt), and serializes 32-byte Linux hdr_output_metadata blobs (ST.2084 PQ / BT.2020) directly to DRM connectors (color_management.rs).
+
+2. In-Process Vector & GGUF Engine (crates/vector, crates/llm, corten-ai):
+- Rather than requiring a Python/FastAPI background server, we embedded a pure-Rust HNSW-like vector index (corten-vector) with JSON-lines Write-Ahead Logging (wal.rs), tombstone compaction, and metadata filtering (==, !=, >, <, >=, <=), plus a zero-copy memmap2 GGUF inference engine (corten-llm) supporting Q4_K, Q6_K, Q5_0, Q8_0, and F16 quantized blocks.
+- corten-ai layers a 20-tool ReAct loop (aura.rs), persistent vector memory (user_profile.json + memory_vector.wal), and a Human-In-The-Loop (HITL) security gate (hitl_audit.log) on top, while also supporting loopback fallback to Ollama/llama.cpp when GPU VRAM offloading is needed.
+
+3. Trade-Offs:
+- Shell panels/applets (corten-panel, corten-settings, corten-files) use Iced's tiny-skia software rasterizer rather than per-process GL contexts to keep idle RAM at ~180 MB, while the compositor handles 60-240Hz GPU scanout.
+- Built-in launcher file indexing uses deterministic 128-dim LSH character/word n-gram hashing (<0.2ms, zero model weights on disk) so Super+Space has zero cold-start latency.
+
+Everything builds offline from a single workspace (cargo test --workspace). Happy to answer technical questions!
+```

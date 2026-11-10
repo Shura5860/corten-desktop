@@ -172,7 +172,7 @@ To keep expectations concrete for developers and contributors, here are the expl
 
 ```bash
 # 0. Clone the repository
-git clone https://github.com/Shura5800/corten-desktop.git
+git clone https://github.com/Shura5860/corten-desktop.git
 cd corten-desktop
 
 # 1. Run all 123 unit tests across the 28 workspace crates

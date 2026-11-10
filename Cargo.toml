@@ -36,7 +36,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Corten Desktop Contributors"]
-repository = "https://github.com/Shura5800/corten-desktop"
+repository = "https://github.com/Shura5860/corten-desktop"
 
 [workspace.dependencies]
 # GUI Toolkit (Tam sürüm kilitli)

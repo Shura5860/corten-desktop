@@ -4,7 +4,7 @@ Release:        1%{?dist}
 Summary:        Pure Rust, Modular, Modern Wayland Desktop Environment with Native Local AI
 
 License:        GPL-3.0-only
-URL:            https://github.com/Shura5800/corten-desktop
+URL:            https://github.com/Shura5860/corten-desktop
 
 BuildRequires:  cargo
 BuildRequires:  rust
