@@ -1,0 +1,26 @@
+# Rust / Cargo build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Temporary / runtime logs & sockets
+*.log
+*.sock
+*.pid
+*.swp
+*.swo
+*~
+
+# OS / Editor directories
+.DS_Store
+.idea/
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Packaging build outputs
+packaging/pkg/
+packaging/src/
+packaging/*.pkg.tar.*
+packaging/*.tar.gz
+

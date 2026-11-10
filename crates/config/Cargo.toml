@@ -1,0 +1,14 @@
+[package]
+name = "corten-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Configuration format, TOML parser, and live reload for Corten Desktop"
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+notify.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+directories.workspace = true

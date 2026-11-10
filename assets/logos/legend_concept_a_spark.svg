@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Deep Obsidian Canvas Gradient -->
+    <radialGradient id="canvas-bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1e1816"/>
+      <stop offset="60%" stop-color="#111317"/>
+      <stop offset="100%" stop-color="#0a0b0d"/>
+    </radialGradient>
+
+    <!-- Warm Corten Rust to Copper Gold Gradient -->
+    <linearGradient id="corten-copper" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#be5046"/>
+      <stop offset="35%" stop-color="#e06c75"/>
+      <stop offset="70%" stop-color="#d19a66"/>
+      <stop offset="100%" stop-color="#ffd59e"/>
+    </linearGradient>
+
+    <!-- Inner Shadow & Depth Gradient -->
+    <linearGradient id="inner-depth" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd59e" stop-opacity="0.9"/>
+      <stop offset="40%" stop-color="#d19a66" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#be5046" stop-opacity="0.1"/>
+    </linearGradient>
+
+    <!-- AI Spark Radiance -->
+    <radialGradient id="spark-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="40%" stop-color="#ffd59e"/>
+      <stop offset="80%" stop-color="#e06c75"/>
+      <stop offset="100%" stop-color="#be5046" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Ambient Shadow -->
+    <filter id="master-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="20" stdDeviation="28" flood-color="#000000" flood-opacity="0.9"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#e06c75" flood-opacity="0.25"/>
+    </filter>
+
+    <filter id="spark-blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Canvas Base -->
+  <rect width="512" height="512" rx="112" fill="url(#canvas-bg)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.15" stroke-width="1.5"/>
+
+  <g filter="url(#master-shadow)">
+    <!-- 
+      THE CORTEN SPARK MARK:
+      A single, confident, monolithic sweep that forms the iconic 'C'.
+      The inner aperture houses the sharp, radiant 4-pointed AI Diamond Spark.
+    -->
+
+    <!-- Outer Ambient Glow ring -->
+    <path d="M 336,136 
+             C 210,136 128,200 128,256 
+             C 128,312 210,376 336,376" 
+          fill="none" 
+          stroke="#e06c75" 
+          stroke-opacity="0.2" 
+          stroke-width="56" 
+          stroke-linecap="round"/>
+
+    <!-- The Master Corten Monolithic 'C' -->
+    <path d="M 336,136 
+             C 216,136 136,192 136,256 
+             C 136,320 216,376 336,376" 
+          fill="none" 
+          stroke="url(#corten-copper)" 
+          stroke-width="48" 
+          stroke-linecap="round"/>
+
+    <!-- Inner Metallic Core Highlight (gives tactile, industrial bevel) -->
+    <path d="M 334,136 
+             C 218,136 142,190 142,256 
+             C 142,322 218,376 334,376" 
+          fill="none" 
+          stroke="url(#inner-depth)" 
+          stroke-width="10" 
+          stroke-linecap="round"/>
+
+    <!-- THE PURE AI SPARK (✦) floating in the focal point of the 'C' -->
+    <!-- Ambient Halo -->
+    <circle cx="320" cy="256" r="44" fill="url(#spark-glow)" opacity="0.6" filter="url(#spark-blur)"/>
+
+    <!-- Sharp 4-Point AI Spark -->
+    <path d="M 320,196 
+             Q 320,256 380,256 
+             Q 320,256 320,316 
+             Q 320,256 260,256 
+             Q 320,256 320,196 Z" 
+          fill="url(#corten-copper)" 
+          filter="url(#spark-blur)"/>
+
+    <!-- Brilliant Pure White Core -->
+    <circle cx="320" cy="256" r="6" fill="#ffffff"/>
+  </g>
+
+  <!-- Clean, Understated Wordmark -->
+  <text x="256" y="466" text-anchor="middle" font-family="'Inter', -apple-system, sans-serif" font-size="24" font-weight="700" letter-spacing="8" fill="#ffd59e" opacity="0.95">CORTEN</text>
+</svg>
+

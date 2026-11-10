@@ -1,0 +1,16 @@
+[package]
+name = "corten-llm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Pure Rust SIMD-Accelerated GGUF Inference Engine (Quantized Q4_K/Q6_K/Q8_0/F16, KV-Cache, RoPE, RMSNorm) for Corten Desktop"
+
+[dependencies]
+memmap2 = "0.9"
+byteorder = "1.5"
+rayon = "1.10"
+anyhow = "1.0"
+regex = "1.10"
+rand = "0.8"
+

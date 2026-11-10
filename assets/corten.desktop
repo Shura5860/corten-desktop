@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Corten
+Comment=Modern Pure Rust Wayland Desktop Environment
+Exec=corten-session
+Type=Application
+DesktopNames=Corten
+Keywords=wayland;compositor;desktop;rust;

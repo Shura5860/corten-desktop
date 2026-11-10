@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <radialGradient id="nexus-bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1f1816"/>
+      <stop offset="60%" stop-color="#101216"/>
+      <stop offset="100%" stop-color="#08090b"/>
+    </radialGradient>
+
+    <!-- Top Plate Gradient (Copper Gold to Rust) -->
+    <linearGradient id="nexus-top" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="40%" stop-color="#e5c07b"/>
+      <stop offset="100%" stop-color="#d19a66"/>
+    </linearGradient>
+
+    <!-- Bottom Plate Gradient (Rust to Deep Burgundy Steel) -->
+    <linearGradient id="nexus-bottom" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d19a66"/>
+      <stop offset="50%" stop-color="#e06c75"/>
+      <stop offset="100%" stop-color="#80261f"/>
+    </linearGradient>
+
+    <!-- Central AI Nexus Glow -->
+    <radialGradient id="nexus-spark-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="40%" stop-color="#ffd59e"/>
+      <stop offset="80%" stop-color="#e06c75"/>
+      <stop offset="100%" stop-color="#be5046" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="nexus-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.9"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="10" flood-color="#e06c75" flood-opacity="0.2"/>
+    </filter>
+
+    <filter id="nexus-glow-filter" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#nexus-bg)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.15" stroke-width="1.5"/>
+
+  <g filter="url(#nexus-shadow)">
+    <!-- 
+      THE TILING NEXUS:
+      Two interlocking geometric plates (Wayland Tiling)
+      forming the upper and lower arms of 'C'.
+      Between them floats the AI Nexus spark.
+    -->
+
+    <!-- Top Plate (Curved Upper Wing of 'C') -->
+    <path d="M 348,136 
+             L 216,136 
+             C 152,136 128,172 128,236 
+             L 192,236 
+             C 192,192 208,184 236,184 
+             L 348,184 
+             Z" 
+          fill="url(#nexus-top)"/>
+
+    <!-- Bottom Plate (Curved Lower Wing of 'C') -->
+    <path d="M 348,376 
+             L 216,376 
+             C 152,376 128,340 128,276 
+             L 192,276 
+             C 192,320 208,328 236,328 
+             L 348,328 
+             Z" 
+          fill="url(#nexus-bottom)"/>
+
+    <!-- Left Bridge Plate (Connects with beveled gap) -->
+    <rect x="128" y="244" width="40" height="24" rx="4" fill="#be5046"/>
+
+    <!-- THE AI NEXUS SPARK (Floating in the geometric gateway) -->
+    <circle cx="288" cy="256" r="48" fill="url(#nexus-spark-glow)" opacity="0.6" filter="url(#nexus-glow-filter)"/>
+
+    <!-- Iconic 4-Pointed Symmetrical Spark -->
+    <path d="M 288,188 
+             Q 288,256 356,256 
+             Q 288,256 288,324 
+             Q 288,256 220,256 
+             Q 288,256 288,188 Z" 
+          fill="url(#nexus-top)" 
+          filter="url(#nexus-glow-filter)"/>
+
+    <circle cx="288" cy="256" r="6" fill="#ffffff"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="256" y="466" text-anchor="middle" font-family="'Inter', -apple-system, sans-serif" font-size="24" font-weight="700" letter-spacing="8" fill="#ffd59e" opacity="0.95">CORTEN</text>
+</svg>
+

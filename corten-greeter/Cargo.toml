@@ -1,0 +1,25 @@
+[package]
+name = "corten-greeter"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+authors.workspace = true
+repository.workspace = true
+description = "Modern, elegant login screen / greeter for greetd using iced and corten-theme"
+
+[dependencies]
+corten-auth = { path = "../crates/auth" }
+corten-theme = { path = "../crates/theme" }
+corten-config = { path = "../crates/config" }
+corten-ipc = { path = "../crates/ipc" }
+
+iced = { workspace = true, features = ["tiny-skia", "tokio", "image"] }
+greetd_ipc = { version = "0.10", features = ["sync-codec"] }
+users = "0.11"
+chrono = "0.4"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { version = "1.0", features = ["full"] }
+thiserror = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }

@@ -1,0 +1,27 @@
+[package]
+name = "corten-polkit"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+authors.workspace = true
+repository.workspace = true
+description = "Native PolicyKit (Polkit-1) Authentication Agent for the Corten Wayland Desktop suite"
+
+[dependencies]
+corten-theme = { path = "../crates/theme" }
+corten-config = { path = "../crates/config" }
+corten-auth = { path = "../crates/auth" }
+
+# GUI Toolkit & Layer-shell integration
+iced = { workspace = true, features = ["tiny-skia", "tokio"] }
+iced_layershell = "0.7"
+iced_runtime = "0.13"
+zbus = { workspace = true, features = ["tokio"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
+serde = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = "1.0"
+directories = { workspace = true }
+futures-lite = "2.6"
+pam = "0.8"

@@ -1,0 +1,23 @@
+[package]
+name = "corten-wallpaper"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+authors.workspace = true
+repository.workspace = true
+description = "High-performance hardware-accelerated wallpaper daemon for Corten Desktop Environment"
+
+[dependencies]
+corten-theme = { path = "../crates/theme" }
+corten-config = { path = "../crates/config" }
+iced = { workspace = true, features = ["image", "tokio"] }
+tokio = { version = "1.0", features = ["rt", "signal", "macros"] }
+futures = "0.3"
+iced_layershell = "0.7"
+iced_runtime = "0.13"
+serde = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+image = "0.24"
+directories = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "corten-capture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Optional PipeWire screen-capture consumer for Corten"
+
+[features]
+default = []
+pipewire = ["dep:pipewire"]
+ffmpeg = []
+
+[dependencies]
+thiserror.workspace = true
+pipewire = { version = "0.8", optional = true }

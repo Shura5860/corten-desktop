@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <radialGradient id="bg-shield" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#241b18" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#0b0d11" stop-opacity="1.0"/>
+    </radialGradient>
+
+    <linearGradient id="shield-rim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="45%" stop-color="#e06c75"/>
+      <stop offset="100%" stop-color="#be5046"/>
+    </linearGradient>
+
+    <linearGradient id="shield-body" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#261d1b"/>
+      <stop offset="100%" stop-color="#141112"/>
+    </linearGradient>
+
+    <linearGradient id="patina-flame" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#80261f"/>
+      <stop offset="40%" stop-color="#e06c75"/>
+      <stop offset="80%" stop-color="#d19a66"/>
+      <stop offset="100%" stop-color="#ffd59e"/>
+    </linearGradient>
+
+    <filter id="shield-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="22" flood-color="#000000" flood-opacity="0.8"/>
+    </filter>
+
+    <filter id="crest-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="14" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base Canvas -->
+  <rect width="512" height="512" rx="112" fill="url(#bg-shield)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.18" stroke-width="1.5"/>
+
+  <g filter="url(#shield-shadow)">
+    <!-- 1. OUTER SHIELD FRAME -->
+    <path d="M 256,92 
+             C 340,92 384,124 384,180 
+             C 384,276 312,364 256,408 
+             C 200,364 128,276 128,180 
+             C 128,124 172,92 256,92 Z"
+          fill="url(#shield-body)" 
+          stroke="url(#shield-rim)" 
+          stroke-width="5"/>
+
+    <!-- Subtle Inner Shield Inset Line -->
+    <path d="M 256,112 
+             C 324,112 364,138 364,184 
+             C 364,264 302,342 256,382 
+             C 210,342 148,264 148,184 
+             C 148,138 188,112 256,112 Z"
+          fill="none" 
+          stroke="#e06c75" 
+          stroke-opacity="0.3" 
+          stroke-width="1.5"/>
+
+    <!-- 2. CORE PATINA 'C' CREST (Interlocking steel flame & C monogram) -->
+    <path d="M 318,172
+             C 318,172 232,154 196,192
+             C 162,228 162,284 196,320
+             C 232,356 318,340 318,340
+             C 318,340 252,364 218,326
+             C 188,294 188,252 216,218
+             C 248,180 318,172 318,172 Z"
+          fill="url(#patina-flame)" 
+          filter="url(#crest-glow)"/>
+
+    <!-- Center Security Diamond Core -->
+    <polygon points="256,220 278,256 256,292 234,256" fill="#ffd59e" opacity="0.9" filter="url(#crest-glow)"/>
+    <circle cx="256" cy="256" r="4" fill="#141112"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="256" y="468" text-anchor="middle" font-family="'Inter', 'JetBrains Mono', sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#ffd59e" opacity="0.9">CORTEN</text>
+</svg>
+

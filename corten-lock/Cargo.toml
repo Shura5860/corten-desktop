@@ -1,0 +1,28 @@
+[package]
+name = "corten-lock"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+authors.workspace = true
+repository.workspace = true
+description = "Minimal, security-focused screen lock for Wayland using ext-session-lock-v1 and PAM"
+
+[dependencies]
+corten-auth = { path = "../crates/auth" }
+corten-theme = { path = "../crates/theme" }
+corten-config = { path = "../crates/config" }
+corten-ipc = { path = "../crates/ipc" }
+corten-services = { path = "../crates/services" }
+
+iced = { workspace = true, features = ["tiny-skia", "tokio", "image"] }
+iced_sessionlock = "0.7.2"
+
+pam = "0.8"
+users = "0.11"
+chrono = "0.4"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { version = "1.0", features = ["full"] }
+thiserror = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }

@@ -1,0 +1,10 @@
+[package]
+name = "theme-preview"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Visual preview app for Corten theme tokens and widgets"
+
+[dependencies]
+corten-theme = { path = "../../crates/theme" }
+iced = { workspace = true, features = ["tiny-skia"] }

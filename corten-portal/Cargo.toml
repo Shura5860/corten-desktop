@@ -1,0 +1,24 @@
+[package]
+name = "corten-portal"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+authors.workspace = true
+repository.workspace = true
+description = "Native XDG Desktop Portal backend implementation for the Corten Wayland Desktop suite"
+
+[dependencies]
+corten-theme = { path = "../crates/theme" }
+corten-config = { path = "../crates/config" }
+corten-ipc = { path = "../crates/ipc" }
+corten-services = { path = "../crates/services" }
+
+zbus = { workspace = true, features = ["tokio"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "process", "time"] }
+serde = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = "1.0"
+directories = { workspace = true }
+chrono = "0.4"
+futures = "0.3"

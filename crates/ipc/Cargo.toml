@@ -1,0 +1,18 @@
+[package]
+name = "corten-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Common IPC and D-Bus helpers for Corten Desktop"
+
+[[bin]]
+name = "cortenctl"
+path = "src/bin/cortenctl.rs"
+
+[dependencies]
+zbus = { workspace = true, features = ["tokio"] }
+tokio = { version = "1.0", features = ["full"] }
+serde_json = "1.0"
+tracing.workspace = true
+thiserror.workspace = true
+serde.workspace = true

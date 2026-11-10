@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Radial Gradient -->
+    <radialGradient id="bg-glow" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#241c19" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#0e1014" stop-opacity="1.0"/>
+    </radialGradient>
+
+    <!-- Metallic Corten Gradients -->
+    <linearGradient id="facet-top" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="40%" stop-color="#e5c07b"/>
+      <stop offset="100%" stop-color="#d19a66"/>
+    </linearGradient>
+
+    <linearGradient id="facet-side" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e06c75"/>
+      <stop offset="60%" stop-color="#be5046"/>
+      <stop offset="100%" stop-color="#803028"/>
+    </linearGradient>
+
+    <linearGradient id="facet-inner" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#be5046"/>
+      <stop offset="50%" stop-color="#5a2420"/>
+      <stop offset="100%" stop-color="#1e1816"/>
+    </linearGradient>
+
+    <linearGradient id="c-cutout" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f28e2b"/>
+      <stop offset="50%" stop-color="#d19a66"/>
+      <stop offset="100%" stop-color="#e06c75"/>
+    </linearGradient>
+
+    <!-- Glow & Shadow Filters -->
+    <filter id="corten-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <filter id="drop-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base Canvas -->
+  <rect width="512" height="512" rx="112" fill="url(#bg-glow)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.18" stroke-width="1.5"/>
+
+  <!-- Geometric Hexagonal 'C' Prism -->
+  <g filter="url(#drop-shadow)">
+    <!-- Ambient Back Glow -->
+    <path d="M 256,92 L 396,172 L 396,340 L 256,420 L 116,340 L 116,172 Z"
+          fill="none" stroke="#e06c75" stroke-opacity="0.35" stroke-width="28" filter="url(#corten-glow)"/>
+
+    <!-- Outer Hexagonal Frame (Faceted Steel Plates) -->
+    <!-- Top-Right Beam -->
+    <path d="M 256,104 L 380,176 L 332,204 L 256,160 L 180,204 L 132,176 Z" 
+          fill="url(#facet-top)"/>
+
+    <!-- Left Vertical Spine (Thick Anchor Pillar) -->
+    <path d="M 132,176 L 180,204 L 180,308 L 132,336 Z" 
+          fill="url(#facet-inner)"/>
+
+    <!-- Bottom Beam -->
+    <path d="M 132,336 L 180,308 L 256,352 L 332,308 L 380,336 L 256,408 Z" 
+          fill="url(#facet-side)"/>
+
+    <!-- Top Right Floating Accent (Completes the C gap) -->
+    <path d="M 380,176 L 380,224 L 332,252 L 332,204 Z" 
+          fill="url(#facet-side)"/>
+
+    <!-- Bottom Right Floating Accent -->
+    <path d="M 380,288 L 380,336 L 332,308 L 332,260 Z" 
+          fill="url(#facet-top)"/>
+
+    <!-- Core Glowing 'C' Monogram Line -->
+    <path d="M 310,210 L 256,178 L 196,212 L 196,300 L 256,334 L 310,302" 
+          fill="none" stroke="url(#c-cutout)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Center Pivot Indicator Dot -->
+    <circle cx="256" cy="256" r="10" fill="#ffd59e" filter="url(#corten-glow)"/>
+  </g>
+
+  <!-- Title Subtext -->
+  <text x="256" y="468" text-anchor="middle" font-family="'Inter', 'JetBrains Mono', sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#ffd59e" opacity="0.9">CORTEN</text>
+</svg>
+

@@ -1,0 +1,5 @@
+[portal]
+DBusName=org.freedesktop.impl.portal.desktop.corten
+Interfaces=org.freedesktop.impl.portal.FileChooser;org.freedesktop.impl.portal.Screenshot;org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.Settings;
+UseIn=corten;wlroots;sway;Wayland
+

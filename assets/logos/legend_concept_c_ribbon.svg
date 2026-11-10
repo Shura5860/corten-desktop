@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <radialGradient id="ribbon-bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1c1615"/>
+      <stop offset="60%" stop-color="#0f1115"/>
+      <stop offset="100%" stop-color="#08090b"/>
+    </radialGradient>
+
+    <!-- Top Fold (Lit by overhead light: Warm Gold Copper) -->
+    <linearGradient id="ribbon-top-facet" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="60%" stop-color="#e5c07b"/>
+      <stop offset="100%" stop-color="#d19a66"/>
+    </linearGradient>
+
+    <!-- Side Fold (Corten Rust in soft shadow) -->
+    <linearGradient id="ribbon-side-facet" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e06c75"/>
+      <stop offset="70%" stop-color="#be5046"/>
+      <stop offset="100%" stop-color="#6e201a"/>
+    </linearGradient>
+
+    <!-- Inner Core Fold (Deep Warm Umber) -->
+    <linearGradient id="ribbon-inner-facet" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#80261f"/>
+      <stop offset="100%" stop-color="#241412"/>
+    </linearGradient>
+
+    <radialGradient id="ai-ember-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="40%" stop-color="#ffd59e"/>
+      <stop offset="80%" stop-color="#e06c75"/>
+      <stop offset="100%" stop-color="#be5046" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="ribbon-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.9"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#e06c75" flood-opacity="0.25"/>
+    </filter>
+
+    <filter id="ember-filter" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#ribbon-bg)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.15" stroke-width="1.5"/>
+
+  <g filter="url(#ribbon-shadow)">
+    <!-- 
+      THE FOLDED MONOLITH:
+      A single architectural ribbon of Corten steel
+      folded in 3D isometric space, framing an AI Singularity.
+    -->
+
+    <!-- Top Horizontal Beam -->
+    <polygon points="172,136 340,136 388,184 220,184" fill="url(#ribbon-top-facet)"/>
+
+    <!-- Left Vertical Spine (Thick Anchor) -->
+    <polygon points="172,136 220,184 220,328 172,376" fill="url(#ribbon-side-facet)"/>
+
+    <!-- Bottom Horizontal Beam -->
+    <polygon points="172,376 220,328 388,328 340,376" fill="url(#ribbon-inner-facet)"/>
+
+    <!-- Top Right 45-degree Bevel Fold -->
+    <polygon points="340,136 388,184 388,216 340,168" fill="url(#ribbon-side-facet)"/>
+
+    <!-- Bottom Right 45-degree Bevel Fold -->
+    <polygon points="388,296 388,328 340,376 340,344" fill="url(#ribbon-top-facet)"/>
+
+    <!-- AI SPARK EMBEDDED IN THE ARCHITECTURAL FOLD -->
+    <circle cx="296" cy="256" r="42" fill="url(#ai-ember-glow)" opacity="0.65" filter="url(#ember-filter)"/>
+
+    <!-- Sharp 4-Point AI Star -->
+    <path d="M 296,198 
+             Q 296,256 354,256 
+             Q 296,256 296,314 
+             Q 296,256 238,256 
+             Q 296,256 296,198 Z" 
+          fill="url(#ribbon-top-facet)" 
+          filter="url(#ember-filter)"/>
+
+    <!-- White Energy Core -->
+    <circle cx="296" cy="256" r="6" fill="#ffffff"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="256" y="466" text-anchor="middle" font-family="'Inter', -apple-system, sans-serif" font-size="24" font-weight="700" letter-spacing="8" fill="#ffd59e" opacity="0.95">CORTEN</text>
+</svg>
+

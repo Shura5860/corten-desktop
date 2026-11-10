@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <radialGradient id="s3-bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1f1816"/>
+      <stop offset="60%" stop-color="#0f1115"/>
+      <stop offset="100%" stop-color="#08090b"/>
+    </radialGradient>
+
+    <!-- Top Isometric Bevel (Overhead Light) -->
+    <linearGradient id="s3-face-top" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="50%" stop-color="#e5c07b"/>
+      <stop offset="100%" stop-color="#d19a66"/>
+    </linearGradient>
+
+    <!-- Left Outer Flank (Rich Corten Rust) -->
+    <linearGradient id="s3-face-left" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e06c75"/>
+      <stop offset="60%" stop-color="#be5046"/>
+      <stop offset="100%" stop-color="#701c15"/>
+    </linearGradient>
+
+    <!-- Bottom & Inner Flank (Deep Oxidized Shadow) -->
+    <linearGradient id="s3-face-dark" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#80261f"/>
+      <stop offset="50%" stop-color="#461410"/>
+      <stop offset="100%" stop-color="#1c0b09"/>
+    </linearGradient>
+
+    <radialGradient id="s3-node-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="35%" stop-color="#ffd59e"/>
+      <stop offset="75%" stop-color="#e06c75"/>
+      <stop offset="100%" stop-color="#be5046" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="s3-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="20" stdDeviation="26" flood-color="#000000" flood-opacity="0.95"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#e06c75" flood-opacity="0.25"/>
+    </filter>
+
+    <filter id="s3-bloom" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#s3-bg)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.15" stroke-width="1.5"/>
+
+  <g filter="url(#s3-shadow)">
+    <!-- 
+      KONSEPT 3: ALTIGEN AÇILI ÇELİK PRİZMA (HEX-FORGED PRISM)
+      Tamamen 60 ve 120 derecelik sert açılarla dövülmüş monolitik çelik C prizması.
+      Sıfır eğri, sıfır esneklik. Ağır çelik kütle.
+    -->
+
+    <!-- Üst Açılı Çelik Kiriş (Top Ingot) -->
+    <polygon points="176,128 360,128 396,168 236,168 200,204 140,168" fill="url(#s3-face-top)"/>
+
+    <!-- Sol Dikey Taşıyıcı Omurga (Spine Pillar) -->
+    <polygon points="140,168 200,204 200,308 140,344" fill="url(#s3-face-left)"/>
+
+    <!-- Alt Açılı Çelik Kiriş (Bottom Ingot) -->
+    <polygon points="140,344 200,308 236,344 396,344 360,384 176,384" fill="url(#s3-face-dark)"/>
+
+    <!-- Üst Sağ Açılı Çelik Kilit (Terminal Cap) -->
+    <polygon points="360,128 396,168 396,204 360,168" fill="url(#s3-face-left)"/>
+
+    <!-- Alt Sağ Açılı Çelik Kilit (Terminal Cap) -->
+    <polygon points="360,344 396,344 360,384 324,384" fill="url(#s3-face-top)"/>
+
+    <!-- Keskin Çelik Pah Kenar Çizgileri -->
+    <polyline points="360,128 176,128 140,168 140,344 176,384 360,384" 
+              fill="none" stroke="#ffffff" stroke-opacity="0.4" stroke-width="2"/>
+
+    <!-- 3 NÖRAL VERİ DÜĞÜMÜ (Prizma Köşelerine Preslenmiş Çekirdekler) -->
+    <!-- Üst Terminal Köşe Düğümü -->
+    <circle cx="340" cy="148" r="22" fill="url(#s3-node-glow)" opacity="0.45" filter="url(#s3-bloom)"/>
+    <polygon points="340,136 352,148 340,160 328,148" fill="#be5046"/>
+    <polygon points="340,139 349,148 340,157 331,148" fill="url(#s3-face-top)"/>
+    <circle cx="340" cy="148" r="4.5" fill="#ffffff" filter="url(#s3-bloom)"/>
+
+    <!-- Omurga Merkez Düğümü -->
+    <circle cx="170" cy="256" r="26" fill="url(#s3-node-glow)" opacity="0.5" filter="url(#s3-bloom)"/>
+    <polygon points="170,242 184,256 170,270 156,256" fill="#701c15"/>
+    <polygon points="170,245 181,256 170,267 159,256" fill="url(#s3-face-left)"/>
+    <circle cx="170" cy="256" r="5" fill="#ffffff" filter="url(#s3-bloom)"/>
+
+    <!-- Alt Terminal Köşe Düğümü -->
+    <circle cx="340" cy="364" r="22" fill="url(#s3-node-glow)" opacity="0.45" filter="url(#s3-bloom)"/>
+    <polygon points="340,352 352,364 340,376 328,364" fill="#be5046"/>
+    <polygon points="340,355 349,364 340,373 331,364" fill="url(#s3-face-dark)"/>
+    <circle cx="340" cy="364" r="4.5" fill="#ffffff" filter="url(#s3-bloom)"/>
+
+    <!-- Rijit İletim Çizgisi -->
+    <polyline points="340,148 200,204 200,308 340,364" 
+              fill="none" stroke="#ffd59e" stroke-opacity="0.5" stroke-width="1.5" stroke-dasharray="4 6"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="256" y="466" text-anchor="middle" font-family="'Inter', -apple-system, sans-serif" font-size="24" font-weight="800" letter-spacing="8" fill="#ffd59e" opacity="0.95">CORTEN</text>
+</svg>
+

@@ -1,0 +1,36 @@
+[package]
+name = "corten-launcher"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+authors = ["Corten Desktop Contributors"]
+description = "Fast, keyboard-centric Wayland application launcher for Corten Desktop"
+
+[dependencies]
+corten-theme = { path = "../crates/theme" }
+corten-config = { path = "../crates/config" }
+corten-ipc = { path = "../crates/ipc" }
+corten-i18n = { path = "../crates/i18n" }
+corten-vector = { path = "../crates/vector" }
+
+# GUI & Layer-shell
+iced = { workspace = true, features = ["tiny-skia", "tokio", "image"] }
+iced_layershell = "0.7"
+iced_runtime = "0.13"
+
+# Fuzzy search & Desktop entries
+nucleo = "0.5"
+freedesktop-desktop-entry = "0.7"
+
+# D-Bus & Async
+zbus = { workspace = true, features = ["tokio"] }
+tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
+
+# Utilities & Config
+directories.workspace = true
+notify.workspace = true
+serde.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true

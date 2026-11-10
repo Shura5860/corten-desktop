@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <radialGradient id="ai2-bg" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#221b19" stop-opacity="0.95"/>
+      <stop offset="60%" stop-color="#101216" stop-opacity="1.0"/>
+      <stop offset="100%" stop-color="#08090c" stop-opacity="1.0"/>
+    </radialGradient>
+
+    <linearGradient id="ai2-plate-master" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e06c75"/>
+      <stop offset="60%" stop-color="#d19a66"/>
+      <stop offset="100%" stop-color="#8a3628"/>
+    </linearGradient>
+
+    <linearGradient id="ai2-plate-stack" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="100%" stop-color="#d19a66"/>
+    </linearGradient>
+
+    <linearGradient id="ai2-spark-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="50%" stop-color="#ffd59e"/>
+      <stop offset="100%" stop-color="#e06c75"/>
+    </linearGradient>
+
+    <filter id="ai2-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <filter id="ai2-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000000" flood-opacity="0.8"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#ai2-bg)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.2" stroke-width="1.5"/>
+
+  <g filter="url(#ai2-shadow)">
+    <!-- 1. Master Plate (Left) -->
+    <rect x="110" y="112" width="108" height="288" rx="20" fill="url(#ai2-plate-master)"/>
+    <rect x="110" y="112" width="108" height="288" rx="20" fill="none" stroke="#ffe3bd" stroke-opacity="0.4" stroke-width="2"/>
+
+    <!-- Neural synaptic traces inside Master window -->
+    <path d="M 164,152 L 164,220 L 190,246 L 190,266 L 164,292 L 164,360" 
+          fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="164" cy="152" r="4.5" fill="#ffd59e"/>
+    <circle cx="164" cy="360" r="4.5" fill="#ffd59e"/>
+    <circle cx="190" cy="256" r="4.5" fill="#ffffff" filter="url(#ai2-glow)"/>
+
+    <!-- 2. Stack Plate Top -->
+    <rect x="238" y="112" width="164" height="130" rx="20" fill="url(#ai2-plate-stack)"/>
+    <rect x="238" y="112" width="164" height="130" rx="20" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
+    <path d="M 270,177 L 330,177 L 356,151" 
+          fill="none" stroke="#3a1c14" stroke-opacity="0.3" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="356" cy="151" r="4" fill="#3a1c14" opacity="0.5"/>
+
+    <!-- 3. Stack Plate Bottom -->
+    <rect x="238" y="270" width="164" height="130" rx="20" fill="url(#ai2-plate-master)"/>
+    <rect x="238" y="270" width="164" height="130" rx="20" fill="none" stroke="#ffe3bd" stroke-opacity="0.4" stroke-width="2"/>
+    <path d="M 270,335 L 330,335 L 356,361" 
+          fill="none" stroke="#ffffff" stroke-opacity="0.3" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="356" cy="361" r="4" fill="#ffd59e" opacity="0.6"/>
+
+    <!-- 4. CENTRAL FLOATING AI CONVERGENCE NODE (Connects all tiling plates) -->
+    <!-- Ambient Radiance -->
+    <circle cx="224" cy="256" r="36" fill="#e06c75" opacity="0.5" filter="url(#ai2-glow)"/>
+
+    <!-- 4-Point AI Spark Node at the gap center -->
+    <path d="M 224,204 Q 224,256 276,256 Q 224,256 224,308 Q 224,256 172,256 Q 224,256 224,204 Z" 
+          fill="url(#ai2-spark-grad)" filter="url(#ai2-glow)"/>
+    <circle cx="224" cy="256" r="6" fill="#ffffff"/>
+
+    <!-- Synaptic Data Pulses (Connecting to top & bottom stack) -->
+    <line x1="224" y1="220" x2="250" y2="190" stroke="#ffd59e" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 4"/>
+    <line x1="224" y1="292" x2="250" y2="322" stroke="#ffd59e" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 4"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="256" y="468" text-anchor="middle" font-family="'Inter', 'JetBrains Mono', sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#ffd59e" opacity="0.9">CORTEN <tspan fill="#e06c75" font-weight="400">DESKTOP</tspan></text>
+</svg>
+

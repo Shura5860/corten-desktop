@@ -1,0 +1,24 @@
+[package]
+name = "corten-settings"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+authors.workspace = true
+repository.workspace = true
+description = "Modern and responsive Settings Application for Corten Wayland Desktop suite"
+
+[dependencies]
+corten-theme = { path = "../crates/theme" }
+corten-config = { path = "../crates/config" }
+corten-services = { path = "../crates/services" }
+corten-ipc = { path = "../crates/ipc" }
+
+# GUI Toolkit
+iced = { workspace = true, features = ["tiny-skia", "tokio"] }
+serde = { workspace = true }
+toml = { workspace = true }
+tokio = { version = "1.0", features = ["rt", "macros"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = "1.0"
+zbus = { workspace = true, features = ["tokio"] }

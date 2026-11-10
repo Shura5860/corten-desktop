@@ -1,0 +1,24 @@
+[package]
+name = "corten-files"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+authors.workspace = true
+repository.workspace = true
+description = "Native File Manager and Explorer for the Corten Wayland Desktop suite"
+
+[dependencies]
+corten-theme = { path = "../crates/theme" }
+corten-config = { path = "../crates/config" }
+corten-services = { path = "../crates/services" }
+
+# GUI Toolkit
+iced = { workspace = true, features = ["tiny-skia", "tokio", "image"] }
+tokio = { version = "1.0", features = ["rt", "macros"] }
+serde = { workspace = true }
+toml = { workspace = true }
+directories = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = "1.0"
+

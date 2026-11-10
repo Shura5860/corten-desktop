@@ -1,0 +1,13 @@
+[package]
+name = "corten-services"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Desktop service adapters for Corten without desktop-environment dependencies"
+
+[dependencies]
+thiserror.workspace = true
+zbus = { workspace = true, features = ["tokio"] }
+tokio = { version = "1.0", features = ["rt", "time"] }
+futures-lite = "2.6"
+

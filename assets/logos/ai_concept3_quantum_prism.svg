@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <radialGradient id="ai3-bg" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#2a1816" stop-opacity="0.95"/>
+      <stop offset="60%" stop-color="#121318" stop-opacity="1.0"/>
+      <stop offset="100%" stop-color="#08090b" stop-opacity="1.0"/>
+    </radialGradient>
+
+    <linearGradient id="ai3-prism-top" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="45%" stop-color="#e5c07b"/>
+      <stop offset="100%" stop-color="#d19a66"/>
+    </linearGradient>
+
+    <linearGradient id="ai3-prism-left" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#be5046"/>
+      <stop offset="60%" stop-color="#80261f"/>
+      <stop offset="100%" stop-color="#36100c"/>
+    </linearGradient>
+
+    <linearGradient id="ai3-prism-right" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e06c75"/>
+      <stop offset="50%" stop-color="#be5046"/>
+      <stop offset="100%" stop-color="#5a1814"/>
+    </linearGradient>
+
+    <linearGradient id="ai3-singularity" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="30%" stop-color="#ffd59e"/>
+      <stop offset="70%" stop-color="#e06c75"/>
+      <stop offset="100%" stop-color="#80261f"/>
+    </linearGradient>
+
+    <filter id="ai3-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="20" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <filter id="ai3-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.85"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#ai3-bg)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.2" stroke-width="1.5"/>
+
+  <g filter="url(#ai3-shadow)">
+    <!-- Ambient Core Aura Glow -->
+    <circle cx="256" cy="256" r="110" fill="#e06c75" opacity="0.35" filter="url(#ai3-glow)"/>
+
+    <!-- OUTER CORTEN STEEL C-SHAPED ISOMETRIC HOUSING -->
+    <!-- Top Isometric Face -->
+    <polygon points="256,96 384,170 324,204 256,165 188,204 128,170" fill="url(#ai3-prism-top)"/>
+
+    <!-- Left Vertical Anchor Wall (Forms spine of 'C') -->
+    <polygon points="128,170 188,204 188,308 128,342" fill="url(#ai3-prism-left)"/>
+
+    <!-- Bottom Isometric Face -->
+    <polygon points="128,342 188,308 256,347 324,308 384,342 256,416" fill="url(#ai3-prism-right)"/>
+
+    <!-- Top Right Accent Arm -->
+    <polygon points="384,170 384,216 324,250 324,204" fill="url(#ai3-prism-right)"/>
+
+    <!-- Bottom Right Accent Arm -->
+    <polygon points="384,296 384,342 324,308 324,262" fill="url(#ai3-prism-top)"/>
+
+    <!-- Circuit Inset Grooves on Steel Plates -->
+    <polyline points="158,190 220,154 290,194" fill="none" stroke="#ffffff" stroke-opacity="0.3" stroke-width="2.5" stroke-linecap="round"/>
+    <polyline points="158,322 220,358 290,318" fill="none" stroke="#ffffff" stroke-opacity="0.2" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- FLOATING QUANTUM AI SINGULARITY (THE LIVING NEURAL SPARK) -->
+    <!-- Outer Quantum Diamond Ring -->
+    <polygon points="256,192 310,256 256,320 202,256" 
+             fill="none" stroke="#ffd59e" stroke-width="2" stroke-dasharray="5 7" opacity="0.7"/>
+
+    <!-- Core AI 4-Point Spark -->
+    <path d="M 256,170 Q 256,256 342,256 Q 256,256 256,342 Q 256,256 170,256 Q 256,256 256,170 Z" 
+          fill="url(#ai3-singularity)" 
+          filter="url(#ai3-glow)"/>
+
+    <!-- Quantum Energy Nucleus -->
+    <circle cx="256" cy="256" r="8" fill="#ffffff"/>
+    <circle cx="256" cy="256" r="16" fill="none" stroke="#ffd59e" stroke-width="1.5" opacity="0.8"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="256" y="468" text-anchor="middle" font-family="'Inter', 'JetBrains Mono', sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#ffd59e" opacity="0.9">CORTEN <tspan fill="#e06c75" font-weight="300">OS</tspan></text>
+</svg>
+

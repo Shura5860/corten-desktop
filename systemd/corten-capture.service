@@ -1,0 +1,16 @@
+[Unit]
+Description=Corten screen capture service
+PartOf=corten-session.service
+After=corten-session.service
+ConditionEnvironment=CORTEN_ENABLE_CAPTURE=1
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/corten-capture-service
+Restart=on-failure
+RestartSec=2s
+KillMode=mixed
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=default.target

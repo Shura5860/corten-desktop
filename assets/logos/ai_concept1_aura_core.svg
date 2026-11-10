@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Radial Gradient -->
+    <radialGradient id="ai-bg-glow" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#281a17" stop-opacity="0.95"/>
+      <stop offset="60%" stop-color="#121419" stop-opacity="1.0"/>
+      <stop offset="100%" stop-color="#090a0d" stop-opacity="1.0"/>
+    </radialGradient>
+
+    <!-- Metallic Steel Arc -->
+    <linearGradient id="ai-steel-arc" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="35%" stop-color="#e5c07b"/>
+      <stop offset="70%" stop-color="#d19a66"/>
+      <stop offset="100%" stop-color="#be5046"/>
+    </linearGradient>
+
+    <!-- Deep Chassis Shadow Facet -->
+    <linearGradient id="ai-chassis-dark" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#be5046"/>
+      <stop offset="50%" stop-color="#461d18"/>
+      <stop offset="100%" stop-color="#181414"/>
+    </linearGradient>
+
+    <!-- AI Neural Core Radiant Gradient -->
+    <radialGradient id="ai-spark-core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="30%" stop-color="#ffd59e"/>
+      <stop offset="70%" stop-color="#e06c75"/>
+      <stop offset="100%" stop-color="#be5046" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="ai-beam" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="50%" stop-color="#ffd59e"/>
+      <stop offset="100%" stop-color="#e06c75"/>
+    </linearGradient>
+
+    <!-- Filters -->
+    <filter id="ai-radiance" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <filter id="ai-deep-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="22" flood-color="#000000" flood-opacity="0.85"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base Canvas -->
+  <rect width="512" height="512" rx="112" fill="url(#ai-bg-glow)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.22" stroke-width="1.5"/>
+
+  <!-- AI Synaptic Circuit Grid Nodes in Background -->
+  <g opacity="0.25">
+    <circle cx="160" cy="160" r="3" fill="#d19a66"/>
+    <circle cx="352" cy="160" r="3" fill="#d19a66"/>
+    <circle cx="160" cy="352" r="3" fill="#d19a66"/>
+    <circle cx="352" cy="352" r="3" fill="#d19a66"/>
+    <line x1="160" y1="160" x2="256" y2="256" stroke="#d19a66" stroke-dasharray="3 6" stroke-width="1"/>
+    <line x1="352" y1="160" x2="256" y2="256" stroke="#d19a66" stroke-dasharray="3 6" stroke-width="1"/>
+    <line x1="160" y1="352" x2="256" y2="256" stroke="#d19a66" stroke-dasharray="3 6" stroke-width="1"/>
+    <line x1="352" y1="352" x2="256" y2="256" stroke="#d19a66" stroke-dasharray="3 6" stroke-width="1"/>
+  </g>
+
+  <!-- Main Corten Chassis & AI Spark -->
+  <g filter="url(#ai-deep-shadow)">
+    <!-- Ambient Halo from the AI Core onto the Steel -->
+    <circle cx="280" cy="256" r="90" fill="#e06c75" opacity="0.32" filter="url(#ai-radiance)"/>
+
+    <!-- INDUSTRIAL CORTEN "C" CHASSIS (Faceted Architectural Plates) -->
+    <!-- Top Arc Block -->
+    <path d="M 330,116 
+             L 220,116 
+             C 150,116 112,168 112,256 
+             C 112,344 150,396 220,396 
+             L 330,396 
+             L 364,348 
+             L 230,348 
+             C 184,348 168,312 168,256 
+             C 168,200 184,164 230,164 
+             L 364,164 Z" 
+          fill="url(#ai-steel-arc)"/>
+
+    <!-- Beveled Inner Steel Edge for 3D Mechanical Depth -->
+    <path d="M 364,164 
+             L 330,116 
+             L 220,116 
+             L 230,164 Z" 
+          fill="url(#ai-chassis-dark)" opacity="0.65"/>
+    <path d="M 364,348 
+             L 330,396 
+             L 220,396 
+             L 230,348 Z" 
+          fill="url(#ai-chassis-dark)" opacity="0.85"/>
+
+    <!-- Synaptic Cutout Tracks on the Steel Chassis -->
+    <line x1="148" y1="210" x2="148" y2="302" stroke="#ffffff" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="148" cy="210" r="4" fill="#ffd59e"/>
+    <circle cx="148" cy="302" r="4" fill="#ffd59e"/>
+
+    <!-- THE FLOATING AI NEURAL SPARK (AURA-CORE) IN THE 'C' OPENING -->
+    <!-- Outer Radiant Halo -->
+    <circle cx="288" cy="256" r="46" fill="url(#ai-spark-core)" opacity="0.75" filter="url(#ai-radiance)"/>
+
+    <!-- Iconic 4-Pointed AI Diamond Spark (✦) -->
+    <path d="M 288,180 
+             Q 288,256 364,256 
+             Q 288,256 288,332 
+             Q 288,256 212,256 
+             Q 288,256 288,180 Z" 
+          fill="url(#ai-beam)" 
+          filter="url(#ai-radiance)"/>
+
+    <!-- Secondary Micro Neural Spark (Diagonal Satellite Spark) -->
+    <path d="M 334,210 
+             Q 334,226 350,226 
+             Q 334,226 334,242 
+             Q 334,226 318,226 
+             Q 334,226 334,210 Z" 
+          fill="#ffd59e" 
+          opacity="0.85"/>
+
+    <!-- Super-bright Center Quantum Core -->
+    <circle cx="288" cy="256" r="7" fill="#ffffff"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="256" y="468" text-anchor="middle" font-family="'Inter', 'JetBrains Mono', sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#ffd59e" opacity="0.9">CORTEN <tspan fill="#e06c75" font-weight="400">AI</tspan></text>
+</svg>
+

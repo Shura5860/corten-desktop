@@ -1,0 +1,161 @@
+# Maintainer: Corten Desktop Contributors <https://github.com/corten-desktop/corten-core>
+pkgname=corten-desktop
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Pure Rust, Modular, Modern Wayland Desktop Environment with Native Local AI"
+arch=('x86_64')
+url="https://github.com/corten-desktop/corten-core"
+license=('GPL-3.0-only')
+depends=(
+    'wayland'
+    'libxkbcommon'
+    'libseat'
+    'systemd'
+    'pipewire'
+    'wireplumber'
+    'networkmanager'
+    'udisks2'
+    'bluez'
+    'brightnessctl'
+    'wl-clipboard'
+    'cliphist'
+    'xdg-utils'
+)
+makedepends=('cargo' 'rust' 'pkgconf')
+optdepends=(
+    'ffmpeg: hardware-accelerated screen capture'
+    'xorg-xwayland: native X11 backwards compatibility'
+    'xdg-desktop-portal-wlr: screen sharing portal'
+)
+source=()
+sha256sums=()
+
+build() {
+    cargo build --release --offline
+}
+
+check() {
+    cargo test --workspace --offline
+}
+
+package() {
+    install -d "$pkgdir/usr/bin"
+    install -m 755 target/release/corten-compositor "$pkgdir/usr/bin/corten-compositor"
+    install -m 755 target/release/corten-session "$pkgdir/usr/bin/corten-session"
+    install -m 755 target/release/corten-welcome "$pkgdir/usr/bin/corten-welcome"
+    install -m 755 target/release/corten-panel "$pkgdir/usr/bin/corten-panel"
+    install -m 755 target/release/corten-launcher "$pkgdir/usr/bin/corten-launcher"
+    install -m 755 target/release/corten-notify "$pkgdir/usr/bin/corten-notify"
+    install -m 755 target/release/corten-settings "$pkgdir/usr/bin/corten-settings"
+    install -m 755 target/release/corten-lock "$pkgdir/usr/bin/corten-lock"
+    install -m 755 target/release/corten-greeter "$pkgdir/usr/bin/corten-greeter"
+    install -m 755 target/release/corten-widgets "$pkgdir/usr/bin/corten-widgets"
+    install -m 755 target/release/corten-files "$pkgdir/usr/bin/corten-files"
+    install -m 755 target/release/corten-monitor "$pkgdir/usr/bin/corten-monitor"
+    install -m 755 target/release/corten-snipper "$pkgdir/usr/bin/corten-snipper"
+    install -m 755 target/release/corten-wallpaper "$pkgdir/usr/bin/corten-wallpaper"
+    install -m 755 target/release/corten-polkit "$pkgdir/usr/bin/corten-polkit"
+    install -m 755 target/release/corten-portal "$pkgdir/usr/bin/corten-portal"
+    install -m 755 target/release/cortenctl "$pkgdir/usr/bin/cortenctl"
+    install -m 755 target/release/corten-ai "$pkgdir/usr/bin/corten-ai"
+
+    cat << 'EOF' > "$pkgdir/usr/bin/corten-terminal"
+#!/usr/bin/env sh
+if command -v foot >/dev/null 2>&1; then
+    exec foot --app-id=corten-terminal "$@"
+elif command -v alacritty >/dev/null 2>&1; then
+    exec alacritty --class corten-terminal,corten-terminal "$@"
+elif command -v kitty >/dev/null 2>&1; then
+    exec kitty --class corten-terminal "$@"
+elif command -v wezterm >/dev/null 2>&1; then
+    exec wezterm start --class corten-terminal "$@"
+elif command -v ghostty >/dev/null 2>&1; then
+    exec ghostty --class=corten-terminal "$@"
+elif command -v konsole >/dev/null 2>&1; then
+    exec konsole "$@"
+else
+    exec xterm "$@"
+fi
+EOF
+    chmod 755 "$pkgdir/usr/bin/corten-terminal"
+
+    # Wallpapers & Icons
+    install -d "$pkgdir/usr/share/backgrounds/corten"
+    install -m 644 assets/wallpapers/* "$pkgdir/usr/share/backgrounds/corten/"
+    install -d "$pkgdir/usr/share/pixmaps"
+    install -m 644 assets/logo.png "$pkgdir/usr/share/pixmaps/corten.png"
+    install -m 644 assets/logos/ai_concept1_aura_core.png "$pkgdir/usr/share/pixmaps/corten-ai.png"
+
+    # XDG Desktop Portal
+    install -d "$pkgdir/usr/share/xdg-desktop-portal/portals"
+    cat << 'EOF' > "$pkgdir/usr/share/xdg-desktop-portal/portals/corten.portal"
+[portal]
+DBusName=org.freedesktop.impl.portal.desktop.corten
+Interfaces=org.freedesktop.impl.portal.ScreenCast;
+UseIn=Corten;corten;
+EOF
+    cat << 'EOF' > "$pkgdir/usr/share/xdg-desktop-portal/corten-portals.conf"
+[preferred]
+default=gtk;wlr;
+org.freedesktop.impl.portal.ScreenCast=corten;wlr;
+EOF
+
+    # Wayland session
+    install -d "$pkgdir/usr/share/wayland-sessions"
+    cat <<EOF > "$pkgdir/usr/share/wayland-sessions/corten.desktop"
+[Desktop Entry]
+Name=Corten Desktop
+Comment=Pure Rust Modular Wayland Desktop Environment
+Exec=corten-session
+Type=Application
+DesktopNames=Corten
+Keywords=wayland;compositor;rust;desktop;
+EOF
+
+    # Applications
+    install -d "$pkgdir/usr/share/applications"
+    cat <<EOF > "$pkgdir/usr/share/applications/corten-settings.desktop"
+[Desktop Entry]
+Name=Corten Settings
+Comment=System and Desktop configuration for Corten
+Exec=corten-settings
+Icon=preferences-system
+Terminal=false
+Type=Application
+Categories=Settings;DesktopSettings;
+EOF
+
+    cat <<EOF > "$pkgdir/usr/share/applications/corten-files.desktop"
+[Desktop Entry]
+Name=Corten Files
+Comment=Modern Pure Rust File Manager
+Exec=corten-files
+Icon=system-file-manager
+Terminal=false
+Type=Application
+Categories=System;FileManager;Utility;
+EOF
+
+    cat <<EOF > "$pkgdir/usr/share/applications/corten-monitor.desktop"
+[Desktop Entry]
+Name=Corten Monitor
+Comment=Hardware, Network and Process Monitor
+Exec=corten-monitor
+Icon=utilities-system-monitor
+Terminal=false
+Type=Application
+Categories=System;Monitor;
+EOF
+
+    cat <<EOF > "$pkgdir/usr/share/applications/corten-ai.desktop"
+[Desktop Entry]
+Name=Corten AI
+Comment=Local AI Assistant HUD
+Exec=corten-ai
+Icon=help-browser
+Terminal=false
+Type=Application
+Categories=Utility;
+EOF
+}
+

@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <radialGradient id="s2-bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1b1614"/>
+      <stop offset="60%" stop-color="#0e1014"/>
+      <stop offset="100%" stop-color="#07080a"/>
+    </radialGradient>
+
+    <!-- Structural Steel Beam Gradient -->
+    <linearGradient id="s2-top-beam" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="50%" stop-color="#e5c07b"/>
+      <stop offset="100%" stop-color="#d19a66"/>
+    </linearGradient>
+
+    <linearGradient id="s2-spine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d19a66"/>
+      <stop offset="50%" stop-color="#be5046"/>
+      <stop offset="100%" stop-color="#7a241e"/>
+    </linearGradient>
+
+    <linearGradient id="s2-bottom-beam" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#be5046"/>
+      <stop offset="50%" stop-color="#d19a66"/>
+      <stop offset="100%" stop-color="#ffd59e"/>
+    </linearGradient>
+
+    <!-- Chamfer Edge Light -->
+    <linearGradient id="s2-edge" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#d19a66" stop-opacity="0.1"/>
+    </linearGradient>
+
+    <!-- High-Voltage Synaptic Bus Gradient -->
+    <linearGradient id="s2-bus-glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd59e"/>
+      <stop offset="50%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e06c75"/>
+    </linearGradient>
+
+    <radialGradient id="s2-node-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="35%" stop-color="#ffd59e"/>
+      <stop offset="75%" stop-color="#e06c75"/>
+      <stop offset="100%" stop-color="#be5046" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="s2-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000000" flood-opacity="0.95"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="10" flood-color="#e06c75" flood-opacity="0.3"/>
+    </filter>
+
+    <filter id="s2-bloom" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#s2-bg)"/>
+  <rect width="510" height="510" x="1" y="1" rx="111" fill="none" stroke="#d19a66" stroke-opacity="0.15" stroke-width="1.5"/>
+
+  <g filter="url(#s2-shadow)">
+    <!-- 
+      KONSEPT 2 (GÜNCELLENMİŞ): ÇELİK LEVHALAR & BİRBİRİNE BAĞLI NÖRAL AĞ
+      3 bağımsız masif çelik plaka.
+      3 nöral düğüm hem doğrudan çelik içi sinir yoluyla hem de açılı nöral ışınla kenetlenmiştir.
+    -->
+
+    <!-- 1. SOL DİKEY ÇELİK OMURGA (Spine Pillar) -->
+    <path d="M 124,124 L 188,124 L 188,388 L 124,388 Z" fill="url(#s2-spine)"/>
+    <rect x="124" y="124" width="64" height="264" fill="none" stroke="url(#s2-edge)" stroke-width="2"/>
+
+    <!-- 2. ÜST YATAY ÇELİK KİRİŞ (Top Flange) -->
+    <path d="M 202,124 L 372,124 L 372,188 L 202,188 Z" fill="url(#s2-top-beam)"/>
+    <rect x="202" y="124" width="170" height="64" fill="none" stroke="url(#s2-edge)" stroke-width="2"/>
+
+    <!-- 3. ALT YATAY ÇELİK KİRİŞ (Bottom Flange) -->
+    <path d="M 202,324 L 372,324 L 372,388 L 202,388 Z" fill="url(#s2-bottom-beam)"/>
+    <rect x="202" y="324" width="170" height="64" fill="none" stroke="url(#s2-edge)" stroke-width="2"/>
+
+    <!-- 45 Derece Köşe Bağlantı Braketleri -->
+    <polygon points="188,124 202,138 202,174 188,188" fill="#be5046"/>
+    <polygon points="188,324 202,338 202,374 188,388" fill="#80261f"/>
+
+    <!-- Çelik İçi Sinaptik Veri Yolu (Nokta Nokta Bağlantı Hattı - Çapraz Lazer Yok) -->
+    <path d="M 334,156 L 156,156 L 156,356 L 334,356" 
+          fill="none" 
+          stroke="url(#s2-bus-glow)" 
+          stroke-width="2.5" 
+          stroke-linecap="round" 
+          stroke-linejoin="miter" 
+          stroke-dasharray="4 6"
+          stroke-opacity="0.85"/>
+
+    <!-- 
+      3 NÖRAL DÜĞÜM (Merkez Veri Çekirdekleri)
+    -->
+    <!-- Üst Kiriş Düğümü (Girdi) -->
+    <circle cx="334" cy="156" r="24" fill="url(#s2-node-glow)" opacity="0.45" filter="url(#s2-bloom)"/>
+    <circle cx="334" cy="156" r="14" fill="#3a1612"/>
+    <circle cx="334" cy="156" r="10" fill="url(#s2-top-beam)"/>
+    <circle cx="334" cy="156" r="5" fill="#ffffff" filter="url(#s2-bloom)"/>
+
+    <!-- Omurga Merkez Düğümü (Çekirdek - İki Kirişin Birleştiği Nöral Hub) -->
+    <circle cx="156" cy="256" r="28" fill="url(#s2-node-glow)" opacity="0.6" filter="url(#s2-bloom)"/>
+    <circle cx="156" cy="256" r="16" fill="#240c09"/>
+    <circle cx="156" cy="256" r="12" fill="url(#s2-spine)"/>
+    <circle cx="156" cy="256" r="6" fill="#ffffff" filter="url(#s2-bloom)"/>
+
+    <!-- Alt Kiriş Düğümü (Çıktı) -->
+    <circle cx="334" cy="356" r="24" fill="url(#s2-node-glow)" opacity="0.45" filter="url(#s2-bloom)"/>
+    <circle cx="334" cy="356" r="14" fill="#3a1612"/>
+    <circle cx="334" cy="356" r="10" fill="url(#s2-bottom-beam)"/>
+    <circle cx="334" cy="356" r="5" fill="#ffffff" filter="url(#s2-bloom)"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="256" y="466" text-anchor="middle" font-family="'Inter', -apple-system, sans-serif" font-size="24" font-weight="800" letter-spacing="8" fill="#ffd59e" opacity="0.95">CORTEN</text>
+</svg>

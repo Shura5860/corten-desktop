@@ -1,0 +1,19 @@
+[Unit]
+Description=Corten Wayland desktop session
+After=graphical-session-pre.target
+Wants=graphical-session-pre.target
+Conflicts=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/corten-session
+Restart=on-failure
+RestartSec=3s
+KillMode=mixed
+TimeoutStopSec=10s
+Environment=XDG_CURRENT_DESKTOP=Corten
+Environment=XDG_SESSION_DESKTOP=corten
+Environment=XDG_SESSION_TYPE=wayland
+
+[Install]
+WantedBy=default.target

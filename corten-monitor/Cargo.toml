@@ -1,0 +1,18 @@
+[package]
+name = "corten-monitor"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0"
+authors.workspace = true
+repository.workspace = true
+description = "Native System Resource Monitor and Task Manager for the Corten Wayland Desktop suite"
+
+[dependencies]
+corten-config = { path = "../crates/config" }
+corten-theme = { path = "../crates/theme" }
+
+iced = { workspace = true, features = ["tiny-skia", "tokio"] }
+tokio = { version = "1.0", features = ["rt", "process"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+

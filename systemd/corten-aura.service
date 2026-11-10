@@ -1,0 +1,15 @@
+[Unit]
+Description=Corten AURA-CORE Native Rust AI Agent & D-Bus Service
+Documentation=https://github.com/corten-desktop/corten-core
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/corten-ai --daemon
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
+

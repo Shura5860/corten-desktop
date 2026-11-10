@@ -1,0 +1,15 @@
+[package]
+name = "corten-theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Design tokens, color palette, and iced styles for Corten Desktop"
+
+[dependencies]
+iced = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+
+[features]
+default = ["iced", "serde"]
+iced = ["dep:iced"]
+serde = ["dep:serde"]

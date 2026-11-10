@@ -1,0 +1,74 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/auth",
+    "crates/theme",
+    "crates/config",
+    "crates/ipc",
+    "crates/services",
+    "crates/capture",
+    "crates/capture-session",
+    "crates/i18n",
+    "crates/vector",
+    "crates/llm",
+    "examples/preview",
+    "corten-notify",
+    "corten-launcher",
+    "corten-panel",
+    "corten-lock",
+    "corten-greeter",
+    "corten-compositor",
+    "corten-settings",
+    "corten-files",
+    "corten-monitor",
+    "corten-snipper",
+    "corten-session",
+    "corten-widgets",
+    "corten-wallpaper",
+    "corten-portal",
+    "corten-polkit",
+    "corten-ai",
+    "corten-welcome",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Corten Desktop Contributors"]
+repository = "https://github.com/corten-desktop/corten-core"
+
+[workspace.dependencies]
+# GUI Toolkit (Tam sürüm kilitli)
+iced = { version = "0.13.1", default-features = false, features = ["tiny-skia"] }
+
+# IPC & D-Bus
+zbus = { version = "5.1", default-features = false }
+
+# Config & Serialization
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+notify = "6.1"
+
+# Diagnostics & Utils
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2.0"
+directories = "5.0"
+
+[patch.crates-io]
+iced_layershell = { path = "patches/iced_layershell" }
+iced_tiny_skia = { path = "patches/iced_tiny_skia" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = 1
+split-debuginfo = "unpacked"
+
