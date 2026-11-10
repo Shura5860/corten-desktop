@@ -1,10 +1,10 @@
-# Maintainer: Corten Desktop Contributors <https://github.com/corten-desktop/corten-core>
+# Maintainer: Corten Desktop Contributors <https://github.com/Shura5800/corten-desktop>
 pkgname=corten-desktop
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Pure Rust, Modular, Modern Wayland Desktop Environment with Native Local AI"
 arch=('x86_64')
-url="https://github.com/corten-desktop/corten-core"
+url="https://github.com/Shura5800/corten-desktop"
 license=('GPL-3.0-only')
 depends=(
     'wayland'

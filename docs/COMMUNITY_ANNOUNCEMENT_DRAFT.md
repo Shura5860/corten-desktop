@@ -45,8 +45,8 @@ A major goal of mine was integrating my standalone local AI project (**AURA-CORE
 
 ### Building & Running Tests
 ```bash
-git clone https://github.com/corten-desktop/corten-core.git
-cd corten-core
+git clone https://github.com/Shura5800/corten-desktop.git
+cd corten-desktop
 cargo test --workspace
 cargo clippy --workspace -- -D warnings
 cargo build --release

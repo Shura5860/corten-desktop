@@ -161,17 +161,21 @@ To keep expectations concrete for developers and contributors, here are the expl
 ### System Dependencies
 * **Arch Linux:**
   ```bash
-  sudo pacman -S base-devel rust wayland libxkbcommon libseat systemd mesa libinput pipewire wireplumber brightnessctl wl-clipboard librsvg
+  sudo pacman -S base-devel rust clang wayland libxkbcommon libseat systemd mesa libinput pipewire wireplumber pam brightnessctl wl-clipboard librsvg
   ```
 * **Ubuntu / Debian:**
   ```bash
-  sudo apt install build-essential cargo libwayland-dev libxkbcommon-dev libseat-dev libudev-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev libinput-dev libpipewire-0.3-dev libdbus-1-dev librsvg2-bin wl-clipboard
+  sudo apt install build-essential pkg-config cargo clang libclang-dev llvm-dev libwayland-dev libxkbcommon-dev libseat-dev libudev-dev libgbm-dev libdrm-dev libegl1-mesa-dev libgles2-mesa-dev libinput-dev libpam0g-dev libpipewire-0.3-dev libspa-0.2-dev libdbus-1-dev librsvg2-bin wl-clipboard
   ```
 
 ### Compile & Run Verification Suite
 
 ```bash
-# 1. Run all 122 unit tests across the 28 workspace crates
+# 0. Clone the repository
+git clone https://github.com/Shura5800/corten-desktop.git
+cd corten-desktop
+
+# 1. Run all 123 unit tests across the 28 workspace crates
 cargo test --workspace
 
 # 2. Run strict static analysis (zero warnings policy)
@@ -184,8 +188,8 @@ cargo build --release
 sudo ./install.sh
 ```
 
-### Verification & Test Suite Breakdown (`122 Passed / 0 Failed`)
-* `corten-compositor`: **30 unit tests** (BSP tree splitting, magnetic edge snapping, kinetic gesture velocity & spring convergence, Dual-Kawase glass regions, DRM overlay plane flags, Multi-GPU node structure, Wacom tablet descriptors, XWayland scale math, explicit sync eventfd detection).
+### Verification & Test Suite Breakdown (`123 Passed / 0 Failed`)
+* `corten-compositor`: **31 unit tests** (BSP tree splitting, magnetic edge snapping, kinetic gesture velocity & spring convergence, Dual-Kawase glass regions, crisp titlebar glyph rendering, DRM overlay plane flags, Multi-GPU node structure, Wacom tablet descriptors, XWayland scale math, explicit sync eventfd detection).
 * `corten-ai`: **15 unit tests** (20-tool registry verification, recursive-descent calculator evaluation, multi-step ReAct workflow execution, HITL security gate blocking & audit logging, RFC 4648 Base64 encoding, natural-language intent parsing).
 * `corten-services`: **9 unit tests** (CIE 1931 gamut matrix inverses, sRGB/ST.2084 PQ EOTF roundtrips, 32-byte DRM HDR metadata serialization, synthetic ICC profile generation & parsing, AT-SPI2 accessibility tree).
 * `corten-panel`, `corten-settings`, `corten-files`, `corten-launcher`, `corten-welcome`, `corten-theme`, `corten-snipper`, `corten-wallpaper`, `corten-vector`, `corten-llm`, `corten-portal`, `corten-capture`, `corten-auth`: **68 unit tests**.
