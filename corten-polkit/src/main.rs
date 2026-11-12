@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use zbus::interface;
 use zbus::zvariant::{OwnedValue, Value};
 
@@ -122,6 +122,7 @@ pub enum Message {
     SubmitAuth,
     CancelAuth,
     LayerAction(LayershellCustomActions),
+    NoOp,
 }
 
 impl TryInto<LayershellCustomActions> for Message {
@@ -320,25 +321,27 @@ impl Application for CortenPolkitApp {
 
                         // Notify PolicyKit Authority via AuthenticationAgentResponse
                         let dbus_conn = self.shared.dbus_connection.clone();
-                        tokio::spawn(async move {
-                            let guard = dbus_conn.lock().await;
-                            if let Some(conn) = guard.as_ref() {
-                                if let Ok(proxy) = zbus::Proxy::new(
-                                    conn,
-                                    "org.freedesktop.PolicyKit1",
-                                    "/org/freedesktop/PolicyKit1/Authority",
-                                    "org.freedesktop.PolicyKit1.Authority",
-                                ).await {
-                                    let mut id_map: HashMap<&str, Value> = HashMap::new();
-                                    id_map.insert("uid", Value::U32(uid));
-                                    let identity = ("unix-user", id_map);
-                                    let res: zbus::Result<()> = proxy.call(
-                                        "AuthenticationAgentResponse",
-                                        &(cookie.as_str(), identity),
-                                    ).await;
-                                    info!("PolicyKit Authority AuthenticationAgentResponse result: {:?}", res);
+                        std::thread::spawn(move || {
+                            futures_lite::future::block_on(async move {
+                                let guard = dbus_conn.lock().await;
+                                if let Some(conn) = guard.as_ref() {
+                                    if let Ok(proxy) = zbus::Proxy::new(
+                                        conn,
+                                        "org.freedesktop.PolicyKit1",
+                                        "/org/freedesktop/PolicyKit1/Authority",
+                                        "org.freedesktop.PolicyKit1.Authority",
+                                    ).await {
+                                        let mut id_map: HashMap<&str, Value> = HashMap::new();
+                                        id_map.insert("uid", Value::U32(uid));
+                                        let identity = ("unix-user", id_map);
+                                        let res: zbus::Result<()> = proxy.call(
+                                            "AuthenticationAgentResponse",
+                                            &(cookie.as_str(), identity),
+                                        ).await;
+                                        info!("PolicyKit Authority AuthenticationAgentResponse result: {:?}", res);
+                                    }
                                 }
-                            }
+                            });
                         });
 
                         return Task::batch(vec![
@@ -369,7 +372,7 @@ impl Application for CortenPolkitApp {
                     Task::done(Message::LayerAction(LayershellCustomActions::SizeChange((1, 1)))),
                 ]);
             }
-            Message::LayerAction(_) => {}
+            Message::LayerAction(_) | Message::NoOp => {}
         }
         Task::none()
     }
@@ -378,7 +381,10 @@ impl Application for CortenPolkitApp {
         let palette = Palette::for_mode(self.theme_mode).with_patina(self.active_patina);
 
         let Some(req) = &self.current_request else {
-            return container(horizontal_space()).width(0).height(0).into();
+            return container(horizontal_space())
+                .width(Length::Fixed(1.0))
+                .height(Length::Fixed(1.0))
+                .into();
         };
 
         let title = if req.message.is_empty() {
@@ -492,46 +498,59 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let dbus_shared = shared.clone();
-    // Register Polkit D-Bus agent in background system bus connection
-    tokio::spawn(async move {
-        let agent = PolkitDbusAgent { shared: dbus_shared.clone() };
-        if let Ok(connection) = zbus::connection::Builder::system() {
-            if let Ok(conn) = connection
-                .serve_at("/org/freedesktop/PolicyKit1/AuthenticationAgent", agent)
-            {
-                if let Ok(built_conn) = conn.build().await {
-                    {
-                        let mut conn_guard = dbus_shared.dbus_connection.lock().await;
-                        *conn_guard = Some(built_conn.clone());
-                    }
-                    let locale = std::env::var("LANG").unwrap_or_else(|_| "tr_TR.UTF-8".into());
-                    // Register with Authority using standard PolicyKit-1 Subject: (unix-process, {pid, start-time})
-                    if let Ok(proxy) = zbus::Proxy::new(
-                        &built_conn,
-                        "org.freedesktop.PolicyKit1",
-                        "/org/freedesktop/PolicyKit1/Authority",
-                        "org.freedesktop.PolicyKit1.Authority",
-                    ).await {
-                        let mut details: std::collections::HashMap<&str, zbus::zvariant::Value> = std::collections::HashMap::new();
-                        let pid = std::process::id();
-                        let start_time = get_process_start_time();
-                        details.insert("pid", zbus::zvariant::Value::U32(pid));
-                        details.insert("start-time", zbus::zvariant::Value::U64(start_time));
-                        let subject = ("unix-process", details);
-                        let object_path = "/org/freedesktop/PolicyKit1/AuthenticationAgent";
-                        let res: zbus::Result<()> = proxy.call(
-                            "RegisterAuthenticationAgent",
-                            &(subject, locale.as_str(), object_path),
-                        ).await;
-                        match res {
-                            Ok(()) => info!("Successfully registered with PolicyKit-1 Authority!"),
-                            Err(e) => warn!("Polkit Authority RegisterAuthenticationAgent: {:?}", e),
+    // Register Polkit D-Bus agent in dedicated background thread with its own Tokio runtime
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                error!("Polkit: Failed to build tokio runtime: {}", e);
+                return;
+            }
+        };
+
+        rt.block_on(async move {
+            let agent = PolkitDbusAgent { shared: dbus_shared.clone() };
+            if let Ok(connection) = zbus::connection::Builder::system() {
+                if let Ok(conn) = connection
+                    .serve_at("/org/freedesktop/PolicyKit1/AuthenticationAgent", agent)
+                {
+                    if let Ok(built_conn) = conn.build().await {
+                        {
+                            let mut conn_guard = dbus_shared.dbus_connection.lock().await;
+                            *conn_guard = Some(built_conn.clone());
                         }
+                        let locale = std::env::var("LANG").unwrap_or_else(|_| "tr_TR.UTF-8".into());
+                        // Register with Authority using standard PolicyKit-1 Subject: (unix-process, {pid, start-time})
+                        if let Ok(proxy) = zbus::Proxy::new(
+                            &built_conn,
+                            "org.freedesktop.PolicyKit1",
+                            "/org/freedesktop/PolicyKit1/Authority",
+                            "org.freedesktop.PolicyKit1.Authority",
+                        ).await {
+                            let mut details: std::collections::HashMap<&str, zbus::zvariant::Value> = std::collections::HashMap::new();
+                            let pid = std::process::id();
+                            let start_time = get_process_start_time();
+                            details.insert("pid", zbus::zvariant::Value::U32(pid));
+                            details.insert("start-time", zbus::zvariant::Value::U64(start_time));
+                            let subject = ("unix-process", details);
+                            let object_path = "/org/freedesktop/PolicyKit1/AuthenticationAgent";
+                            let res: zbus::Result<()> = proxy.call(
+                                "RegisterAuthenticationAgent",
+                                &(subject, locale.as_str(), object_path),
+                            ).await;
+                            match res {
+                                Ok(()) => info!("Successfully registered with PolicyKit-1 Authority!"),
+                                Err(e) => warn!("Polkit Authority RegisterAuthenticationAgent: {:?}", e),
+                            }
+                        }
+                        futures_lite::future::pending::<()>().await;
                     }
-                    futures_lite::future::pending::<()>().await;
                 }
             }
-        }
+        });
     });
 
     CortenPolkitApp::run(Settings {
@@ -546,7 +565,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             margin: (0, 0, 0, 0),
             exclusive_zone: -1,
             size: Some((1, 1)),
-            keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            keyboard_interactivity: KeyboardInteractivity::OnDemand,
             binded_output_name: None,
         },
         default_font: iced::Font::default(),

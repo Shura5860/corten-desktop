@@ -125,6 +125,7 @@ pub enum Message {
     SearchChanged(String),
     ToggleThemeMode(ThemeModeChoice),
     SetPatina(String),
+    SetDensity(String),
     UpdateWallpaperPath(String),
     SelectPresetWallpaper(String),
     ChooseWallpaper,
@@ -376,6 +377,11 @@ impl CortenSettingsApp {
                 self.appearance.patina = patina;
                 self.status_message =
                     Some("Patina rengi güncellendi. Uygulanması için 'Değişiklikleri Kaydet'e basın.".into());
+            }
+            Message::SetDensity(density) => {
+                self.appearance.density = density;
+                self.status_message =
+                    Some("Bilgi yoğunluğu güncellendi. Uygulanması için 'Değişiklikleri Kaydet'e basın.".into());
             }
             Message::UpdateWallpaperPath(path) => {
                 self.appearance.wallpaper_path = path;
@@ -754,7 +760,7 @@ impl CortenSettingsApp {
         )
         .width(Length::Fill)
         .center_x(Length::Fill)
-        .padding([Spacing::XL + content_offset, Spacing::XL]);
+        .padding([Spacing::LG + content_offset, Spacing::MD]);
 
         let scrollable_content = scrollable(content_column)
             .width(Length::Fill)
@@ -935,6 +941,132 @@ impl CortenSettingsApp {
         .into()
     }
 
+    /// High-impact widescreen visual staging banner
+    fn hero_stage<'a>(
+        content: impl Into<Element<'a, Message>>,
+        palette: Palette,
+    ) -> Element<'a, Message> {
+        container(content.into())
+            .width(Length::Fill)
+            .padding(Spacing::LG)
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.07, 0.08, 0.11, 0.94,
+                ))),
+                border: Border {
+                    color: iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.30,
+                    ),
+                    width: 1.0,
+                    radius: border::Radius::from(Radius::MD),
+                },
+                shadow: Shadow {
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                    offset: iced::Vector::new(0.0, 6.0),
+                    blur_radius: 18.0,
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Modular Bento Grid Card container with header, icon, and optional badge
+    fn bento_card<'a>(
+        icon: char,
+        title: &'static str,
+        badge: Option<&'static str>,
+        content: impl Into<Element<'a, Message>>,
+        palette: Palette,
+    ) -> Element<'a, Message> {
+        let badge_widget: Element<'a, Message> = if let Some(b) = badge {
+            container(text(b).size(10.0).color(palette.primary.to_iced()))
+                .padding([2, 8])
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.14,
+                    ))),
+                    border: Border {
+                        color: iced::Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.35,
+                        ),
+                        width: 1.0,
+                        radius: border::Radius::from(6.0),
+                    },
+                    ..Default::default()
+                })
+                .into()
+        } else {
+            horizontal_space().into()
+        };
+
+        let header = row![
+            text(icon)
+                .font(LUCIDE_FONT)
+                .size(15.0)
+                .color(palette.primary.to_iced()),
+            text(title)
+                .size(Typography::BODY)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..Default::default()
+                })
+                .color(palette.text_primary.to_iced()),
+            horizontal_space(),
+            badge_widget,
+        ]
+        .spacing(Spacing::XS)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+        let divider = container(row![])
+            .height(Length::Fixed(1.0))
+            .width(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                ..Default::default()
+            });
+
+        container(
+            column![
+                header,
+                divider,
+                content.into(),
+            ]
+            .spacing(Spacing::SM)
+        )
+        .padding(Spacing::MD)
+        .width(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(palette.surface.to_iced())),
+            border: Border {
+                color: iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.18,
+                ),
+                width: 1.0,
+                radius: border::Radius::from(Radius::MD),
+            },
+            shadow: Shadow {
+                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.18),
+                offset: iced::Vector::new(0.0, 2.0),
+                blur_radius: 8.0,
+            },
+            ..Default::default()
+        })
+        .into()
+    }
+
     /// Responsive setting item inside a settings group card
     fn setting_item<'a>(
         title: &'static str,
@@ -945,6 +1077,10 @@ impl CortenSettingsApp {
         let info = column![
             text(title)
                 .size(Typography::BODY)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Medium,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
             text(subtitle)
                 .size(Typography::CAPTION)
@@ -959,51 +1095,14 @@ impl CortenSettingsApp {
             .align_y(Alignment::Center);
 
         container(
-            row![info, horizontal_space(), ctrl]
+            row![info, ctrl]
                 .spacing(Spacing::MD)
                 .align_y(Alignment::Center)
                 .width(Length::Fill),
         )
-        .padding([Spacing::MD, Spacing::LG])
+        .padding([Spacing::MD, Spacing::MD])
         .width(Length::Fill)
         .into()
-    }
-
-    /// Modern grouped settings card with subtle dividers
-    fn settings_group<'a>(
-        items: Vec<Element<'a, Message>>,
-        palette: Palette,
-    ) -> Element<'a, Message> {
-        let mut col = column![].spacing(0);
-        let len = items.len();
-        for (i, item) in items.into_iter().enumerate() {
-            col = col.push(item);
-            if i + 1 < len {
-                col = col.push(
-                    container(row![])
-                        .height(Length::Fixed(1.0))
-                        .width(Length::Fill)
-                        .style(|_| container::Style {
-                            background: Some(iced::Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
-                            ..Default::default()
-                        }),
-                );
-            }
-        }
-        container(col)
-            .width(Length::Fill)
-            .style(move |_| card_style(palette))
-            .into()
-    }
-
-    /// Responsive setting row (backwards-compatible single-item group)
-    fn setting_row<'a>(
-        title: &'static str,
-        subtitle: &'static str,
-        control: impl Into<Element<'a, Message>>,
-        palette: Palette,
-    ) -> Element<'a, Message> {
-        Self::settings_group(vec![Self::setting_item(title, subtitle, control, palette)], palette)
     }
 
     /// Modern iOS / macOS / Fluent style interactive pill switch
@@ -1122,73 +1221,357 @@ impl CortenSettingsApp {
         let heading = column![
             text("Görünüm ve Tema")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Masaüstü stilini, açık/koyu temayı ve duvar kâğıdını özelleştirin")
+            text("Masaüstü stilini, açık/koyu temayı, patina vurgusunu ve duvar kâğıdını özelleştirin")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
         .spacing(Spacing::XXS);
 
         let dark_selected = self.appearance.theme_mode == ThemeModeChoice::Dark;
-
-        let theme_toggle = row![
-            Self::segment_button(
-                "Dark Anthracite",
-                dark_selected,
-                Message::ToggleThemeMode(ThemeModeChoice::Dark),
-                palette,
-            ),
-            Self::segment_button(
-                "Warm Light",
-                !dark_selected,
-                Message::ToggleThemeMode(ThemeModeChoice::Light),
-                palette,
-            ),
-        ]
-        .spacing(Spacing::XS);
-
         let current_patina = PatinaVariant::from_code(&self.appearance.patina);
-        let patina_toggle = row![
-            Self::segment_button(
-                "Rust (Pas)",
-                current_patina == PatinaVariant::Rust,
-                Message::SetPatina("rust".into()),
-                palette,
-            ),
-            Self::segment_button(
-                "Verdigris (Zümrüt)",
-                current_patina == PatinaVariant::Verdigris,
-                Message::SetPatina("verdigris".into()),
-                palette,
-            ),
-            Self::segment_button(
-                "Titanium (Çelik)",
-                current_patina == PatinaVariant::Titanium,
-                Message::SetPatina("titanium".into()),
-                palette,
-            ),
-            Self::segment_button(
-                "Molten (Altın)",
-                current_patina == PatinaVariant::Molten,
-                Message::SetPatina("molten".into()),
-                palette,
-            ),
-        ]
-        .spacing(Spacing::XS);
+        let is_compact = self.appearance.density == "compact";
 
-        let wp_input = text_input(
-            "e.g. /home/user/Pictures/wallpaper.jpg",
-            &self.appearance.wallpaper_path,
-        )
-        .on_input(Message::UpdateWallpaperPath)
-        .padding([Spacing::XS + 2.0, Spacing::SM])
-        .width(Length::Fill);
-        let wallpaper_control = row![
-            wp_input,
-            button(text("Dosya seç")).on_press(Message::ChooseWallpaper),
+        // ==================== 1. WIDESCREEN HERO DESKTOP STAGE ====================
+        let stage_top_bar = row![
+            text("12:00 PM  •  Corten OS Desktop")
+                .size(11.0)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Medium,
+                    ..Default::default()
+                })
+                .color(palette.text_muted.to_iced()),
+            horizontal_space(),
+            row![
+                container(text(if dark_selected { "● Koyu Antrasit" } else { "○ Sıcak Krem" }).size(10.0).color(palette.text_primary.to_iced()))
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
+                        border: Border { radius: border::Radius::from(6.0), ..Default::default() },
+                        ..Default::default()
+                    }),
+                container(text(match current_patina {
+                    PatinaVariant::Rust => "🍂 Pas (Rust)",
+                    PatinaVariant::Verdigris => "🌊 Zümrüt (Verdigris)",
+                    PatinaVariant::Titanium => "⚡ Çelik (Titanium)",
+                    PatinaVariant::Molten => "🌋 Akkor (Molten)",
+                }).size(10.0).color(palette.primary.to_iced()))
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16))),
+                        border: Border {
+                            color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.40),
+                            width: 1.0,
+                            radius: border::Radius::from(6.0),
+                        },
+                        ..Default::default()
+                    }),
+                container(text(if is_compact { "📐 Kompakt" } else { "📐 Ferah" }).size(10.0).color(palette.text_muted.to_iced()))
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
+                        border: Border { radius: border::Radius::from(6.0), ..Default::default() },
+                        ..Default::default()
+                    }),
+            ]
+            .spacing(Spacing::XS)
+            .align_y(Alignment::Center),
         ]
-        .spacing(Spacing::SM)
-        .width(Length::Fill);
+        .width(Length::Fill)
+        .align_y(Alignment::Center);
+
+        let preview_window = container(
+            column![
+                row![
+                    row![
+                        container(row![]).width(Length::Fixed(8.0)).height(Length::Fixed(8.0))
+                            .style(|_| container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgb(0.95, 0.35, 0.35))),
+                                border: Border { radius: border::Radius::from(4.0), ..Default::default() },
+                                ..Default::default()
+                            }),
+                        container(row![]).width(Length::Fixed(8.0)).height(Length::Fixed(8.0))
+                            .style(|_| container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgb(0.95, 0.75, 0.25))),
+                                border: Border { radius: border::Radius::from(4.0), ..Default::default() },
+                                ..Default::default()
+                            }),
+                        container(row![]).width(Length::Fixed(8.0)).height(Length::Fixed(8.0))
+                            .style(|_| container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgb(0.35, 0.85, 0.45))),
+                                border: Border { radius: border::Radius::from(4.0), ..Default::default() },
+                                ..Default::default()
+                            }),
+                    ]
+                    .spacing(4)
+                    .align_y(Alignment::Center),
+                    horizontal_space(),
+                    text("terminal ~ corten")
+                        .size(10.0)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Medium,
+                            ..Default::default()
+                        })
+                        .color(palette.text_muted.to_iced()),
+                    horizontal_space(),
+                ]
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+                text("corten-desktop ~ $ cargo check --workspace")
+                    .size(11.0)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Medium,
+                        ..Default::default()
+                    })
+                    .color(palette.primary.to_iced()),
+                row![
+                    text("✓").size(11.0).color(iced::Color::from_rgb(0.25, 0.85, 0.45)),
+                    text("Workspace check: 0 errors, 31 tests passed")
+                        .size(10.0)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            ]
+            .spacing(6),
+        )
+        .padding(10)
+        .width(Length::Fixed(290.0))
+        .height(Length::Fixed(92.0))
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(palette.surface.to_iced())),
+            border: Border {
+                color: palette.primary.to_iced(),
+                width: 1.5,
+                radius: border::Radius::from(Radius::SM),
+            },
+            shadow: Shadow {
+                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                offset: iced::Vector::new(0.0, 4.0),
+                blur_radius: 12.0,
+            },
+            ..Default::default()
+        });
+
+        let preview_dock = container(
+            row![
+                text(Icon::APP_WINDOW).font(LUCIDE_FONT).size(13.0).color(palette.primary.to_iced()),
+                text(Icon::TERMINAL).font(LUCIDE_FONT).size(13.0).color(palette.text_primary.to_iced()),
+                text(Icon::CODE).font(LUCIDE_FONT).size(13.0).color(palette.text_primary.to_iced()),
+                text(Icon::GLOBE).font(LUCIDE_FONT).size(13.0).color(palette.text_primary.to_iced()),
+                text(Icon::SETTINGS).font(LUCIDE_FONT).size(13.0).color(palette.text_muted.to_iced()),
+            ]
+            .spacing(Spacing::SM)
+            .align_y(Alignment::Center),
+        )
+        .padding([4, 16])
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(iced::Color::from_rgba(0.09, 0.10, 0.13, 0.94))),
+            border: Border {
+                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.40),
+                width: 1.0,
+                radius: border::Radius::from(20.0),
+            },
+            ..Default::default()
+        });
+
+        let hero_canvas = Self::hero_stage(
+            column![
+                stage_top_bar,
+                vertical_space().height(6),
+                container(preview_window).width(Length::Fill).center_x(Length::Fill),
+                vertical_space().height(6),
+                container(preview_dock).width(Length::Fill).center_x(Length::Fill),
+            ]
+            .spacing(6)
+            .width(Length::Fill),
+            palette,
+        );
+
+        // ==================== BENTO CARDS ====================
+        let mode_card = |label: &'static str, sub: &'static str, is_active: bool, msg: Message, is_dark: bool| {
+            button(
+                column![
+                    row![
+                        text(if is_dark { Icon::MOON } else { Icon::SUN }).font(LUCIDE_FONT).size(16.0).color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
+                        text(label).size(Typography::BODY).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
+                        horizontal_space(),
+                        if is_active {
+                            text("✓").size(13.0).color(palette.primary.to_iced())
+                        } else {
+                            text("").size(13.0)
+                        },
+                    ]
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                    text(sub).size(Typography::CAPTION).color(palette.text_muted.to_iced()),
+                ]
+                .spacing(4)
+                .width(Length::Fill)
+            )
+            .width(Length::Fill)
+            .padding([10, 14])
+            .style(move |_, status| {
+                let bg = if is_active {
+                    iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14)
+                } else if matches!(status, button::Status::Hovered) {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+                } else {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03)
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: Border {
+                        color: if is_active { palette.primary.to_iced() } else { palette.border.to_iced() },
+                        width: if is_active { 1.5 } else { 1.0 },
+                        radius: border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(msg)
+        };
+
+        let theme_bento = Self::bento_card(
+            Icon::SUN,
+            "Arayüz Teması",
+            Some("Stil"),
+            row![
+                mode_card("Koyu Antrasit", "Düşük ışık ve yüksek kontrast", dark_selected, Message::ToggleThemeMode(ThemeModeChoice::Dark), true),
+                mode_card("Sıcak Krem", "Aydınlık ve yumuşak ışık", !dark_selected, Message::ToggleThemeMode(ThemeModeChoice::Light), false),
+            ]
+            .spacing(Spacing::SM)
+            .width(Length::Fill),
+            palette,
+        );
+
+        let density_card = |label: &'static str, sub: &'static str, is_active: bool, msg: Message| {
+            button(
+                column![
+                    row![
+                        text(label).size(Typography::BODY).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
+                        horizontal_space(),
+                        if is_active {
+                            text("✓").size(13.0).color(palette.primary.to_iced())
+                        } else {
+                            text("").size(13.0)
+                        },
+                    ]
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                    text(sub).size(Typography::CAPTION).color(palette.text_muted.to_iced()),
+                ]
+                .spacing(4)
+                .width(Length::Fill)
+            )
+            .width(Length::Fill)
+            .padding([10, 14])
+            .style(move |_, status| {
+                let bg = if is_active {
+                    iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14)
+                } else if matches!(status, button::Status::Hovered) {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+                } else {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03)
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: Border {
+                        color: if is_active { palette.primary.to_iced() } else { palette.border.to_iced() },
+                        width: if is_active { 1.5 } else { 1.0 },
+                        radius: border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(msg)
+        };
+
+        let density_bento = Self::bento_card(
+            Icon::GAUGE,
+            "Bilgi Yoğunluğu",
+            Some("Yerleşim"),
+            row![
+                density_card("Ferah", "Geniş satır aralıkları ve rahat okuma", !is_compact, Message::SetDensity("comfortable".into())),
+                density_card("Kompakt", "Çoklu pencere için sıkı veri", is_compact, Message::SetDensity("compact".into())),
+            ]
+            .spacing(Spacing::SM)
+            .width(Length::Fill),
+            palette,
+        );
+
+        let patina_chip = |name: &'static str, hex_name: &'static str, color_val: iced::Color, is_active: bool, msg: Message| {
+            button(
+                row![
+                    container(row![])
+                        .width(Length::Fixed(22.0))
+                        .height(Length::Fixed(22.0))
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(color_val)),
+                            border: Border {
+                                color: if is_active { iced::Color::WHITE } else { iced::Color::TRANSPARENT },
+                                width: if is_active { 2.0 } else { 0.0 },
+                                radius: border::Radius::from(11.0),
+                            },
+                            ..Default::default()
+                        }),
+                    column![
+                        text(name).size(Typography::BODY_SM).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
+                        text(hex_name).size(10.0).color(palette.text_muted.to_iced()),
+                    ]
+                    .spacing(1),
+                    horizontal_space(),
+                    if is_active {
+                        text("✓").size(12.0).color(palette.primary.to_iced())
+                    } else {
+                        text("").size(12.0)
+                    },
+                ]
+                .spacing(Spacing::XS)
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+            )
+            .width(Length::Fill)
+            .padding([8, 12])
+            .style(move |_, status| {
+                let bg = if is_active {
+                    iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16)
+                } else if matches!(status, button::Status::Hovered) {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+                } else {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03)
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: Border {
+                        color: if is_active { palette.primary.to_iced() } else { palette.border.to_iced() },
+                        width: if is_active { 1.5 } else { 1.0 },
+                        radius: border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(msg)
+        };
+
+        let patina_bento = Self::bento_card(
+            Icon::ACTIVITY,
+            "Corten Metalik Patina & Vurgu Rengi",
+            Some("4 Renk Teması"),
+            row![
+                patina_chip("Rust (Pas)", "Dövme Bakır #D97736", iced::Color::from_rgb(0.85, 0.42, 0.26), current_patina == PatinaVariant::Rust, Message::SetPatina("rust".into())),
+                patina_chip("Verdigris", "Oksit Zümrüt #2DD4BF", iced::Color::from_rgb(0.18, 0.83, 0.75), current_patina == PatinaVariant::Verdigris, Message::SetPatina("verdigris".into())),
+                patina_chip("Titanium", "Sert Çelik #64748B", iced::Color::from_rgb(0.58, 0.64, 0.72), current_patina == PatinaVariant::Titanium, Message::SetPatina("titanium".into())),
+                patina_chip("Molten", "Akkor Altın #F59E0B", iced::Color::from_rgb(0.96, 0.62, 0.04), current_patina == PatinaVariant::Molten, Message::SetPatina("molten".into())),
+            ]
+            .spacing(Spacing::XS)
+            .width(Length::Fill),
+            palette,
+        );
 
         let current_wp = &self.appearance.wallpaper_path;
         let p1_path = if std::path::Path::new("/usr/share/backgrounds/corten/corten_dark_landscape.jpg").exists() {
@@ -1202,34 +1585,48 @@ impl CortenSettingsApp {
             "assets/wallpapers/corten_dark_portrait.jpg"
         };
 
-        let preset_btn = |name: &'static str, path: &'static str, is_active: bool| {
+        let wallpaper_card = |name: &'static str, sub: &'static str, path: &'static str, is_active: bool| {
             button(
-                row![
-                    text(if is_active { "●" } else { "○" })
-                        .size(11.0)
-                        .color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
-                    text(name)
-                        .size(Typography::BODY_SM)
-                        .color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
+                column![
+                    row![
+                        text(Icon::CAMERA).font(LUCIDE_FONT).size(14.0).color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
+                        text(name).size(Typography::BODY_SM).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
+                        horizontal_space(),
+                        if is_active {
+                            container(text("Aktif ✓").size(10.0).color(Color::WHITE))
+                                .padding([2, 6])
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(palette.primary.to_iced())),
+                                    border: Border { radius: border::Radius::from(4.0), ..Default::default() },
+                                    ..Default::default()
+                                })
+                        } else {
+                            container(row![])
+                        },
+                    ]
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                    text(sub).size(11.0).color(palette.text_muted.to_iced()),
                 ]
-                .spacing(6)
-                .align_y(Alignment::Center),
+                .spacing(4)
+                .width(Length::Fill)
             )
-            .padding([6, 12])
+            .width(Length::Fill)
+            .padding([10, 14])
             .style(move |_, status| {
                 let bg = if is_active {
-                    iced::Color::from_rgba(0.85, 0.42, 0.26, 0.18)
+                    iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16)
                 } else if matches!(status, button::Status::Hovered) {
                     iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
                 } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04)
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03)
                 };
                 button::Style {
                     background: Some(iced::Background::Color(bg)),
-                    border: iced::Border {
+                    border: Border {
                         color: if is_active { palette.primary.to_iced() } else { palette.border.to_iced() },
-                        width: 1.0,
-                        radius: iced::border::Radius::from(Radius::SM),
+                        width: if is_active { 1.5 } else { 1.0 },
+                        radius: border::Radius::from(Radius::SM),
                     },
                     ..Default::default()
                 }
@@ -1237,207 +1634,55 @@ impl CortenSettingsApp {
             .on_press(Message::SelectPresetWallpaper(path.to_string()))
         };
 
-        let wallpaper_presets = row![
-            preset_btn("Corten Dark Patina (Yatay)", p1_path, current_wp.contains("landscape")),
-            preset_btn("Corten Forged Rust (Dikey)", p2_path, current_wp.contains("portrait")),
+        let wp_input = text_input(
+            "e.g. /home/user/Pictures/wallpaper.jpg",
+            &self.appearance.wallpaper_path,
+        )
+        .on_input(Message::UpdateWallpaperPath)
+        .padding([Spacing::XS + 2.0, Spacing::SM])
+        .width(Length::Fill);
+
+        let custom_wp_row = row![
+            wp_input,
+            button(
+                row![
+                    text(Icon::FOLDER).font(LUCIDE_FONT).size(13.0),
+                    text("Gözat...").size(Typography::BODY_SM),
+                ]
+                .spacing(Spacing::XS)
+                .align_y(Alignment::Center),
+            )
+            .padding([Spacing::XS + 2.0, Spacing::MD])
+            .on_press(Message::ChooseWallpaper),
         ]
-        .spacing(Spacing::SM);
+        .spacing(Spacing::SM)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
 
-        // Interactive Live Miniature Desktop Canvas Preview
-        let preview_dock = container(
-            row![
-                text(Icon::APP_WINDOW)
-                    .font(LUCIDE_FONT)
-                    .size(10.0)
-                    .color(palette.primary.to_iced()),
-                text(Icon::TERMINAL)
-                    .font(LUCIDE_FONT)
-                    .size(10.0)
-                    .color(palette.text_primary.to_iced()),
-                text(Icon::CODE)
-                    .font(LUCIDE_FONT)
-                    .size(10.0)
-                    .color(palette.text_primary.to_iced()),
-                text(Icon::GLOBE)
-                    .font(LUCIDE_FONT)
-                    .size(10.0)
-                    .color(palette.text_primary.to_iced()),
-            ]
-            .spacing(Spacing::XS)
-            .align_y(Alignment::Center),
-        )
-        .padding([3, 10])
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(palette.surface_hover.to_iced())),
-            border: Border {
-                color: palette.border.to_iced(),
-                width: 1.0,
-                radius: border::Radius::from(Radius::SM),
-            },
-            ..Default::default()
-        });
-
-        let preview_window = container(
+        let wallpaper_bento = Self::bento_card(
+            Icon::CAMERA,
+            "Masaüstü Duvar Kâğıdı Vitrini",
+            Some("4K UHD"),
             column![
                 row![
-                    text("terminal ~ corten")
-                        .size(9.0)
-                        .color(palette.text_muted.to_iced()),
-                    horizontal_space(),
-                    row![
-                        // Minimize (-)
-                        container(text("-").size(7.0).color(palette.primary.to_iced()))
-                            .width(Length::Fixed(8.0))
-                            .height(Length::Fixed(8.0))
-                            .center_x(Length::Fill)
-                            .center_y(Length::Fill)
-                            .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
-                                border: Border {
-                                    radius: border::Radius::from(Radius::FULL),
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            }),
-                        // Maximize (□)
-                        container(text("□").size(6.0).color(palette.primary.to_iced()))
-                            .width(Length::Fixed(8.0))
-                            .height(Length::Fixed(8.0))
-                            .center_x(Length::Fill)
-                            .center_y(Length::Fill)
-                            .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
-                                border: Border {
-                                    radius: border::Radius::from(Radius::FULL),
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            }),
-                        // Close (✕)
-                        container(text("✕").size(6.0).color(iced::Color::WHITE))
-                            .width(Length::Fixed(8.0))
-                            .height(Length::Fixed(8.0))
-                            .center_x(Length::Fill)
-                            .center_y(Length::Fill)
-                            .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(palette.primary.to_iced())),
-                                border: Border {
-                                    radius: border::Radius::from(Radius::FULL),
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            }),
-                    ]
-                    .spacing(3)
-                    .align_y(Alignment::Center),
+                    wallpaper_card("Corten Dark Patina", "Yatay 16:9 Geniş Ekran Duvar Kâğıdı", p1_path, current_wp.contains("landscape")),
+                    wallpaper_card("Corten Forged Rust", "Dikey 9:16 Portre Endüstriyel Çelik", p2_path, current_wp.contains("portrait")),
                 ]
-                .width(Length::Fill)
-                .align_y(Alignment::Center),
-                text("corten-desktop ~ $ cargo run")
-                    .size(Typography::CAPTION)
-                    .color(palette.primary.to_iced()),
+                .spacing(Spacing::SM)
+                .width(Length::Fill),
+                custom_wp_row,
             ]
-            .spacing(4),
-        )
-        .padding(6)
-        .width(Length::Fixed(160.0))
-        .height(Length::Fixed(80.0))
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(palette.surface.to_iced())),
-            border: Border {
-                color: palette.primary.to_iced(),
-                width: 1.0,
-                radius: border::Radius::from(Radius::SM),
-            },
-            ..Default::default()
-        });
-
-        let mini_desktop_canvas = container(
-            column![
-                row![
-                    text("12:00 PM")
-                        .size(9.0)
-                        .color(palette.text_muted.to_iced()),
-                    horizontal_space(),
-                    row![
-                        text(Icon::WIFI)
-                            .font(LUCIDE_FONT)
-                            .size(9.0)
-                            .color(palette.primary.to_iced()),
-                        text(Icon::VOLUME)
-                            .font(LUCIDE_FONT)
-                            .size(9.0)
-                            .color(palette.text_primary.to_iced()),
-                    ]
-                    .spacing(4),
-                ]
-                .width(Length::Fill)
-                .align_y(Alignment::Center),
-                preview_window,
-                vertical_space().height(4),
-                container(preview_dock)
-                    .width(Length::Fill)
-                    .center_x(Length::Fill),
-            ]
-            .spacing(6)
-            .width(Length::Fill)
-            .height(Length::Fill),
-        )
-        .padding(8)
-        .width(Length::Fixed(240.0))
-        .height(Length::Fixed(155.0))
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(palette.background.to_iced())),
-            border: Border {
-                color: palette.border.to_iced(),
-                width: 1.0,
-                radius: border::Radius::from(Radius::MD),
-            },
-            shadow: Shadow {
-                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25),
-                offset: iced::Vector::new(0.0, 4.0),
-                blur_radius: 12.0,
-            },
-            ..Default::default()
-        });
+            .spacing(Spacing::SM)
+            .width(Length::Fill),
+            palette,
+        );
 
         column![
             heading,
-            vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Arayüz Teması",
-                        "Koyu antrasit ve sıcak krem açık tema arasında seçim yapın",
-                        theme_toggle,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Sistem Patina & Vurgu Rengi",
-                        "Pencere sınırları, kart ışıltıları ve butonlar için metalik patina teması",
-                        patina_toggle,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Canlı Küçük Önizleme",
-                        "Etkin renk paletini ve pencere stilini anlık olarak önizleyin",
-                        mini_desktop_canvas,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Masaüstü Duvar Kâğıdı",
-                        "Kilit ekranı ve masaüstü arka plan görseli (önayarlı kartlara tıklayarak anında uygulayabilirsiniz)",
-                        column![wallpaper_control, wallpaper_presets].spacing(Spacing::XS),
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero_canvas,
+            row![theme_bento, density_bento].spacing(Spacing::MD).width(Length::Fill),
+            patina_bento,
+            wallpaper_bento,
         ]
         .spacing(Spacing::MD)
         .into()
@@ -1447,14 +1692,146 @@ impl CortenSettingsApp {
         let heading = column![
             text("Panel ve Dock")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Konumu, dock görünümünü ve sistem bileşenlerini yapılandırın")
+            text("Masaüstü dock konumunu, kapsül geometrisini ve sistem çekmecesi modüllerini yapılandırın")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
         .spacing(Spacing::XXS);
 
         let is_top = self.panel.position == PanelPositionChoice::Top;
+
+        // ==================== 1. HERO LIVE DOCK SIMULATOR STAGE ====================
+        let mut dock_items = row![].spacing(Spacing::SM).align_y(Alignment::Center);
+
+        if self.panel.show_launcher_button {
+            dock_items = dock_items.push(
+                container(text(Icon::APP_WINDOW).font(LUCIDE_FONT).size(13.0).color(palette.primary.to_iced()))
+                    .padding([3, 7])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.20))),
+                        border: Border { radius: border::Radius::from(10.0), ..Default::default() },
+                        ..Default::default()
+                    })
+            );
+        }
+
+        dock_items = dock_items.push(
+            row![
+                container(text("1").size(9.0).color(Color::WHITE))
+                    .padding([1, 5])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(palette.primary.to_iced())),
+                        border: Border { radius: border::Radius::from(4.0), ..Default::default() },
+                        ..Default::default()
+                    }),
+                container(text("2").size(9.0).color(palette.text_muted.to_iced()))
+                    .padding([1, 5]),
+            ]
+            .spacing(2)
+            .align_y(Alignment::Center)
+        );
+
+        dock_items = dock_items.push(
+            container(row![])
+                .width(Length::Fixed(1.0))
+                .height(Length::Fixed(12.0))
+                .style(|_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.15))),
+                    ..Default::default()
+                })
+        );
+
+        dock_items = dock_items.push(
+            row![
+                text(Icon::TERMINAL).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced()),
+                text(Icon::FOLDER).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced()),
+                text(Icon::CODE).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced()),
+                text(Icon::GLOBE).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced()),
+            ]
+            .spacing(Spacing::SM)
+            .align_y(Alignment::Center)
+        );
+
+        dock_items = dock_items.push(
+            container(row![])
+                .width(Length::Fixed(1.0))
+                .height(Length::Fixed(12.0))
+                .style(|_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.15))),
+                    ..Default::default()
+                })
+        );
+
+        let mut right_modules = row![].spacing(6).align_y(Alignment::Center);
+        if self.panel.show_audio {
+            right_modules = right_modules.push(text(Icon::VOLUME).font(LUCIDE_FONT).size(11.0).color(palette.text_primary.to_iced()));
+        }
+        if self.panel.show_network {
+            right_modules = right_modules.push(text(Icon::WIFI).font(LUCIDE_FONT).size(11.0).color(palette.text_primary.to_iced()));
+        }
+        if self.panel.show_battery {
+            right_modules = right_modules.push(text(Icon::BATTERY).font(LUCIDE_FONT).size(11.0).color(palette.text_primary.to_iced()));
+        }
+        right_modules = right_modules.push(text("12:00").size(10.0).font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() }).color(palette.text_muted.to_iced()));
+
+        dock_items = dock_items.push(right_modules);
+
+        let simulated_dock = container(dock_items)
+            .padding([5, 14])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(0.09, 0.10, 0.13, 0.94))),
+                border: Border {
+                    color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.45),
+                    width: 1.0,
+                    radius: border::Radius::from(match self.panel.style {
+                        PanelStyleChoice::Floating => 18.0,
+                        PanelStyleChoice::Islands => 8.0,
+                        PanelStyleChoice::Flush => 0.0,
+                    }),
+                },
+                shadow: Shadow {
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.40),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 12.0,
+                },
+                ..Default::default()
+            });
+
+        let sim_stage_content = column![
+            row![
+                text("Canlı Dock & Panel Yerleşim Simülatörü")
+                    .size(11.0)
+                    .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                    .color(palette.text_muted.to_iced()),
+                horizontal_space(),
+                container(text(if is_top { "Konum: Üst Kenar" } else { "Konum: Alt Kenar" }).size(10.0).color(palette.primary.to_iced()))
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14))),
+                        border: Border {
+                            color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
+                            width: 1.0,
+                            radius: border::Radius::from(6.0),
+                        },
+                        ..Default::default()
+                    }),
+            ]
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+            vertical_space().height(if is_top { 8 } else { 24 }),
+            container(simulated_dock).width(Length::Fill).center_x(Length::Fill),
+            vertical_space().height(if is_top { 24 } else { 8 }),
+        ]
+        .width(Length::Fill);
+
+        let hero_canvas = Self::hero_stage(sim_stage_content, palette);
+
+        // ==================== BENTO CARDS ====================
         let pos_control = row![
             Self::segment_button(
                 "Üst Panel",
@@ -1473,7 +1850,7 @@ impl CortenSettingsApp {
 
         let style_control = row![
             Self::segment_button(
-                "Yüzen",
+                "Yüzen Kapsül",
                 self.panel.style == PanelStyleChoice::Floating,
                 Message::SetPanelStyle(PanelStyleChoice::Floating),
                 palette,
@@ -1492,6 +1869,40 @@ impl CortenSettingsApp {
             ),
         ]
         .spacing(Spacing::XS);
+
+        let autohide_cb = Self::pill_switch(
+            self.panel.autohide,
+            Message::TogglePanelAutohide(!self.panel.autohide),
+            palette,
+        );
+
+        let layout_bento = Self::bento_card(
+            Icon::MONITOR,
+            "Yerleşim & Kapsül Geometrisi",
+            Some("Panel"),
+            column![
+                Self::setting_item(
+                    "Panel Konumu",
+                    "Panelin ekranın üstünde mi yoksa alt kenarında mı duracağını seçin",
+                    pos_control,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Görsel Geometri",
+                    "Yüzen kart dock, ayrık adacıklar veya tam genişlikte çubuk",
+                    style_control,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Akıllı Kaçınma / Otomatik Gizlenme (Autohide)",
+                    "Pencereler yaklaştığında ekran alanını en üst düzeye çıkarmak için dock'u gizle",
+                    autohide_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::XS),
+            palette,
+        );
 
         let launcher_cb = Self::pill_switch(
             self.panel.show_launcher_button,
@@ -1513,67 +1924,46 @@ impl CortenSettingsApp {
             Message::TogglePanelBattery(!self.panel.show_battery),
             palette,
         );
-        let autohide_cb = Self::pill_switch(
-            self.panel.autohide,
-            Message::TogglePanelAutohide(!self.panel.autohide),
+
+        let modules_bento = Self::bento_card(
+            Icon::APP_WINDOW,
+            "Sistem Tepsisi & Çekmece Modülleri",
+            Some("Modüller"),
+            column![
+                Self::setting_item(
+                    "Corten Başlatıcı Orb Düğmesi",
+                    "Dock'un sol tarafında Corten bağımsız başlatıcı amblem düğmesini göster",
+                    launcher_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Ses ve Canlı Medya Bileşeni",
+                    "Gerçek zamanlı PipeWire ses düzeyini ve stereo VU metre göstergesini göster",
+                    audio_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Ağ ve Wi-Fi Durumu",
+                    "NetworkManager canlı bağlantı durum simgesini göster",
+                    network_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Pil ve Güç Yönetimi",
+                    "Pil seviyesini, kalan süreyi ve güç profili durumunu göster",
+                    battery_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::XS),
             palette,
         );
 
         column![
             heading,
-            vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Panel Konumu",
-                        "Panelin üst kenarda mı yoksa alt dock olarak mı duracağını seçin",
-                        pos_control,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Görsel Geometri",
-                        "Yüzen kart dock, kapsül adacıklar veya tam genişlikte çubuk",
-                        style_control,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Corten Başlatıcı Düğmesi",
-                        "Dock'un solunda Corten orb amblem düğmesini göster",
-                        launcher_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Ses ve Medya Bileşeni",
-                        "Gerçek zamanlı PipeWire ses düzeyini ve VU metre göstergesini göster",
-                        audio_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Ağ ve Bağlantı",
-                        "NetworkManager durum simgesini göster (Wi-Fi / Ethernet)",
-                        network_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Pil ve Güç",
-                        "Taşınabilir sistemlerde pil seviyesini ve güç durumunu göster",
-                        battery_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Akıllı Otomatik Gizleme (Autohide)",
-                        "Ekran alanını artırmak için dock'u otomatik gizle",
-                        autohide_cb,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero_canvas,
+            layout_bento,
+            modules_bento,
         ]
         .spacing(Spacing::MD)
         .into()
@@ -1583,22 +1973,89 @@ impl CortenSettingsApp {
         let heading = column![
             text("Uygulama Başlatıcı ve Spotlight")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Spotlight boyutlarını, arama tercihlerini ve pano yöneticisini yapılandırın")
+            text("Spotlight boyutlarını, başlatıcı stilini ve sistem pano yöneticisini yapılandırın")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
         .spacing(Spacing::XXS);
 
-        let clip_cb = Self::pill_switch(
-            self.launcher.enable_clipboard_history,
-            Message::ToggleLauncherClipboard(!self.launcher.enable_clipboard_history),
+        // ==================== 1. HERO LAUNCHER STAGE ====================
+        let search_sim = container(
+            row![
+                text(Icon::SEARCH).font(LUCIDE_FONT).size(13.0).color(palette.primary.to_iced()),
+                text("Terminal").size(12.0).color(palette.text_primary.to_iced()),
+                horizontal_space(),
+                container(text("↵ Çalıştır").size(10.0).color(palette.primary.to_iced()))
+                    .padding([2, 6])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16))),
+                        border: Border { radius: border::Radius::from(4.0), ..Default::default() },
+                        ..Default::default()
+                    }),
+            ]
+            .spacing(Spacing::SM)
+            .align_y(Alignment::Center)
+        )
+        .padding([8, 14])
+        .width(Length::Fixed(320.0))
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(iced::Color::from_rgba(0.09, 0.10, 0.13, 0.94))),
+            border: Border {
+                color: palette.primary.to_iced(),
+                width: 1.5,
+                radius: border::Radius::from(Radius::SM),
+            },
+            shadow: Shadow {
+                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                offset: iced::Vector::new(0.0, 4.0),
+                blur_radius: 12.0,
+            },
+            ..Default::default()
+        });
+
+        let hero_canvas = Self::hero_stage(
+            column![
+                row![
+                    text("Canlı Başlatıcı & Arama Simülatörü")
+                        .size(11.0)
+                        .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                        .color(palette.text_muted.to_iced()),
+                    horizontal_space(),
+                    container(text(match self.launcher.style.as_str() {
+                        "startmenu" => "Stil: Başlat Menüsü",
+                        "dashboard" => "Stil: Uygulama Panosu",
+                        _ => "Stil: Spotlight",
+                    }).size(10.0).color(palette.primary.to_iced()))
+                        .padding([2, 8])
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14))),
+                            border: Border {
+                                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
+                                width: 1.0,
+                                radius: border::Radius::from(6.0),
+                            },
+                            ..Default::default()
+                        }),
+                ]
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+                vertical_space().height(10),
+                container(search_sim).width(Length::Fill).center_x(Length::Fill),
+                vertical_space().height(10),
+            ]
+            .width(Length::Fill),
             palette,
         );
 
+        // ==================== BENTO CARDS ====================
         let width_control = row![
             Self::segment_button(
-                "600px (Varsayılan)",
+                "600px (Standart)",
                 self.launcher.width == 600,
                 Message::SetLauncherWidth(600),
                 palette,
@@ -1614,25 +2071,53 @@ impl CortenSettingsApp {
 
         let style_control = row![
             Self::segment_button(
-                "Başlat Menüsü (Start)",
+                "Başlat Menüsü",
                 self.launcher.style == "startmenu",
                 Message::SetLauncherDefaultStyle("startmenu".into()),
                 palette,
             ),
             Self::segment_button(
-                "Spotlight (Kompakt)",
+                "Spotlight",
                 self.launcher.style == "spotlight",
                 Message::SetLauncherDefaultStyle("spotlight".into()),
                 palette,
             ),
             Self::segment_button(
-                "Uygulama Panosu (Izgara)",
+                "Uygulama Panosu",
                 self.launcher.style == "dashboard",
                 Message::SetLauncherDefaultStyle("dashboard".into()),
                 palette,
             ),
         ]
         .spacing(Spacing::XS);
+
+        let style_bento = Self::bento_card(
+            Icon::SEARCH,
+            "Başlatıcı Stili & Pencere Boyutu",
+            Some("Arama"),
+            column![
+                Self::setting_item(
+                    "Varsayılan Başlatıcı Stili",
+                    "Kompakt Başlat Menüsü, Spotlight veya tam ekran Uygulama Panosu seçimi",
+                    style_control,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Spotlight Genişliği",
+                    "Ortalanmış Spotlight arama penceresinin piksel genişliği",
+                    width_control,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::XS),
+            palette,
+        );
+
+        let clip_cb = Self::pill_switch(
+            self.launcher.enable_clipboard_history,
+            Message::ToggleLauncherClipboard(!self.launcher.enable_clipboard_history),
+            palette,
+        );
 
         let clip_limit_control = row![
             Self::segment_button(
@@ -1656,43 +2141,33 @@ impl CortenSettingsApp {
         ]
         .spacing(Spacing::XS);
 
+        let clip_bento = Self::bento_card(
+            Icon::CLIPBOARD,
+            "Pano Yöneticisi Entegrasyonu (Super+V)",
+            Some("Pano"),
+            column![
+                Self::setting_item(
+                    "Pano Geçmişini Etkinleştir",
+                    "Kopyalanan metin ve görsellerin pano geçmişine kaydedilmesini sağlar",
+                    clip_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Pano Geçmişi Derinliği",
+                    "Panoda saklanacak maksimum metin ve görsel kopyalama sayısı",
+                    clip_limit_control,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::XS),
+            palette,
+        );
+
         column![
             heading,
-            vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Varsayılan Başlatıcı Stili",
-                        "Kompakt Başlat Menüsü, Spotlight veya geniş Uygulama Panosu arasında seçim yapın",
-                        style_control,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Spotlight Genişliği",
-                        "Ortalanmış Spotlight arama penceresinin piksel genişliği",
-                        width_control,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Pano Yöneticisi Entegrasyonu",
-                        "Kopyalanan metin ve görsellerin pano geçmişine kaydedilmesini sağlar",
-                        clip_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Pano Geçmişi Derinliği",
-                        "Panoda saklanacak maksimum metin ve görsel kopyalama sayısı",
-                        clip_limit_control,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero_canvas,
+            style_bento,
+            clip_bento,
         ]
         .spacing(Spacing::MD)
         .into()
@@ -1702,8 +2177,12 @@ impl CortenSettingsApp {
         let heading = column![
             text("Masaüstü Bileşenleri")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Masaüstü araçlarını, ses görselleştiricisini ve not defterini yönetin")
+            text("Masaüstü katmanındaki canlı araçları, ses görselleştiricisini ve sistem monitörünü yapılandırın")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
@@ -1730,40 +2209,197 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let active_count = [
+            self.widgets.music_enabled,
+            self.widgets.sysinfo_enabled,
+            self.widgets.weather_enabled,
+            self.widgets.scratchpad_enabled,
+        ]
+        .iter()
+        .filter(|&&x| x)
+        .count();
+
+        let hero = Self::hero_stage(
+            column![
+                row![
+                    row![
+                        text(Icon::ACTIVITY).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
+                        text("CANLI MASAÜSTÜ BİLEŞEN YERLEŞİMİ")
+                            .size(Typography::CAPTION)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .color(palette.primary.to_iced()),
+                    ].spacing(Spacing::XS).align_y(Alignment::Center),
+                    horizontal_space(),
+                    container(
+                        text(format!("{} Aktif Bileşen", active_count))
+                            .size(Typography::CAPTION)
+                            .color(palette.primary.to_iced())
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                        border: Border { color: palette.primary.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                ]
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                vertical_space().height(Spacing::XS),
+                // Simulated desktop canvas with widgets
+                container(
+                    column![
+                        row![
+                            // Top left scratchpad
+                            if self.widgets.scratchpad_enabled {
+                                container(text("📝 Hızlı Notlar").size(Typography::CAPTION).color(palette.text_primary.to_iced()))
+                                    .padding([4, 8])
+                                    .style(move |_| container::Style {
+                                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8))),
+                                        border: Border { color: palette.border.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                                        ..Default::default()
+                                    })
+                            } else {
+                                container(horizontal_space()).width(Length::Shrink)
+                            },
+                            horizontal_space(),
+                            // Top right sysinfo
+                            if self.widgets.sysinfo_enabled {
+                                container(
+                                    row![
+                                        text(Icon::CPU).font(LUCIDE_FONT).size(12).color(palette.primary.to_iced()),
+                                        text("CPU 14% • RAM 3.2 GB").size(Typography::CAPTION).color(palette.text_primary.to_iced()),
+                                    ]
+                                    .spacing(4)
+                                    .align_y(Alignment::Center)
+                                )
+                                .padding([4, 8])
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8))),
+                                    border: Border { color: palette.border.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                                    ..Default::default()
+                                })
+                            } else {
+                                container(horizontal_space()).width(Length::Shrink)
+                            },
+                        ]
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill),
+                        vertical_space().height(Spacing::MD),
+                        row![
+                            // Bottom left music visualizer
+                            if self.widgets.music_enabled {
+                                container(
+                                    row![
+                                        text(Icon::MUSIC).font(LUCIDE_FONT).size(12).color(palette.primary.to_iced()),
+                                        text("▂▄▆█ 128 BPM").size(Typography::CAPTION).color(palette.primary.to_iced()),
+                                    ]
+                                    .spacing(4)
+                                    .align_y(Alignment::Center)
+                                )
+                                .padding([4, 8])
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                                    border: Border { color: palette.primary.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                                    ..Default::default()
+                                })
+                            } else {
+                                container(horizontal_space()).width(Length::Shrink)
+                            },
+                            horizontal_space(),
+                            // Bottom right weather
+                            if self.widgets.weather_enabled {
+                                container(
+                                    row![
+                                        text(Icon::SUN).font(LUCIDE_FONT).size(12).color(palette.primary.to_iced()),
+                                        text("22°C Güneşli").size(Typography::CAPTION).color(palette.text_primary.to_iced()),
+                                    ]
+                                    .spacing(4)
+                                    .align_y(Alignment::Center)
+                                )
+                                .padding([4, 8])
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8))),
+                                    border: Border { color: palette.border.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                                    ..Default::default()
+                                })
+                            } else {
+                                container(horizontal_space()).width(Length::Shrink)
+                            },
+                        ]
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill),
+                    ]
+                )
+                .padding(Spacing::MD)
+                .width(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(0.05, 0.06, 0.08, 0.7))),
+                    border: Border {
+                        color: palette.border.to_iced(),
+                        width: 1.0,
+                        radius: border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_media = Self::bento_card(
+            Icon::MUSIC,
+            "Medya & Sistem İzleme",
+            Some("Canlı Metrikler"),
+            column![
+                Self::setting_item(
+                    "Müzik & Ses Dalga Görselleştiricisi",
+                    "MPRIS medya oynatıcılarına duyarlı canlı ekolayzer widget'ı",
+                    music_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Donanım & Sistem İzleyici",
+                    "Masaüstünde anlık CPU ve RAM kullanım göstergesi",
+                    sysinfo_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_info = Self::bento_card(
+            Icon::CALENDAR,
+            "Bilgi & Üretkenlik",
+            Some("Masaüstü Araçları"),
+            column![
+                Self::setting_item(
+                    "Masaüstü Hava Durumu",
+                    "Gerçek zamanlı hava durumu ve sıcaklık bilgisi",
+                    weather_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Masaüstü Not Defteri",
+                    "Masaüstünde kalıcı hızlı notlar ve yapılacaklar listesi",
+                    scratchpad_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Müzik & Ses Dalga Görselleştiricisi",
-                        "MPRIS medya oynatıcılarına duyarlı canlı ekolayzer widget'ı",
-                        music_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Donanım & Sistem İzleyici",
-                        "Masaüstünde anlık CPU ve RAM kullanım göstergesi",
-                        sysinfo_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Masaüstü Hava Durumu",
-                        "Gerçek zamanlı hava durumu ve sıcaklık bilgisi",
-                        weather_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Masaüstü Not Defteri",
-                        "Masaüstünde kalıcı hızlı notlar ve yapılacaklar listesi",
-                        scratchpad_cb,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero,
+            vertical_space().height(Spacing::SM),
+            bento_media,
+            vertical_space().height(Spacing::SM),
+            bento_info,
         ]
-        .spacing(Spacing::MD)
+        .spacing(Spacing::SM)
         .into()
     }
 
@@ -1771,8 +2407,12 @@ impl CortenSettingsApp {
         let heading = column![
             text("Klavye ve Fare")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Klavye düzenini, touchpad hareketlerini ve tuş dönüşümlerini yapılandırın")
+            text("Klavye düzenini, touchpad hareketlerini, tuş dönüşümlerini ve dokunmatik girişleri yapılandırın")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
@@ -1816,51 +2456,113 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let hero = Self::hero_stage(
+            column![
+                row![
+                    row![
+                        text(Icon::KEYBOARD).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
+                        text("GİRİŞ AYGITLARI & DONANIM SÜRÜCÜSÜ")
+                            .size(Typography::CAPTION)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .color(palette.primary.to_iced()),
+                    ].spacing(Spacing::XS).align_y(Alignment::Center),
+                    horizontal_space(),
+                    container(
+                        text(if is_tr { "XKB: TR-Q Türkçe" } else { "XKB: US English" })
+                            .size(Typography::CAPTION)
+                            .color(palette.primary.to_iced())
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                        border: Border { color: palette.primary.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                    container(
+                        text(if self.input.natural_scrolling { "Doğal Kaydırma: Açık" } else { "Standart Kaydırma" })
+                            .size(Typography::CAPTION)
+                            .color(palette.text_primary.to_iced())
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.7))),
+                        border: Border { color: palette.border.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                ]
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                vertical_space().height(Spacing::XS),
+                row![
+                    text("libinput üzerinden donanım tabanlı parmak jestleri ve düşük gecikmeli Wayland klavye girişleri işlenmektedir.")
+                        .size(Typography::BODY_SM)
+                        .color(palette.text_muted.to_iced()),
+                ],
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_keyboard = Self::bento_card(
+            Icon::KEYBOARD,
+            "Klavye Yapılandırması",
+            Some("XKB"),
+            column![
+                Self::setting_item(
+                    "Klavye Düzeni",
+                    "Terminal ve uygulamalarda yazım için geçerli XKB düzeni",
+                    layout_control,
+                    palette,
+                ),
+                Self::setting_item(
+                    "CapsLock tuşunu Control / Esc yap",
+                    "Hızlı terminal ve Vim iş akışları için ergonomik tuş eşlemesi",
+                    caps_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Sanal Ekran Klavyesi",
+                    "Kilit ekranında ve dokunmatik ekranlarda sanal klavye",
+                    vkey_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_pointer = Self::bento_card(
+            Icon::MONITOR,
+            "İşaretçi & Dokunmatik Yüzey",
+            Some("libinput"),
+            column![
+                Self::setting_item(
+                    "Doğal Kaydırma (Natural Scrolling)",
+                    "Touchpad ve fare tekerinde parmak hareketini takip et",
+                    natural_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Dokunarak Tıklama (Tap to Click)",
+                    "Touchpad yüzeyine hafifçe dokunarak birincil tıklama yap",
+                    tap_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Klavye Düzeni",
-                        "Terminal ve uygulamalarda yazım için geçerli XKB düzeni",
-                        layout_control,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Doğal Kaydırma (Natural Scrolling)",
-                        "Touchpad ve fare tekerinde parmak hareketini takip et",
-                        natural_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Dokunarak Tıklama (Tap to Click)",
-                        "Touchpad yüzeyine hafifçe dokunarak birincil tıklama yap",
-                        tap_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "CapsLock tuşunu Control / Esc yap",
-                        "Hızlı terminal ve Vim iş akışları için ergonomik tuş eşlemesi",
-                        caps_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Sanal Ekran Klavyesi",
-                        "Kilit ekranında ve dokunmatik ekranlarda sanal klavye",
-                        vkey_cb,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero,
+            vertical_space().height(Spacing::SM),
+            bento_keyboard,
+            vertical_space().height(Spacing::SM),
+            bento_pointer,
         ]
-        .spacing(Spacing::MD)
+        .spacing(Spacing::SM)
         .into()
     }
 
@@ -2330,160 +3032,289 @@ impl CortenSettingsApp {
         ]
         .spacing(Spacing::XS);
 
+        let hero = Self::hero_stage(arranger_container, palette);
+
+        let bento_scale = Self::bento_card(
+            Icon::MONITOR,
+            "Ekran Ölçeği & Çözünürlük",
+            Some("DRM / KMS"),
+            column![
+                Self::setting_item(
+                    "Birincil Ekran Ölçeği (eDP-1 / Dizüstü)",
+                    "Dahili birincil ekranın kesirli arayüz ölçeğini ayarlayın",
+                    scale_control,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Çözünürlük ve Yenileme Hızı",
+                    "DRM tarafından desteklenen biçim: genişlik x yükseklik @ Hz",
+                    resolution_input,
+                    palette,
+                ),
+                Self::setting_item(
+                    "İkincil Ekran Ölçeği (Harici)",
+                    "Çift ekran kurulumunda çıkışa özel bağımsız ölçek katsayısı",
+                    secondary_scale_control,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Ekran Parlaklığı",
+                    "Donanım arka aydınlatma parlaklığı kontrolü",
+                    brightness_slider,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_refresh = Self::bento_card(
+            Icon::SUN,
+            "Görüntüleme & Yenileme Teknolojileri",
+            Some("VRR & Gece Işığı"),
+            column![
+                Self::setting_item(
+                    "Gece Işığı (Night Light - Mavi Işık Filtresi)",
+                    "Göz yorgunluğunu azaltmak için ekran renk sıcaklığını sıcak tonlara kaydır",
+                    night_light_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Otomatik Gün Batımı / Gece Işığı Zamanlayıcısı",
+                    "Günün saatine göre (19:00 - 07:00) mavi ışık filtresini otomatik olarak açıp kapatır",
+                    auto_night_light_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "VRR (FreeSync / Değişken Tazeleme Hızı)",
+                    "Desteklenen monitörlerde ekran yenileme hızını dinamik FPS ile senkronize eder",
+                    vrr_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Düşük Gecikmeli Oyun Modu (Tearing / V-Sync Bypass)",
+                    "Rekabetçi oyunlarda V-Sync giriş gecikmesini (input lag) tamamen ortadan kaldırır",
+                    tearing_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_color = Self::bento_card(
+            Icon::DROPLET,
+            "Renk Yönetimi & HDR (Color Management)",
+            Some("Wayland Color v1"),
+            column![
+                Self::setting_item(
+                    "Renk Uzayı ve Gamut (Color Space)",
+                    "Monitör panelinin renk kapsamı (sRGB / DCI-P3 / BT.2020)",
+                    color_space_picker,
+                    palette,
+                ),
+                Self::setting_item(
+                    "HDR10 / ST.2084 PQ Çıkışı",
+                    "10-bit SMPTE ST 2084 dinamik aralık ve geniş renk gamutu DRM metadata sinyali",
+                    hdr_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "HDR Tepe Parlaklığı (Peak Luminance)",
+                    "Monitör donanımının desteklediği maksimum tepe parlaklık düzeyi (cd/m²)",
+                    max_luminance_slider,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Monitör ICC Kalibrasyon Profili",
+                    "Donanımsal renk doğruluğu ve ICC renk yönetim profili",
+                    icc_status,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
-            arranger_container,
-            vertical_space().height(Spacing::XS),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Birincil Ekran Ölçeği (eDP-1 / Dizüstü)",
-                        "Dahili birincil ekranın kesirli arayüz ölçeğini ayarlayın",
-                        scale_control,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Çözünürlük ve Yenileme Hızı",
-                        "DRM tarafından desteklenen biçim: genişlik x yükseklik @ Hz",
-                        resolution_input,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "İkincil Ekran Ölçeği (Harici)",
-                        "Çift ekran kurulumunda çıkışa özel bağımsız ölçek katsayısı",
-                        secondary_scale_control,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Ekran Parlaklığı",
-                        "Donanım arka aydınlatma parlaklığı kontrolü",
-                        brightness_slider,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Gece Işığı (Night Light - Mavi Işık Filtresi)",
-                        "Göz yorgunluğunu azaltmak için ekran renk sıcaklığını sıcak tonlara kaydır",
-                        night_light_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Otomatik Gün Batımı / Gece Işığı Zamanlayıcısı",
-                        "Günün saatine göre (19:00 - 07:00) mavi ışık filtresini otomatik olarak açıp kapatır",
-                        auto_night_light_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "VRR (FreeSync / Değişken Tazeleme Hızı)",
-                        "Desteklenen monitörlerde ekran yenileme hızını dinamik FPS ile senkronize eder",
-                        vrr_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Düşük Gecikmeli Oyun Modu (Tearing / V-Sync Bypass)",
-                        "Rekabetçi oyunlarda V-Sync giriş gecikmesini (input lag) tamamen ortadan kaldırır",
-                        tearing_cb,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Renk Uzayı ve Gamut (Color Space)",
-                        "Monitör panelinin renk kapsamı (sRGB / DCI-P3 / BT.2020)",
-                        color_space_picker,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "HDR10 / ST.2084 PQ Çıkışı",
-                        "10-bit SMPTE ST 2084 dinamik aralık ve geniş renk gamutu DRM metadata sinyali",
-                        hdr_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "HDR Tepe Parlaklığı (Peak Luminance)",
-                        "Monitör donanımının desteklediği maksimum tepe parlaklık düzeyi (cd/m²)",
-                        max_luminance_slider,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Monitör ICC Kalibrasyon Profili",
-                        "Donanımsal renk doğruluğu ve ICC renk yönetim profili",
-                        icc_status,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero,
+            vertical_space().height(Spacing::SM),
+            bento_scale,
+            vertical_space().height(Spacing::SM),
+            bento_refresh,
+            vertical_space().height(Spacing::SM),
+            bento_color,
         ]
-        .spacing(Spacing::MD)
+        .spacing(Spacing::SM)
         .into()
     }
 
     fn view_sound(&self, palette: Palette) -> Element<'_, Message> {
         let heading = column![
-            text("Ses")
+            text("Ses ve Girişler")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Ana ses düzeyini, PipeWire yönlendirmesini ve mikrofon seviyesini yapılandırın")
+            text("Ana ses düzeyini, stereo PipeWire yönlendirmesini ve mikrofon kayıt seviyesini yapılandırın")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
         .spacing(Spacing::XXS);
 
-        let out_vol_slider = row![
-            slider(0..=100, self.sound.output_volume, Message::SetOutputVolume)
-                .width(Length::Fixed(150.0))
-                .style(corten_theme::iced_styles::capsule_slider_style(palette)),
-            text(format!("{}%", self.sound.output_volume))
-                .size(Typography::BODY_SM)
-                .color(palette.text_primary.to_iced()),
+        // ==================== 1. HERO AUDIO STUDIO CONSOLE ====================
+        let vol_val = self.sound.output_volume;
+        let is_muted = self.sound.mute_output;
+
+        let vu_l = ((vol_val as f32 / 100.0) * 0.90).clamp(0.05, 0.95);
+        let vu_r = ((vol_val as f32 / 100.0) * 0.86).clamp(0.05, 0.95);
+
+        let vu_bar = |val: f32, label: &'static str| {
+            let bars = if val < 0.20 {
+                " "
+            } else if val < 0.40 {
+                "▂"
+            } else if val < 0.60 {
+                "▂▄"
+            } else if val < 0.80 {
+                "▂▄▆"
+            } else {
+                "▂▄▆█"
+            };
+            row![
+                text(label).size(11.0).font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() }).color(palette.text_muted.to_iced()),
+                text(bars).size(13.0).color(if val > 0.85 { palette.danger.to_iced() } else { palette.primary.to_iced() }),
+                text(format!("%{:.0}", val * 100.0)).size(10.0).color(palette.text_muted.to_iced()),
+            ]
+            .spacing(Spacing::XS)
+            .align_y(Alignment::Center)
+        };
+
+        let console_top = row![
+            text("PipeWire Profesyonel Ses Konsolu")
+                .size(11.0)
+                .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                .color(palette.text_muted.to_iced()),
+            horizontal_space(),
+            container(text(if is_muted { "● Susturuldu" } else { "● Canlı Stereo Çıkış" }).size(10.0).color(if is_muted { palette.danger.to_iced() } else { palette.primary.to_iced() }))
+                .padding([2, 8])
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14))),
+                    border: Border {
+                        color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
+                        width: 1.0,
+                        radius: border::Radius::from(6.0),
+                    },
+                    ..Default::default()
+                }),
         ]
-        .spacing(Spacing::SM)
+        .width(Length::Fill)
         .align_y(Alignment::Center);
 
         let test_btn = button(
             row![
-                text(Icon::VOLUME).font(LUCIDE_FONT).size(12.0),
-                text("Sesi Test Et").size(Typography::CAPTION),
+                text(Icon::VOLUME).font(LUCIDE_FONT).size(14.0),
+                text("Sesi Test Et").size(Typography::BODY_SM).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }),
             ]
-            .spacing(4)
+            .spacing(Spacing::XS)
             .align_y(Alignment::Center),
         )
-        .padding([4, 10])
-        .style(move |_, _| button::Style {
-            background: Some(iced::Background::Color(palette.surface_hover.to_iced())),
-            text_color: palette.primary.to_iced(),
-            border: Border {
-                color: palette.border.to_iced(),
-                width: 1.0,
-                radius: border::Radius::from(Radius::SM),
-            },
-            ..Default::default()
+        .padding([8, 16])
+        .style(move |_, status| {
+            let bg = if matches!(status, button::Status::Hovered) {
+                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.28)
+            } else {
+                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16)
+            };
+            button::Style {
+                background: Some(iced::Background::Color(bg)),
+                text_color: palette.primary.to_iced(),
+                border: Border {
+                    color: palette.primary.to_iced(),
+                    width: 1.0,
+                    radius: border::Radius::from(Radius::SM),
+                },
+                ..Default::default()
+            }
         })
         .on_press(Message::TestSoundOutput);
 
-        let out_vol_row = row![
-            out_vol_slider,
+        let console_center = row![
+            row![
+                container(text(Icon::VOLUME).font(LUCIDE_FONT).size(26.0).color(palette.primary.to_iced()))
+                    .padding(8)
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16))),
+                        border: Border { radius: border::Radius::from(10.0), ..Default::default() },
+                        ..Default::default()
+                    }),
+                column![
+                    text(format!("%{}", vol_val))
+                        .size(24.0)
+                        .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                        .color(if is_muted { palette.text_muted.to_iced() } else { palette.text_primary.to_iced() }),
+                    text(if is_muted { "Sistem Susturuldu" } else { "Ana Oynatma Seviyesi" })
+                        .size(11.0)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(2),
+            ]
+            .spacing(Spacing::SM)
+            .align_y(Alignment::Center),
+            horizontal_space(),
+            column![
+                vu_bar(if is_muted { 0.0 } else { vu_l }, "L"),
+                vu_bar(if is_muted { 0.0 } else { vu_r }, "R"),
+            ]
+            .spacing(3),
+            horizontal_space(),
             test_btn,
+        ]
+        .width(Length::Fill)
+        .align_y(Alignment::Center);
+
+        let hero_canvas = Self::hero_stage(
+            column![
+                console_top,
+                vertical_space().height(6),
+                console_center,
+            ]
+            .spacing(6)
+            .width(Length::Fill),
+            palette,
+        );
+
+        // ==================== BENTO CARDS ====================
+        let out_vol_slider = row![
+            slider(0..=100, self.sound.output_volume, Message::SetOutputVolume)
+                .width(Length::Fixed(220.0))
+                .style(corten_theme::iced_styles::capsule_slider_style(palette)),
+            container(text(format!("%{}", self.sound.output_volume)).size(Typography::BODY_SM).color(palette.text_primary.to_iced()))
+                .padding([2, 8])
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
+                    border: Border { radius: border::Radius::from(4.0), ..Default::default() },
+                    ..Default::default()
+                }),
         ]
         .spacing(Spacing::SM)
         .align_y(Alignment::Center);
 
         let in_vol_slider = row![
             slider(0..=100, self.sound.input_volume, Message::SetInputVolume)
-                .width(Length::Fixed(180.0))
+                .width(Length::Fixed(220.0))
                 .style(corten_theme::iced_styles::capsule_slider_style(palette)),
-            text(format!("{}%", self.sound.input_volume))
-                .size(Typography::BODY_SM)
-                .color(palette.text_primary.to_iced()),
+            container(text(format!("%{}", self.sound.input_volume)).size(Typography::BODY_SM).color(palette.text_primary.to_iced()))
+                .padding([2, 8])
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
+                    border: Border { radius: border::Radius::from(4.0), ..Default::default() },
+                    ..Default::default()
+                }),
         ]
         .spacing(Spacing::SM)
         .align_y(Alignment::Center);
@@ -2493,46 +3324,64 @@ impl CortenSettingsApp {
             Message::ToggleMuteSound(!self.sound.mute_output),
             palette,
         );
+
         let output_device = text_input(
             "Varsayılan aygıt veya PipeWire node adı",
             &self.sound.output_device,
         )
         .on_input(Message::SetOutputDevice)
-        .width(Length::Fixed(240.0))
+        .width(Length::Fixed(260.0))
         .padding([Spacing::SM, Spacing::MD]);
+
+        let output_bento = Self::bento_card(
+            Icon::VOLUME,
+            "Hoparlör ve Kulaklık Çıkışı",
+            Some("Output"),
+            column![
+                Self::setting_item(
+                    "Çıkış Ses Düzeyi",
+                    "Varsayılan ses çıkışındaki ana sistem oynatma düzeyi",
+                    out_vol_slider,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Tüm Sesleri Sustur (Mute)",
+                    "Tüm sistem ses çıkışını anında sessize al",
+                    mute_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Ses Çıkış Aygıtı",
+                    "wpctl ile kullanılacak varsayılan PipeWire çıkış aygıtı veya node kimliği",
+                    output_device,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::XS),
+            palette,
+        );
+
+        let input_bento = Self::bento_card(
+            Icon::MIC,
+            "Mikrofon ve Kayıt Girişi",
+            Some("Input"),
+            column![
+                Self::setting_item(
+                    "Mikrofon Giriş Düzeyi",
+                    "Varsayılan ses kayıt seviyesi ve mikrofon giriş hassasiyeti",
+                    in_vol_slider,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::XS),
+            palette,
+        );
 
         column![
             heading,
-            vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Çıkış Ses Düzeyi",
-                        "Varsayılan ses çıkışındaki ana sistem oynatma düzeyi",
-                        out_vol_row,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Ses Çıkış Aygıtı",
-                        "wpctl ile kullanılacak varsayılan PipeWire çıkış aygıtı veya node kimliği",
-                        output_device,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Mikrofon Giriş Düzeyi",
-                        "Varsayılan kayıt seviyesi ve giriş hassasiyeti",
-                        in_vol_slider,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Tüm Sesleri Sessize Al",
-                        "Tüm sistem ses çıkışını anında sustur",
-                        mute_cb,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero_canvas,
+            output_bento,
+            input_bento,
         ]
         .spacing(Spacing::MD)
         .into()
@@ -2542,8 +3391,12 @@ impl CortenSettingsApp {
         let heading = column![
             text("Bluetooth Aygıtları")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Kablosuz çevre birimlerini, ses aygıtlarını ve denetleyicileri yönetin")
+            text("Kablosuz çevre birimlerini, ses aygıtlarını, klavye ve fareleri yönetin")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
@@ -2552,6 +3405,59 @@ impl CortenSettingsApp {
         let power_cb = Self::pill_switch(
             self.bluetooth_powered,
             Message::ToggleBluetoothPower(!self.bluetooth_powered),
+            palette,
+        );
+
+        let connected_count = self
+            .bluetooth_devices
+            .iter()
+            .filter(|d| d.is_connected)
+            .count();
+
+        let hero = Self::hero_stage(
+            column![
+                row![
+                    row![
+                        text(Icon::WIFI).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
+                        text("KABLOSUZ BLUEZ BAĞLANTI MERKEZİ")
+                            .size(Typography::CAPTION)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .color(palette.primary.to_iced()),
+                    ].spacing(Spacing::XS).align_y(Alignment::Center),
+                    horizontal_space(),
+                    container(
+                        text(if self.bluetooth_powered { "● Adaptör Aktif & Keşif Modunda" } else { "○ Adaptör Kapalı" })
+                            .size(Typography::CAPTION)
+                            .color(if self.bluetooth_powered { palette.success.to_iced() } else { palette.text_muted.to_iced() })
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.7))),
+                        border: Border { color: palette.border.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                    container(
+                        text(format!("{} Bağlı Cihaz", connected_count))
+                            .size(Typography::CAPTION)
+                            .color(palette.primary.to_iced())
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                        border: Border { color: palette.primary.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                ]
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                vertical_space().height(Spacing::XS),
+                row![
+                    text("D-Bus org.bluez üzerinden donanım adaptörleriyle düşük gecikmeli eşleşme ve ses iletimi sağlanır.")
+                        .size(Typography::BODY_SM)
+                        .color(palette.text_muted.to_iced()),
+                ],
+            ]
+            .spacing(Spacing::SM),
             palette,
         );
 
@@ -2612,22 +3518,40 @@ impl CortenSettingsApp {
             }
         }
 
+        let bento_power = Self::bento_card(
+            Icon::WIFI,
+            "Bluetooth Gücü",
+            Some("BlueZ Adaptör"),
+            column![
+                Self::setting_item(
+                    "Kablosuz Adaptör Gücü",
+                    "Kablosuz Bluetooth radyosunu etkinleştirin veya pil tasarrufu için kapatın",
+                    power_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_devices = Self::bento_card(
+            Icon::MONITOR,
+            "Aygıtlar ve Çevre Birimleri",
+            Some("Kayıtlı Listesi"),
+            devices_col,
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
-            Self::setting_row(
-                "Bluetooth Gücü",
-                "Kablosuz Bluetooth adaptörünü etkinleştirin veya kapatın",
-                power_cb,
-                palette,
-            ),
-            vertical_space().height(Spacing::XS),
-            text("AYGITLAR")
-                .size(Typography::CAPTION)
-                .color(palette.text_muted.to_iced()),
-            devices_col,
+            hero,
+            vertical_space().height(Spacing::SM),
+            bento_power,
+            vertical_space().height(Spacing::SM),
+            bento_devices,
         ]
-        .spacing(Spacing::MD)
+        .spacing(Spacing::SM)
         .into()
     }
 
@@ -2635,13 +3559,86 @@ impl CortenSettingsApp {
         let heading = column![
             text("Güç ve Pil")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Enerji profillerini, boşta kalma sürelerini ve ekran uyku zaman aşımını yapılandırın")
+            text("Enerji profillerini, UPower işlemci hızını ve ekran uyku zaman aşımını yapılandırın")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
         .spacing(Spacing::XXS);
 
+        // ==================== 1. HERO POWER CONSOLE ====================
+        let profile_label = match self.power.power_profile.as_str() {
+            "power-saver" => "Güç Tasarrufu Modu (Düşük Isı & Pil)",
+            "performance" => "Yüksek Performans (Maksimum Saat Hızı)",
+            _ => "Dengeli Profil (Otomatik Frekans)",
+        };
+
+        let hero_canvas = Self::hero_stage(
+            column![
+                row![
+                    text("UPower & Linux Güç Yönetimi Konsolu")
+                        .size(11.0)
+                        .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                        .color(palette.text_muted.to_iced()),
+                    horizontal_space(),
+                    container(text("● Sistem Hazır").size(10.0).color(palette.primary.to_iced()))
+                        .padding([2, 8])
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14))),
+                            border: Border {
+                                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
+                                width: 1.0,
+                                radius: border::Radius::from(6.0),
+                            },
+                            ..Default::default()
+                        }),
+                ]
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+                vertical_space().height(6),
+                row![
+                    container(text(Icon::BATTERY).font(LUCIDE_FONT).size(26.0).color(palette.primary.to_iced()))
+                        .padding(8)
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16))),
+                            border: Border { radius: border::Radius::from(10.0), ..Default::default() },
+                            ..Default::default()
+                        }),
+                    column![
+                        text(profile_label)
+                            .size(Typography::TITLE_SM)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .color(palette.text_primary.to_iced()),
+                        text("Linux çekirdeği enerji profili D-Bus servisi ile gerçek zamanlı eşitlenir")
+                            .size(11.0)
+                            .color(palette.text_muted.to_iced()),
+                    ]
+                    .spacing(2),
+                    horizontal_space(),
+                    container(text(format!("Uyku: {} dk", if self.power.screen_sleep_mins == 0 { "Asla".into() } else { self.power.screen_sleep_mins.to_string() })).size(11.0).color(palette.primary.to_iced()))
+                        .padding([4, 10])
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16))),
+                            border: Border {
+                                color: palette.primary.to_iced(),
+                                width: 1.0,
+                                radius: border::Radius::from(Radius::SM),
+                            },
+                            ..Default::default()
+                        }),
+                ]
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+            ]
+            .width(Length::Fill),
+            palette,
+        );
+
+        // ==================== BENTO CARDS ====================
         let profile_control = row![
             Self::segment_button(
                 "Güç Tasarrufu",
@@ -2692,26 +3689,43 @@ impl CortenSettingsApp {
         ]
         .spacing(Spacing::XS);
 
+        let profile_bento = Self::bento_card(
+            Icon::BATTERY,
+            "UPower Enerji ve Isıl Profil",
+            Some("Donanım"),
+            column![
+                Self::setting_item(
+                    "Sistem Enerji Profili",
+                    "Pil ömrü veya maksimum performans için çekirdek işlemci hızını ve ısıl sınırları yönetin",
+                    profile_control,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::XS),
+            palette,
+        );
+
+        let sleep_bento = Self::bento_card(
+            Icon::CLOCK,
+            "Ekran Uyku & Boşta Kalma Zaman Aşımı",
+            Some("Güç Tasarrufu"),
+            column![
+                Self::setting_item(
+                    "Ekranı Kapatma Süresi",
+                    "Klavye veya fare etkinliği algılanmadığında ekranı otomatik olarak kapatın",
+                    sleep_control,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::XS),
+            palette,
+        );
+
         column![
             heading,
-            vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Enerji Profili",
-                        "Pil ömrü veya performans için işlemci hızını ve ısıl sınırları yönetin",
-                        profile_control,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Ekranı Kapatma Süresi",
-                        "Klavye veya fare etkinliği algılanmadığında ekranı otomatik olarak kapatın",
-                        sleep_control,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero_canvas,
+            profile_bento,
+            sleep_bento,
         ]
         .spacing(Spacing::MD)
         .into()
@@ -2721,12 +3735,108 @@ impl CortenSettingsApp {
         let heading = column![
             text("Bildirim Servisi")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Bildirim sürelerini ve otomatik kapatma kurallarını yapılandırın")
+            text("Bildirim sürelerini, kapatma kurallarını ve masaüstü bildirim sunucusu davranışını yapılandırın")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
         .spacing(Spacing::XXS);
+
+        let timeout_secs = self.notify.default_timeout_ms / 1000;
+
+        // Notification Hero Stage: Live notification card simulation
+        let hero = Self::hero_stage(
+            column![
+                row![
+                    row![
+                        text(Icon::BELL).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
+                        text("CANLI BİLDİRİM KARTI SİMÜLATÖRÜ")
+                            .size(Typography::CAPTION)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .color(palette.primary.to_iced()),
+                    ].spacing(Spacing::XS).align_y(Alignment::Center),
+                    horizontal_space(),
+                    container(
+                        text(format!("{} Saniye Sonra Otomatik Kapanır", timeout_secs))
+                            .size(Typography::CAPTION)
+                            .color(palette.primary.to_iced())
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                        border: Border { color: palette.primary.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                ]
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                vertical_space().height(Spacing::XS),
+                // Simulated notification card
+                container(
+                    column![
+                        row![
+                            text(Icon::TERMINAL).font(LUCIDE_FONT).size(14).color(palette.primary.to_iced()),
+                            text("Corten Sistem").size(Typography::CAPTION).color(palette.text_muted.to_iced()),
+                            text("•").size(Typography::CAPTION).color(palette.text_muted.to_iced()),
+                            text("Şimdi").size(Typography::CAPTION).color(palette.text_muted.to_iced()),
+                            horizontal_space(),
+                            text(Icon::X).font(LUCIDE_FONT).size(12).color(palette.text_muted.to_iced()),
+                        ]
+                        .spacing(Spacing::XS)
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill),
+                        text("Ayarlar Güncellendi")
+                            .size(Typography::BODY)
+                            .font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() })
+                            .color(palette.text_primary.to_iced()),
+                        text("Bildirim görüntüleme ve döşeme kuralları başarıyla senkronize edildi.")
+                            .size(Typography::BODY_SM)
+                            .color(palette.text_muted.to_iced()),
+                        // Progress bar simulating timeout
+                        container(
+                            container(horizontal_space())
+                                .width(Length::FillPortion(75))
+                                .height(Length::Fixed(3.0))
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(palette.primary.to_iced())),
+                                    border: Border { radius: border::Radius::from(2.0), ..Default::default() },
+                                    ..Default::default()
+                                })
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Fixed(3.0))
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.6))),
+                            border: Border { radius: border::Radius::from(2.0), ..Default::default() },
+                            ..Default::default()
+                        }),
+                    ]
+                    .spacing(Spacing::XS)
+                )
+                .padding(Spacing::MD)
+                .width(Length::Fixed(360.0))
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(0.12, 0.13, 0.17, 0.95))),
+                    border: Border {
+                        color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.4),
+                        width: 1.0,
+                        radius: border::Radius::from(Radius::MD),
+                    },
+                    shadow: Shadow {
+                        color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                        offset: iced::Vector::new(0.0, 4.0),
+                        blur_radius: 12.0,
+                    },
+                    ..Default::default()
+                }),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
 
         let timeout_control = row![
             Self::segment_button(
@@ -2750,22 +3860,30 @@ impl CortenSettingsApp {
         ]
         .spacing(Spacing::XS);
 
+        let bento_timeout = Self::bento_card(
+            Icon::BELL,
+            "Görüntüleme Süresi",
+            Some("Zaman Aşımı"),
+            column![
+                Self::setting_item(
+                    "Bildirim Kapatma Süresi",
+                    "Standart bildirim kartlarının ekranda kalacağı ve otomatik kaybolacağı süre",
+                    timeout_control,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Bildirim Kapatma Süresi",
-                        "Standart bildirim kartlarının ekranda kalacağı süre",
-                        timeout_control,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero,
+            vertical_space().height(Spacing::SM),
+            bento_timeout,
         ]
-        .spacing(Spacing::MD)
+        .spacing(Spacing::SM)
         .into()
     }
 
@@ -2773,38 +3891,197 @@ impl CortenSettingsApp {
         let heading = column![
             text("Pencere Yöneticisi ve Döşeme")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
-            text("Master-Stack dinamik döşeme düzenini, pencere aralıklarını ve oranlarını yapılandırın")
+            text("Wayland Master-Stack dinamik döşeme algoritmasını, pencere boşluklarını ve çalışma alanı davranışını yapılandırın")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
         .spacing(Spacing::XXS);
 
-        let gap_control = row![
-            Self::segment_button(
-                "0px",
-                self.compositor.gap == 0,
-                Message::SetCompositorGap(0),
-                palette,
-            ),
-            Self::segment_button(
-                "12px (Standard)",
-                self.compositor.gap == 12,
-                Message::SetCompositorGap(12),
-                palette,
-            ),
-            Self::segment_button(
-                "20px",
-                self.compositor.gap == 20,
-                Message::SetCompositorGap(20),
-                palette,
-            ),
-        ]
-        .spacing(Spacing::XS);
+        // Compositor Stage: Interactive wireframe of current layout
+        let current_layout_name = match self.compositor.layout_mode {
+            corten_config::LayoutMode::Floating => "Floating (Serbest Yüzen)",
+            corten_config::LayoutMode::MasterStack => "Master-Stack (Dinamik İkili)",
+            corten_config::LayoutMode::Dwindle => "Dwindle (Altın Oran Sarmal)",
+            corten_config::LayoutMode::Bsp => "BSP (İkili Ağaç Bölümleme)",
+            corten_config::LayoutMode::Monocle => "Monocle (Tek Odaklı Tam Ekran)",
+        };
+
+        let gap_px = self.compositor.gap;
+        let mini_win = |title: &'static str, is_active: bool, width_pct: f32, height_pct: f32| -> Element<'_, Message> {
+            let border_color = if is_active {
+                palette.primary.to_iced()
+            } else {
+                palette.border.to_iced()
+            };
+            let bg_color = if is_active {
+                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15)
+            } else {
+                iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.40)
+            };
+
+            let titlebar = row![
+                text(title)
+                    .size(9.0)
+                    .color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
+                horizontal_space(),
+                row![
+                    container(horizontal_space()).width(Length::Fixed(4.0)).height(Length::Fixed(4.0)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(0.9, 0.3, 0.3, 0.8))),
+                        border: Border { radius: border::Radius::from(2.0), ..Default::default() },
+                        ..Default::default()
+                    }),
+                    container(horizontal_space()).width(Length::Fixed(4.0)).height(Length::Fixed(4.0)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(0.9, 0.7, 0.2, 0.8))),
+                        border: Border { radius: border::Radius::from(2.0), ..Default::default() },
+                        ..Default::default()
+                    }),
+                ].spacing(2.0)
+            ]
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
+
+            container(
+                column![
+                    titlebar,
+                    vertical_space(),
+                    text(if is_active { "● Odaklı" } else { "○ Arka Plan" })
+                        .size(8.0)
+                        .color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
+                ]
+                .padding(4.0)
+                .width(Length::Fill)
+                .height(Length::Fill)
+            )
+            .width(Length::FillPortion((width_pct * 100.0) as u16))
+            .height(Length::FillPortion((height_pct * 100.0) as u16))
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(bg_color)),
+                border: Border {
+                    color: border_color,
+                    width: if is_active { 1.5 } else { 1.0 },
+                    radius: border::Radius::from(Radius::SM),
+                },
+                ..Default::default()
+            })
+            .into()
+        };
+
+        let layout_wireframe: Element<'_, Message> = match self.compositor.layout_mode {
+            corten_config::LayoutMode::MasterStack => {
+                row![
+                    mini_win("Master: IDE", true, 0.60, 1.0),
+                    column![
+                        mini_win("Stack 1: Terminal", false, 1.0, 0.50),
+                        mini_win("Stack 2: Tarayıcı", false, 1.0, 0.50),
+                    ]
+                    .spacing(gap_px.max(4) as f32)
+                    .width(Length::FillPortion(40))
+                    .height(Length::Fill)
+                ]
+                .spacing(gap_px.max(4) as f32)
+                .width(Length::Fill)
+                .height(Length::Fixed(120.0))
+                .into()
+            }
+            corten_config::LayoutMode::Floating => {
+                row![
+                    mini_win("Pencere A", false, 0.35, 0.8),
+                    mini_win("Pencere B (Ön Plan)", true, 0.40, 1.0),
+                    mini_win("Pencere C", false, 0.35, 0.7),
+                ]
+                .spacing(12.0)
+                .width(Length::Fill)
+                .height(Length::Fixed(120.0))
+                .into()
+            }
+            corten_config::LayoutMode::Dwindle | corten_config::LayoutMode::Bsp => {
+                row![
+                    mini_win("Kök Sol (Master)", true, 0.50, 1.0),
+                    column![
+                        mini_win("Bölüm Üst", false, 1.0, 0.55),
+                        row![
+                            mini_win("Bölüm Sol", false, 0.50, 1.0),
+                            mini_win("Bölüm Sağ", false, 0.50, 1.0),
+                        ]
+                        .spacing(gap_px.max(4) as f32)
+                        .height(Length::FillPortion(45))
+                    ]
+                    .spacing(gap_px.max(4) as f32)
+                    .width(Length::FillPortion(50))
+                    .height(Length::Fill)
+                ]
+                .spacing(gap_px.max(4) as f32)
+                .width(Length::Fill)
+                .height(Length::Fixed(120.0))
+                .into()
+            }
+            corten_config::LayoutMode::Monocle => {
+                column![
+                    mini_win("Monocle Modu (Tam Odak: 1/4 Pencere)", true, 1.0, 1.0),
+                ]
+                .width(Length::Fill)
+                .height(Length::Fixed(120.0))
+                .into()
+            }
+        };
+
+        let hero = Self::hero_stage(
+            column![
+                row![
+                    row![
+                        text(Icon::APP_WINDOW).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
+                        text("CANLI DÖŞEME ÖNİZLEMESİ")
+                            .size(Typography::CAPTION)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .color(palette.primary.to_iced()),
+                    ].spacing(Spacing::XS).align_y(Alignment::Center),
+                    horizontal_space(),
+                    container(
+                        text(format!("Kenar Boşluğu: {}px", gap_px))
+                            .size(Typography::CAPTION)
+                            .color(palette.text_primary.to_iced())
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.7))),
+                        border: Border { color: palette.border.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                    container(
+                        text(current_layout_name)
+                            .size(Typography::CAPTION)
+                            .color(palette.primary.to_iced())
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                        border: Border { color: palette.primary.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                ]
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                vertical_space().height(Spacing::XS),
+                layout_wireframe,
+                vertical_space().height(Spacing::XS),
+                row![
+                    text("İpucu: Super+Tab ile çalışma anında döşeme algoritmaları arasında anlık geçiş yapabilirsiniz")
+                        .size(Typography::CAPTION)
+                        .color(palette.text_muted.to_iced()),
+                ]
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
 
         let layout_control = row![
             Self::segment_button(
-                "Floating (Serbest)",
+                "Floating",
                 self.compositor.layout_mode == corten_config::LayoutMode::Floating,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::Floating),
                 palette,
@@ -2816,19 +4093,19 @@ impl CortenSettingsApp {
                 palette,
             ),
             Self::segment_button(
-                "Dwindle (Spiral)",
+                "Dwindle",
                 self.compositor.layout_mode == corten_config::LayoutMode::Dwindle,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::Dwindle),
                 palette,
             ),
             Self::segment_button(
-                "BSP (Ağaç)",
+                "BSP",
                 self.compositor.layout_mode == corten_config::LayoutMode::Bsp,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::Bsp),
                 palette,
             ),
             Self::segment_button(
-                "Monocle (Tekli)",
+                "Monocle",
                 self.compositor.layout_mode == corten_config::LayoutMode::Monocle,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::Monocle),
                 palette,
@@ -2836,28 +4113,70 @@ impl CortenSettingsApp {
         ]
         .spacing(Spacing::XS);
 
-        column![
-            heading,
-            vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Varsayılan Döşeme Algoritması",
-                        "Yeni pencerelerin ekrana yerleştirilme düzeni (Super+Tab ile anlık değiştirilebilir)",
-                        layout_control,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Döşeme Aralıkları (Kenar Boşlukları)",
-                        "Döşeli pencereler arasındaki iç ve dış piksel aralığı",
-                        gap_control,
-                        palette,
-                    ),
-                ],
+        let gap_control = row![
+            Self::segment_button(
+                "0px (Bitişik)",
+                self.compositor.gap == 0,
+                Message::SetCompositorGap(0),
+                palette,
+            ),
+            Self::segment_button(
+                "12px (Standart Corten)",
+                self.compositor.gap == 12,
+                Message::SetCompositorGap(12),
+                palette,
+            ),
+            Self::segment_button(
+                "20px (Havadar)",
+                self.compositor.gap == 20,
+                Message::SetCompositorGap(20),
                 palette,
             ),
         ]
-        .spacing(Spacing::MD)
+        .spacing(Spacing::XS);
+
+        let bento_layout = Self::bento_card(
+            Icon::APP_WINDOW,
+            "Varsayılan Döşeme Düzeni",
+            Some("Yerleşim Algoritması"),
+            column![
+                Self::setting_item(
+                    "Algoritma Seçimi",
+                    "Açılan yeni pencerelerin ekrana otomatik dağıtım düzeni",
+                    layout_control,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_gap = Self::bento_card(
+            Icon::GAUGE,
+            "Pencere Boşlukları (Gaps)",
+            Some("Kenar & Ayrım"),
+            column![
+                Self::setting_item(
+                    "İç ve Dış Kenar Boşluğu",
+                    "Pencereler ve ekran sınırları arasındaki mesafe",
+                    gap_control,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        column![
+            heading,
+            vertical_space().height(Spacing::SM),
+            hero,
+            vertical_space().height(Spacing::SM),
+            bento_layout,
+            vertical_space().height(Spacing::SM),
+            bento_gap,
+        ]
+        .spacing(Spacing::SM)
         .into()
     }
 
@@ -3112,58 +4431,125 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let hero = Self::hero_stage(
+            column![
+                row![
+                    row![
+                        text(Icon::EYE).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
+                        text("KAPSAYICI TASARIM & WCAG 2.1 AAA")
+                            .size(Typography::CAPTION)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .color(palette.primary.to_iced()),
+                    ].spacing(Spacing::XS).align_y(Alignment::Center),
+                    horizontal_space(),
+                    container(
+                        text(if self.accessibility.high_contrast { "Yüksek Karşıtlık: Açık (>18:1)" } else { "Standart Karşıtlık" })
+                            .size(Typography::CAPTION)
+                            .color(if self.accessibility.high_contrast { palette.success.to_iced() } else { palette.text_muted.to_iced() })
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.7))),
+                        border: Border { color: palette.border.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                    container(
+                        text(format!("Metin Ölçeği: {:.2}x", self.accessibility.font_scale))
+                            .size(Typography::CAPTION)
+                            .color(palette.primary.to_iced())
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                        border: Border { color: palette.primary.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                ]
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                vertical_space().height(Spacing::XS),
+                row![
+                    text("Corten, görme veya hareket kısıtı bulunan kullanıcılar için donanım seviyesinde renk dönüşümü, dinamik metin ölçekleme ve AT-SPI2 ekran okuyucu entegrasyonu sunar.")
+                        .size(Typography::BODY_SM)
+                        .color(palette.text_muted.to_iced()),
+                ],
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_visual = Self::bento_card(
+            Icon::EYE,
+            "Görsel Erişilebilirlik",
+            Some("WCAG & Tipografi"),
+            column![
+                Self::setting_item(
+                    "Yüksek Karşıtlık Modu (WCAG AAA)",
+                    "Arayüz öğelerinde saf siyah/beyaz ve yüksek kontrastlı renkler (>18:1) uygular",
+                    hc_toggle,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Renk Körlüğü ve Görüş Filtresi",
+                    "Renk algısı bozuklukları için Bretell/Machado renk matrisi dönüşümü uygular",
+                    color_filters,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Genel Metin Ölçekleme",
+                    "Tüm sistem yazı tipleri için metin ölçek katsayısını ayarlar",
+                    font_scales,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Büyük İmleç (48px)",
+                    "İmleç boyutunu varsayılan 24px'ten yüksek görünürlüklü 48px'e çıkarır",
+                    cursor_toggle,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Yüksek Görünürlüklü Odak Çerçevesi (3px)",
+                    "Aktif odaklı pencere etrafında belirgin 3px kalın neon çerçeve çizer",
+                    focus_ring_toggle,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_assistive = Self::bento_card(
+            Icon::VOLUME,
+            "İşitsel & Yardımcı Teknolojiler",
+            Some("AT-SPI2 & Orca"),
+            column![
+                Self::setting_item(
+                    "Erişilebilirlik Sesli Geri Bildirimi",
+                    "Masaüstü değişimi, pencere odağı ve ekran görüntüsü alımında sesli geri bildirim çalar",
+                    sound_feedback_toggle,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Ekran Okuyucu (AT-SPI2 / Orca)",
+                    "Görme engelliler için AT-SPI2 D-Bus erişilebilirlik altyapısını ve Orca desteğini etkinleştirir",
+                    screen_reader_toggle,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Yüksek Karşıtlık Modu (WCAG AAA)",
-                        "Arayüz öğelerinde saf siyah/beyaz ve yüksek kontrastlı renkler (>18:1) uygular",
-                        hc_toggle,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Renk Körlüğü ve Görüş Filtresi",
-                        "Renk algısı bozuklukları için Bretell/Machado renk matrisi dönüşümü uygular",
-                        color_filters,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Genel Metin Ölçekleme",
-                        "Tüm sistem yazı tipleri için metin ölçek katsayısını ayarlar",
-                        font_scales,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Büyük İmleç (48px)",
-                        "İmleç boyutunu varsayılan 24px'ten yüksek görünürlüklü 48px'e çıkarır",
-                        cursor_toggle,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Yüksek Görünürlüklü Odak Çerçevesi (3px)",
-                        "Aktif odaklı pencere etrafında belirgin 3px kalın neon çerçeve çizer",
-                        focus_ring_toggle,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Erişilebilirlik Sesli Geri Bildirimi",
-                        "Masaüstü değişimi, pencere odağı ve ekran görüntüsü alımında sesli geri bildirim çalar",
-                        sound_feedback_toggle,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Ekran Okuyucu (AT-SPI2 / Orca)",
-                        "Görme engelliler için AT-SPI2 D-Bus erişilebilirlik altyapısını ve Orca desteğini etkinleştirir",
-                        screen_reader_toggle,
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero,
+            vertical_space().height(Spacing::SM),
+            bento_visual,
+            vertical_space().height(Spacing::SM),
+            bento_assistive,
         ]
-        .spacing(Spacing::MD)
+        .spacing(Spacing::SM)
         .into()
     }
 
@@ -3171,6 +4557,10 @@ impl CortenSettingsApp {
         let heading = column![
             text("Corten Hakkında")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
             text("Modern, bütünleşik ve bellek güvenli Wayland masaüstü ortamı")
                 .size(Typography::CAPTION)
@@ -3178,50 +4568,106 @@ impl CortenSettingsApp {
         ]
         .spacing(Spacing::XXS);
 
-        let banner = container(
-            column![
-                row![
-                    text(Icon::SHIELD)
-                        .font(LUCIDE_FONT)
-                        .size(32)
-                        .color(palette.primary.to_iced()),
-                    column![
-                        text("Corten OS Paketi")
-                            .size(Typography::TITLE_SM)
+        let hero = Self::hero_stage(
+            row![
+                text(Icon::SHIELD)
+                    .font(LUCIDE_FONT)
+                    .size(44.0)
+                    .color(palette.primary.to_iced()),
+                column![
+                    row![
+                        text("Corten OS Suite")
+                            .size(Typography::TITLE)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
                             .color(palette.text_primary.to_iced()),
-                        text("v0.1.0 (Geliştirme Sürümü)")
-                            .size(Typography::CAPTION)
-                            .color(palette.success.to_iced()),
+                        container(
+                            text("v0.1.0 (Geliştirme Sürümü)")
+                                .size(Typography::CAPTION)
+                                .color(palette.success.to_iced())
+                        )
+                        .padding([2, 8])
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(0.2, 0.8, 0.4, 0.15))),
+                            border: Border { color: palette.success.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                            ..Default::default()
+                        }),
                     ]
-                    .spacing(2),
+                    .spacing(Spacing::SM)
+                    .align_y(Alignment::Center),
+                    text("Katı Unix felsefesi ilkelerini izleyen saf Rust mimarisi üzerine inşa edilmiş, döşemeli ve akrilik kompozitör.")
+                        .size(Typography::BODY)
+                        .color(palette.text_muted.to_iced()),
                 ]
-                .spacing(Spacing::MD)
-                .align_y(Alignment::Center),
-                text(
-                    "Corten, katı Unix felsefesi ilkelerini izleyen saf Rust ile sıfırdan geliştirildi. \
-                     Her bileşen güvenilir bir bağımsız araç olarak çalışırken kesintisiz ve \
-                     yüksek performanslı bütünleşik bir kullanıcı deneyimi sunar.",
-                )
-                .size(Typography::BODY)
-                .color(palette.text_muted.to_iced()),
+                .spacing(Spacing::XS)
+                .width(Length::Fill),
             ]
-            .spacing(Spacing::MD),
-        )
-        .padding(Spacing::LG)
-        .width(Length::Fill)
-        .style(move |_| container::Style {
-            background: Some(palette.surface.to_iced().into()),
-            border: Border {
-                color: palette.border.to_iced(),
-                width: 1.0,
-                radius: border::Radius::from(Radius::MD),
-            },
-            ..Default::default()
-        });
-
-        column![heading, vertical_space().height(Spacing::SM), banner]
             .spacing(Spacing::MD)
-            .into()
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
+            palette,
+        );
+
+        let bento_stack = Self::bento_card(
+            Icon::CPU,
+            "Sistem & Protokol Mimarisi",
+            Some("Smithay 0.3"),
+            column![
+                Self::setting_item(
+                    "Grafik Kompozitörü",
+                    "Smithay tabanlı saf Rust Wayland sunucusu (Hardware Direct Scanout, DRM/KMS, EGL/Vulkan)",
+                    text("corten-compositor").size(Typography::BODY_SM).color(palette.text_primary.to_iced()),
+                    palette,
+                ),
+                Self::setting_item(
+                    "Wayland Protokolleri",
+                    "wl_compositor v6, xdg-shell v5, wlr-layer-shell v4, ext-session-lock v1",
+                    text("Tam Uyumlu").size(Typography::BODY_SM).color(palette.success.to_iced()),
+                    palette,
+                ),
+                Self::setting_item(
+                    "Kullanıcı Arayüz Motoru",
+                    "Donanım ivmelendirmeli wgpu / iced GUI araç seti",
+                    text("Iced v0.13").size(Typography::BODY_SM).color(palette.text_primary.to_iced()),
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_design = Self::bento_card(
+            Icon::SMILE,
+            "Tasarım Kimliği & Felsefe",
+            Some("Corten Identity"),
+            column![
+                Self::setting_item(
+                    "Endüstriyel Ham Çelik & Metalik Patina",
+                    "Koyu antrasit zeminler üzerinde dövme bakır, korozyon yeşili ve titanyum vurgular",
+                    text("Aktif").size(Typography::BODY_SM).color(palette.primary.to_iced()),
+                    palette,
+                ),
+                Self::setting_item(
+                    "Bellek Güvenliği & Sıfır Bellek Sızıntısı",
+                    "Arayüz ve kompozitör kod tabanında sıfır güvensiz kod (zero unsafe in UI logic)",
+                    text("Doğrulandı").size(Typography::BODY_SM).color(palette.success.to_iced()),
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        column![
+            heading,
+            vertical_space().height(Spacing::SM),
+            hero,
+            vertical_space().height(Spacing::SM),
+            bento_stack,
+            vertical_space().height(Spacing::SM),
+            bento_design,
+        ]
+        .spacing(Spacing::SM)
+        .into()
     }
 
     fn view_footer(&self, palette: Palette) -> Element<'_, Message> {
@@ -3274,6 +4720,10 @@ impl CortenSettingsApp {
         let heading = column![
             text("Yapay Zeka (Corten AI)")
                 .size(Typography::TITLE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..Default::default()
+                })
                 .color(palette.text_primary.to_iced()),
             text("Yerel yapay zeka ajanını, model profillerini ve GPU/RAM kaynak kullanımını yapılandırın")
                 .size(Typography::CAPTION)
@@ -3315,40 +4765,107 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let hero = Self::hero_stage(
+            column![
+                row![
+                    row![
+                        text(Icon::CPU).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
+                        text("AURA-CORE YEREL NÖRAL MOTOR")
+                            .size(Typography::CAPTION)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .color(palette.primary.to_iced()),
+                    ].spacing(Spacing::XS).align_y(Alignment::Center),
+                    horizontal_space(),
+                    container(
+                        text(if self.ai.enabled { "● Sistem Ajanı Devrede" } else { "○ Devre Dışı" })
+                            .size(Typography::CAPTION)
+                            .color(if self.ai.enabled { palette.success.to_iced() } else { palette.text_muted.to_iced() })
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.7))),
+                        border: Border { color: palette.border.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                    container(
+                        text(format!("Model Kademesi: {}", self.ai.model_tier.to_uppercase()))
+                            .size(Typography::CAPTION)
+                            .color(palette.primary.to_iced())
+                    )
+                    .padding([2, 8])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                        border: Border { color: palette.primary.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        ..Default::default()
+                    }),
+                ]
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                vertical_space().height(Spacing::XS),
+                row![
+                    text("Doğal dil masaüstü kontrolü (HUD: Super+Alt+Space) için yerel donanım üzerinde çalışan gizlilik odaklı LLM mimarisi.")
+                        .size(Typography::BODY_SM)
+                        .color(palette.text_muted.to_iced()),
+                ],
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_agent = Self::bento_card(
+            Icon::CPU,
+            "Sistem Asistanı & Optimizasyon",
+            Some("Wayland HUD"),
+            column![
+                Self::setting_item(
+                    "Corten AI Sistem Asistanı",
+                    "Wayland HUD (Super+Alt+Space) ve Başlatıcı doğal dil sistem komutlarını etkinleştir",
+                    ai_enabled_cb,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Oyun Modu GPU Koruması",
+                    "Tam ekran bir oyun veya 3D render açıldığında model VRAM'i boşaltılarak maksimum FPS sağlanır",
+                    game_gpu_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
+        let bento_model = Self::bento_card(
+            Icon::GAUGE,
+            "Model Profili & Donanım Tüketimi",
+            Some("Yerel GGUF / AURA"),
+            column![
+                Self::setting_item(
+                    "Yerel Model Profili & Kaynak Tüketimi",
+                    "Sistem donanımına göre optimize edilmiş yerel model kademesi (AURA-CORE / GGUF)",
+                    model_control,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Yerel Motor Adresi",
+                    "AURA-CORE veya Ollama API soket bağlantı noktası: http://127.0.0.1:8000",
+                    text("127.0.0.1:8000 (Aktif)").size(Typography::BODY_SM).color(palette.success.to_iced()),
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
-            Self::settings_group(
-                vec![
-                    Self::setting_item(
-                        "Corten AI Sistem Asistanı",
-                        "Wayland HUD (Super+Alt+Space) ve Başlatıcı doğal dil sistem komutlarını etkinleştir",
-                        ai_enabled_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Yerel Model Profili & Kaynak Tüketimi",
-                        "Sistem donanımına göre optimize edilmiş yerel model kademesi (AURA-CORE / GGUF)",
-                        model_control,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Oyun Modu GPU Koruması",
-                        "Tam ekran bir oyun veya 3D render açıldığında model VRAM'i boşaltılarak maksimum FPS sağlanır",
-                        game_gpu_cb,
-                        palette,
-                    ),
-                    Self::setting_item(
-                        "Yerel Motor Adresi",
-                        "AURA-CORE veya Ollama API soket bağlantı noktası: http://127.0.0.1:8000",
-                        text("127.0.0.1:8000 (Aktif)").size(Typography::BODY_SM).color(palette.success.to_iced()),
-                        palette,
-                    ),
-                ],
-                palette,
-            ),
+            hero,
+            vertical_space().height(Spacing::SM),
+            bento_agent,
+            vertical_space().height(Spacing::SM),
+            bento_model,
         ]
-        .spacing(Spacing::MD)
+        .spacing(Spacing::SM)
         .into()
     }
 }

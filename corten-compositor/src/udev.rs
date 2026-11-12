@@ -358,6 +358,9 @@ fn build_secondary_scene(
 
     let active_window = state.layout_for_output(output).active_window().cloned();
     for (window, rect) in layouts.into_iter().rev() {
+        if !crate::layout::is_window_mapped(&window) {
+            continue;
+        }
         let is_active = active_window.as_ref() == Some(&window);
         let physical_rect = Rectangle::new(
             rect.loc.to_physical_precise_round(fractional_scale),
@@ -556,6 +559,9 @@ fn find_surface_under_loc(
         .layout_for_output_mut(&target_output)
         .arrange_animated(usable_area);
     for (window, rect) in arranged.into_iter().rev() {
+        if !crate::layout::is_window_mapped(&window) {
+            continue;
+        }
         if rect.to_f64().contains(out_rel_loc) {
             let is_fs = state.layout_for_output(&target_output).is_fullscreen(&window);
             let titlebar_h = if is_fs { 0.0 } else { 36.0 };
@@ -1694,6 +1700,22 @@ pub fn run_drm(
                                         let _ = std::process::Command::new(launcher_path).arg("--dashboard").spawn();
                                         return FilterResult::Intercept(());
                                     }
+                                    // Super + F1 / Super + slash: Cheat Sheet
+                                    keysyms::KEY_F1 | keysyms::KEY_slash | keysyms::KEY_question
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        info!("Compositor Hotkey: Super+F1 / Super+? (Shortcuts Cheat Sheet)");
+                                        let check = std::process::Command::new("killall")
+                                            .args(["-q", "corten-launcher"])
+                                            .status();
+                                        if let Ok(status) = check {
+                                            if status.success() {
+                                                return FilterResult::Intercept(());
+                                            }
+                                        }
+                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
+                                        let _ = std::process::Command::new(launcher_path).arg("--cheat-sheet").spawn();
+                                        return FilterResult::Intercept(());
+                                    }
                                     // Super + I: Settings
                                     keysyms::KEY_i | keysyms::KEY_I | keysyms::KEY_comma
                                         if binding("settings") => {
@@ -2110,8 +2132,9 @@ pub fn run_drm(
                                 let delta_w = (loc.x - resize_start_cursor.x).round() as i32;
                                 let delta_h = (loc.y - resize_start_cursor.y).round() as i32;
                                 let mut new_rect = initial_rect;
-                                new_rect.size.w = (initial_rect.size.w + delta_w).max(200);
-                                new_rect.size.h = (initial_rect.size.h + delta_h).max(140);
+                                let (min_w, min_h) = crate::layout::window_min_size(window);
+                                new_rect.size.w = (initial_rect.size.w + delta_w).max(min_w);
+                                new_rect.size.h = (initial_rect.size.h + delta_h).max(min_h + 36);
                                 let target_output = state.output_at(loc);
                                 let usable_area = {
                                     let mut map = layer_map_for_output(&target_output);
@@ -2385,6 +2408,7 @@ pub fn run_drm(
                                     let clicked = window_rects
                                         .into_iter()
                                         .rev()
+                                        .filter(|(w, _)| crate::layout::is_window_mapped(w))
                                         .find(|(_, rect)| rect.to_f64().contains(out_rel_loc));
 
                                     if let Some((window, rect)) = clicked {
@@ -2527,6 +2551,10 @@ pub fn run_drm(
                                     } else if !logo_held && b.button() == 273 {
                                         // Right click on empty desktop canvas: trigger Desktop Context Menu at cursor
                                         info!("Desktop Canvas Right-Click: Spawning Corten Desktop Context Menu at cursor");
+                                        let _ = std::process::Command::new("killall")
+                                            .arg("-9")
+                                            .arg("corten-launcher")
+                                            .status();
                                         let cur_x = state.cursor_location.x.round() as i32;
                                         let cur_y = state.cursor_location.y.round() as i32;
                                         let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
@@ -3268,6 +3296,9 @@ pub fn run_drm(
         let has_fullscreen = active_fullscreen.is_some();
 
         for (window, rect) in layouts.iter().rev() {
+            if !crate::layout::is_window_mapped(window) {
+                continue;
+            }
             let is_fs = state.layout.is_fullscreen(window);
             if has_fullscreen && !is_fs {
                 // Completely occluded by the fullscreen window: skip to preserve direct scanout

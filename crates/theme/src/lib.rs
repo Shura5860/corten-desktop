@@ -17,5 +17,5 @@ pub use bar::BarTokens;
 pub use color::{Color, ColorFilterMode, Palette, PatinaVariant, ThemeMode};
 pub use icons::{Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES};
 pub use radius::Radius;
-pub use spacing::Spacing;
+pub use spacing::{Density, Spacing};
 pub use typography::Typography;

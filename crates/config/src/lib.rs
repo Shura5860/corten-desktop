@@ -199,6 +199,10 @@ fn default_patina() -> String {
     "rust".to_string()
 }
 
+fn default_density() -> String {
+    "comfortable".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppearanceConfig {
     pub theme_mode: ThemeModeChoice,
@@ -211,6 +215,8 @@ pub struct AppearanceConfig {
     pub language: String,
     #[serde(default = "default_patina")]
     pub patina: String,
+    #[serde(default = "default_density")]
+    pub density: String,
 }
 
 impl Default for AppearanceConfig {
@@ -224,6 +230,7 @@ impl Default for AppearanceConfig {
             blur_radius: 24,
             language: default_language(),
             patina: default_patina(),
+            density: default_density(),
         }
     }
 }

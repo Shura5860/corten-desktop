@@ -201,16 +201,31 @@ impl CompositorHandler for CortenCompositor {
                 .find(|l| l.wl_surface() == surface)
                 .cloned()
             {
+                let requested_size = ls.cached_state().size;
                 let mut arranged_any = false;
                 for output in &self.additional_outputs {
                     let mut map = layer_map_for_output(output);
                     if map.layers().any(|l| l.wl_surface() == surface) {
+                        let current_size = map.layer_geometry(&ls).map(|g| g.size);
+                        if requested_size.w > 0 && requested_size.h > 0 && current_size != Some(requested_size) {
+                            ls.layer_surface().with_pending_state(|state| {
+                                state.size = Some(requested_size);
+                            });
+                            let _ = ls.layer_surface().send_configure();
+                        }
                         map.arrange();
                         arranged_any = true;
                     }
                 }
                 let mut primary_map = layer_map_for_output(&self.output);
                 if primary_map.layers().any(|l| l.wl_surface() == surface) {
+                    let current_size = primary_map.layer_geometry(&ls).map(|g| g.size);
+                    if requested_size.w > 0 && requested_size.h > 0 && current_size != Some(requested_size) {
+                        ls.layer_surface().with_pending_state(|state| {
+                            state.size = Some(requested_size);
+                        });
+                        let _ = ls.layer_surface().send_configure();
+                    }
                     primary_map.arrange();
                 } else if !arranged_any {
                     let _ = primary_map.map_layer(&ls);
@@ -285,8 +300,9 @@ impl XdgShellHandler for CortenCompositor {
             let rect = geo.unwrap_or_else(|| {
                 let existing = self.layout.floating_windows();
                 let count = existing.len();
-                let w = 960.min(usable_area.size.w - 48).max(300);
-                let h = 640.min(usable_area.size.h - 48).max(200);
+                let (min_w, min_h) = crate::layout::window_min_size(&window);
+                let w = 960.min(usable_area.size.w - 48).max(min_w);
+                let h = 640.min(usable_area.size.h - 48).max(min_h + 36);
                 let max_cascade_x = (usable_area.size.w.saturating_sub(w) - 64).max(0);
                 let max_cascade_y = (usable_area.size.h.saturating_sub(h) - 64).max(0);
                 let cascade_x = if max_cascade_x > 0 { (count.saturating_sub(1) as i32 * 52) % max_cascade_x } else { 0 };
@@ -578,10 +594,10 @@ impl WlrLayerShellHandler for CortenCompositor {
                     configure_size.h = req.h;
                 }
             }
-            if configure_size.w == 0 || cached.anchor.anchored_horizontally() {
+            if configure_size.w == 0 || (cached.anchor.anchored_horizontally() && state.size.map(|s| s.w == 0).unwrap_or(true)) {
                 configure_size.w = output_size.w;
             }
-            if configure_size.h == 0 || cached.anchor.anchored_vertically() {
+            if configure_size.h == 0 || (cached.anchor.anchored_vertically() && state.size.map(|s| s.h == 0).unwrap_or(true)) {
                 configure_size.h = output_size.h;
             }
 

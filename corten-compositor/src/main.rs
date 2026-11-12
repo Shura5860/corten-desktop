@@ -1542,6 +1542,24 @@ fn main() -> anyhow::Result<()> {
                                             .spawn();
                                         return FilterResult::Intercept(());
                                     }
+                                    // Super + F1 or Super + slash / question: Launch Shortcuts Cheat Sheet
+                                    keysyms::KEY_F1 | keysyms::KEY_slash | keysyms::KEY_question
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        info!("Compositor Hotkey: Super+F1 / Super+? triggered (Launch Shortcuts Cheat Sheet)");
+                                        let check = std::process::Command::new("killall")
+                                            .args(["-q", "corten-launcher"])
+                                            .status();
+                                        if let Ok(status) = check {
+                                            if status.success() {
+                                                return FilterResult::Intercept(());
+                                            }
+                                        }
+                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
+                                        let _ = std::process::Command::new(launcher_path)
+                                            .arg("--cheat-sheet")
+                                            .spawn();
+                                        return FilterResult::Intercept(());
+                                    }
                                     // Super + I or Super + comma: Open Settings
                                     keysyms::KEY_i | keysyms::KEY_I | keysyms::KEY_comma
                                         if binding_matches(
@@ -1944,6 +1962,9 @@ fn main() -> anyhow::Result<()> {
                         };
                         let layouts = state.layout.arrange_animated(usable_area);
                         for (window, rect) in layouts.into_iter().rev() {
+                            if !layout::is_window_mapped(&window) {
+                                continue;
+                            }
                             if rect.to_f64().contains(loc) {
                                 let is_fs = state.layout.is_fullscreen(&window);
                                 let titlebar_h = if is_fs { 0.0 } else { 36.0 };
@@ -2102,8 +2123,9 @@ fn main() -> anyhow::Result<()> {
                         let delta_w = (loc.x - resize_start_cursor.x).round() as i32;
                         let delta_h = (loc.y - resize_start_cursor.y).round() as i32;
                         let mut new_rect = initial_rect;
-                        new_rect.size.w = (initial_rect.size.w + delta_w).max(160);
-                        new_rect.size.h = (initial_rect.size.h + delta_h).max(120);
+                        let (min_w, min_h) = layout::window_min_size(window);
+                        new_rect.size.w = (initial_rect.size.w + delta_w).max(min_w);
+                        new_rect.size.h = (initial_rect.size.h + delta_h).max(min_h + 36);
                         let usable_area = {
                             let mut map = layer_map_for_output(&state.output);
                             map.arrange();
@@ -2376,6 +2398,10 @@ fn main() -> anyhow::Result<()> {
                                 state.selection_box = Some((state.cursor_location, state.cursor_location));
                             } else if (button_code == 2 || button_code == 3 || button_code == 273) && !logo_held {
                                 info!("Right-clicked on empty desktop: Spawning Corten Desktop Context Menu at cursor");
+                                let _ = std::process::Command::new("killall")
+                                    .arg("-9")
+                                    .arg("corten-launcher")
+                                    .status();
                                 let cur_x = state.cursor_location.x.round() as i32;
                                 let cur_y = state.cursor_location.y.round() as i32;
                                 let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
@@ -2598,6 +2624,9 @@ fn main() -> anyhow::Result<()> {
                 let gesture_offset_x = (state.gesture_swipe_dx * 1.4).round() as i32;
                 let active_window = state.layout.active_window().cloned();
                 for (window, rect) in layouts.iter().rev() {
+                    if !layout::is_window_mapped(window) {
+                        continue;
+                    }
                     let mut shifted_rect = *rect;
                     shifted_rect.loc.x += gesture_offset_x;
                     let is_active = active_window.as_ref() == Some(window);
@@ -3375,10 +3404,10 @@ pub(crate) fn draw_window_titlebar(
             palette.primary.r,
             palette.primary.g,
             palette.primary.b,
-            0.95,
+            1.0,
         )
     } else {
-        Color32F::new(palette.border.r, palette.border.g, palette.border.b, 0.45)
+        Color32F::new(palette.border.r, palette.border.g, palette.border.b, 0.25)
     };
     draw_glow_ring(&mut tb_elements, rect, 0, if is_active { 2 } else { 1 }, accent, 4);
 

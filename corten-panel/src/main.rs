@@ -19,7 +19,10 @@ use corten_theme::{
     Icon, Palette, PatinaVariant, Radius, ThemeMode, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS,
     NOTO_SANS_BYTES,
 };
-use iced::widget::{button, column, container, horizontal_space, image, mouse_area, row, scrollable, slider, text, text_input, tooltip};
+use iced::widget::{
+    button, column, container, horizontal_space, image, mouse_area, row, scrollable, slider, text,
+    text_input, tooltip, vertical_space,
+};
 
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct CustomAppletState {
@@ -97,6 +100,20 @@ fn find_binary(bin_name: &str) -> std::path::PathBuf {
         }
     }
     std::path::PathBuf::from(bin_name)
+}
+
+fn get_corten_launcher_cmdline() -> Option<String> {
+    let pids = std::process::Command::new("pidof")
+        .arg("corten-launcher")
+        .output()
+        .ok()?;
+    if !pids.status.success() {
+        return None;
+    }
+    let pid_str = String::from_utf8_lossy(&pids.stdout);
+    let first_pid = pid_str.split_whitespace().next()?;
+    let cmdline_path = format!("/proc/{}/cmdline", first_pid);
+    std::fs::read_to_string(cmdline_path).ok()
 }
 
 fn launch_tray_application(id: &str) -> std::io::Result<()> {
@@ -397,6 +414,7 @@ pub enum Message {
     IpcCommand(PanelIpcCommand),
     IcedEvent(Event),
     LayerAction(LayershellCustomActions),
+    NoOp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -500,6 +518,7 @@ pub struct CortenPanelApp {
     show_desktop_context_hub: bool,
     audio_vu_level: (f32, f32),
     last_dock_width: u32,
+    hovered_dock_item: Option<String>,
 }
 
 fn check_system_integrity(sentinel_mtimes: &mut std::collections::HashMap<std::path::PathBuf, u64>) -> Option<String> {
@@ -913,15 +932,6 @@ impl CortenPanelApp {
     }
 
     fn layer_config_task(&self) -> Task<Message> {
-        let anchor = match self.config.position {
-            PanelPosition::Top => Anchor::Top,
-            PanelPosition::Bottom => Anchor::Bottom,
-        };
-        let margin = match self.config.position {
-            PanelPosition::Top => (10, 0, 0, 0),
-            PanelPosition::Bottom => (0, 0, 10, 0),
-        };
-
         let dynamic_width = self.calculate_dock_width();
         let popover_open = self.show_control_center
             || self.show_power_menu
@@ -938,7 +948,7 @@ impl CortenPanelApp {
         let height = if !self.panel_visible {
             1
         } else if popover_open {
-            540
+            560
         } else if self.osd_state.is_some() {
             136
         } else {
@@ -951,17 +961,9 @@ impl CortenPanelApp {
             dynamic_width
         };
 
-        Task::batch(vec![
-            Task::done(Message::LayerAction(LayershellCustomActions::AnchorChange(
-                anchor,
-            ))),
-            Task::done(Message::LayerAction(LayershellCustomActions::MarginChange(
-                margin,
-            ))),
-            Task::done(Message::LayerAction(LayershellCustomActions::SizeChange((
-                target_width, height,
-            )))),
-        ])
+        Task::done(Message::LayerAction(LayershellCustomActions::SizeChange((
+            target_width, height,
+        ))))
     }
 }
 
@@ -1092,6 +1094,7 @@ impl Application for CortenPanelApp {
                 show_desktop_context_hub: false,
                 audio_vu_level: (0.0, 0.0),
                 last_dock_width: 600,
+                hovered_dock_item: None,
             };
         let init_dock_w = app.calculate_dock_width();
         app.last_dock_width = init_dock_w;
@@ -1196,6 +1199,7 @@ impl Application for CortenPanelApp {
                 | Message::ToggleAudioSlider
                 | Message::ToggleWifiDetails
                 | Message::ToggleDesktopContextHub
+                | Message::OpenDockContextMenu(_)
         ) {
             self.popover_transition.restart();
         }
@@ -1817,14 +1821,18 @@ impl Application for CortenPanelApp {
                 SystemInfo::focus_window(win_id);
             }
             Message::OpenDockContextMenu(target) => {
-                self.dock_context_menu = Some(target);
-                self.show_control_center = false;
-                self.show_power_menu = false;
-                self.show_calendar = false;
-                self.show_clipboard_modal = false;
-                self.show_notification_center = false;
-                self.show_downloads_stack = false;
-                self.show_mini_task_manager = false;
+                if self.dock_context_menu.as_ref() == Some(&target) {
+                    self.dock_context_menu = None;
+                } else {
+                    self.dock_context_menu = Some(target);
+                    self.show_control_center = false;
+                    self.show_power_menu = false;
+                    self.show_calendar = false;
+                    self.show_clipboard_modal = false;
+                    self.show_notification_center = false;
+                    self.show_downloads_stack = false;
+                    self.show_mini_task_manager = false;
+                }
                 return self.layer_config_task();
             }
             Message::CloseDockContextMenu => {
@@ -1879,9 +1887,8 @@ impl Application for CortenPanelApp {
                     return self.layer_config_task();
                 }
             }
-            Message::DockHover(_hover_app_opt) => {
-                // Keep hover smooth without resizing the layer surface to 540px;
-                // clicking a multi-window dock icon toggles window previews explicitly via ToggleWindowPreviews.
+            Message::DockHover(hover_app_opt) => {
+                self.hovered_dock_item = hover_app_opt;
             }
             Message::MediaPlayersUpdated(players) => {
                 self.media_players = players;
@@ -2012,22 +2019,9 @@ impl Application for CortenPanelApp {
                 }
             }
             Message::OpenLauncher | Message::ToggleLauncherModal => {
-                let running_cmdline = std::process::Command::new("pgrep")
-                    .args(["-fa", "corten-launcher"])
-                    .output()
-                    .ok()
-                    .and_then(|o| {
-                        if o.status.success() {
-                            Some(String::from_utf8_lossy(&o.stdout).to_string())
-                        } else {
-                            None
-                        }
-                    });
-
-                if let Some(cmdline) = running_cmdline {
+                if let Some(cmdline) = get_corten_launcher_cmdline() {
                     let _ = std::process::Command::new("killall")
-                        .arg("-TERM")
-                        .arg("corten-launcher")
+                        .args(["-TERM", "corten-launcher"])
                         .status();
                     if cmdline.contains("--dashboard") {
                         let bin = find_binary("corten-launcher");
@@ -2050,22 +2044,9 @@ impl Application for CortenPanelApp {
                 let _ = launch_fallback_chain(&cmd);
             }
             Message::OpenDashboard => {
-                let running_cmdline = std::process::Command::new("pgrep")
-                    .args(["-fa", "corten-launcher"])
-                    .output()
-                    .ok()
-                    .and_then(|o| {
-                        if o.status.success() {
-                            Some(String::from_utf8_lossy(&o.stdout).to_string())
-                        } else {
-                            None
-                        }
-                    });
-
-                if let Some(cmdline) = running_cmdline {
+                if let Some(cmdline) = get_corten_launcher_cmdline() {
                     let _ = std::process::Command::new("killall")
-                        .arg("-TERM")
-                        .arg("corten-launcher")
+                        .args(["-TERM", "corten-launcher"])
                         .status();
                     if !cmdline.contains("--dashboard") {
                         let bin = find_binary("corten-launcher");
@@ -2580,7 +2561,7 @@ impl Application for CortenPanelApp {
                 self.pending_power_action = None;
                 return self.layer_config_task();
             }
-            Message::IcedEvent(_) | Message::LayerAction(_) => {}
+            Message::IcedEvent(_) | Message::LayerAction(_) | Message::NoOp => {}
         }
         Task::none()
     }
@@ -2838,11 +2819,14 @@ impl Application for CortenPanelApp {
                 .any(|(_, aid, title, _, act, _)| is_matching_window(aid, title, app) && *act)
                 || (app == self.active_app && is_running);
 
+            let is_hovered = self.hovered_dock_item.as_deref() == Some(app_name.as_str());
+
             let real_icon = resolve_system_icon(app_name);
+            let icon_size = if is_hovered { 38.0 } else { 34.0 };
             let icon_view: Element<'_, Self::Message> = if let Some(ref icon_path) = real_icon {
                 iced::widget::image(image::Handle::from_path(icon_path))
-                    .width(Length::Fixed(34.0))
-                    .height(Length::Fixed(34.0))
+                    .width(Length::Fixed(icon_size))
+                    .height(Length::Fixed(icon_size))
                     .into()
             } else {
                 let icon_char = match app {
@@ -2855,39 +2839,29 @@ impl Application for CortenPanelApp {
                 };
                 text(icon_char)
                     .font(LUCIDE_FONT)
-                    .size(28.0)
+                    .size(if is_hovered { 32.0 } else { 28.0 })
                     .color(if is_active {
                         palette.primary.to_iced()
                     } else if is_running {
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.90)
+                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.95)
                     } else {
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.45)
+                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.50)
                     })
                     .into()
             };
 
             let icon_container = container(icon_view)
-                .width(Length::Fixed(54.0))
-                .height(Length::Fixed(50.0))
+                .width(Length::Fixed(50.0))
+                .height(Length::Fixed(44.0))
                 .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(if is_active {
-                        iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.20)
-                    } else {
-                        iced::Color::TRANSPARENT
-                    })),
-                    border: iced::Border {
-                        color: if is_active {
-                            palette.primary.to_iced()
-                        } else {
-                            iced::Color::TRANSPARENT
-                        },
-                        width: if is_active { 1.0 } else { 0.0 },
-                        radius: iced::border::Radius::from(12.0),
-                    },
-                    ..Default::default()
-                });
+                .center_y(Length::Fill);
+
+            let elevated_icon = iced::widget::column![
+                vertical_space().height(if is_hovered { 0.0 } else { 6.0 }),
+                icon_container,
+                vertical_space().height(if is_hovered { 6.0 } else { 0.0 }),
+            ]
+            .align_x(Alignment::Center);
 
             // Running indicator: Glowing bar if active, 2 dots if multiple windows, 1 dot if 1 window
             let indicator: Element<'_, Self::Message> = if is_active {
@@ -2972,29 +2946,28 @@ impl Application for CortenPanelApp {
             };
 
             let app_item = button(
-                iced::widget::column![icon_container, indicator]
-                    .spacing(3)
+                iced::widget::column![elevated_icon, indicator]
+                    .spacing(2)
                     .align_x(Alignment::Center),
             )
             .padding(0)
-            .style(|_, status| {
-                let bg = match status {
-                    button::Status::Hovered => Some(iced::Background::Color(
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
-                    )),
-                    button::Status::Pressed => Some(iced::Background::Color(
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.20),
-                    )),
-                    _ => Some(iced::Background::Color(iced::Color::TRANSPARENT)),
-                };
-                button::Style {
-                    background: bg,
+            .style(move |_, status| match status {
+                button::Status::Pressed => button::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10))),
                     border: iced::Border {
                         radius: iced::border::Radius::from(10.0),
                         ..Default::default()
                     },
                     ..Default::default()
-                }
+                },
+                _ => button::Style {
+                    background: Some(iced::Background::Color(iced::Color::TRANSPARENT)),
+                    border: iced::Border {
+                        width: 0.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
             })
             .on_press(pinned_on_press);
 
@@ -3027,6 +3000,9 @@ impl Application for CortenPanelApp {
             if !is_pinned && dynamic_seen.insert(effective_id.to_string()) {
                 let win_id_copy = *win_id;
                 let is_act = *is_active;
+                let dyn_hover_id = effective_id.to_string();
+                let is_hovered = self.hovered_dock_item.as_deref() == Some(dyn_hover_id.as_str());
+
                 let real_icon = resolve_system_icon(effective_id);
                 let app_win_count = self
                     .compositor_windows
@@ -3034,16 +3010,17 @@ impl Application for CortenPanelApp {
                     .filter(|(_, aid, _, _, _, _)| aid == effective_id)
                     .count();
 
+                let icon_size = if is_hovered { 38.0 } else { 34.0 };
                 let icon_view: Element<'_, Self::Message> = if let Some(ref icon_path) = real_icon {
                     iced::widget::image(image::Handle::from_path(icon_path))
-                        .width(Length::Fixed(34.0))
-                        .height(Length::Fixed(34.0))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
                         .into()
                 } else {
                     let icon_char = app_icon_char(effective_id);
                     text(icon_char)
                         .font(LUCIDE_FONT)
-                        .size(28.0)
+                        .size(if is_hovered { 32.0 } else { 28.0 })
                         .color(if is_act {
                             palette.primary.to_iced()
                         } else {
@@ -3053,32 +3030,17 @@ impl Application for CortenPanelApp {
                 };
 
                 let icon_container = container(icon_view)
-                .width(Length::Fixed(54.0))
-                .height(Length::Fixed(50.0))
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(if is_act {
-                        iced::Color::from_rgba(
-                            palette.primary.r,
-                            palette.primary.g,
-                            palette.primary.b,
-                            0.18,
-                        )
-                    } else {
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
-                    })),
-                    border: iced::Border {
-                        color: if is_act {
-                            palette.primary.to_iced()
-                        } else {
-                            iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10)
-                        },
-                        width: 1.0,
-                        radius: iced::border::Radius::from(12.0),
-                    },
-                    ..Default::default()
-                });
+                    .width(Length::Fixed(50.0))
+                    .height(Length::Fixed(44.0))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill);
+
+                let elevated_icon = iced::widget::column![
+                    vertical_space().height(if is_hovered { 0.0 } else { 6.0 }),
+                    icon_container,
+                    vertical_space().height(if is_hovered { 6.0 } else { 0.0 }),
+                ]
+                .align_x(Alignment::Center);
 
                 let indicator: Element<'_, Self::Message> = if is_act {
                     container(row![])
@@ -3143,21 +3105,20 @@ impl Application for CortenPanelApp {
                 };
 
                 let dyn_btn = button(
-                    iced::widget::column![icon_container, indicator]
-                        .spacing(3)
+                    iced::widget::column![elevated_icon, indicator]
+                        .spacing(2)
                         .align_x(Alignment::Center),
                 )
                 .padding(0)
                 .style(|_, status| {
                     let bg = match status {
-                        button::Status::Hovered => Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12))),
-                        button::Status::Pressed => Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.20))),
+                        button::Status::Pressed => Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10))),
                         _ => Some(iced::Background::Color(iced::Color::TRANSPARENT)),
                     };
                     button::Style {
                         background: bg,
                         border: iced::Border {
-                            radius: iced::border::Radius::from(10.0),
+                            width: 0.0,
                             ..Default::default()
                         },
                         ..Default::default()
@@ -3165,7 +3126,6 @@ impl Application for CortenPanelApp {
                 })
                 .on_press(dyn_on_press);
 
-                let dyn_hover_id = effective_id.to_string();
                 let dyn_area = mouse_area(dyn_btn)
                     .on_right_press(Message::OpenDockContextMenu(DockMenuTarget::Dynamic {
                         win_id: win_id_copy,
@@ -5094,9 +5054,13 @@ impl Application for CortenPanelApp {
                 style
             });
 
-            iced::widget::column![calendar_card, dock_cluster]
+            let inner_card = mouse_area(calendar_card).on_press(Message::NoOp);
+            let content_col = iced::widget::column![inner_card, dock_cluster]
                 .spacing(12)
-                .align_x(Alignment::Center)
+                .align_x(Alignment::Center);
+
+            mouse_area(content_col)
+                .on_press(Message::ToggleCalendar)
                 .into()
         } else if self.show_clipboard_modal {
             let title_row = row![
@@ -5405,6 +5369,10 @@ impl Application for CortenPanelApp {
             let header = row![
                 text(format!("⚡ {}", disp_title))
                     .size(13.0)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Semibold,
+                        ..Default::default()
+                    })
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
                 button(text("✕").size(12.0).color(palette.text_muted.to_iced()))
@@ -5412,7 +5380,14 @@ impl Application for CortenPanelApp {
                     .style(|_, _| button::Style::default())
                     .on_press(Message::CloseDockContextMenu),
             ]
+            .width(Length::Fill)
             .align_y(Alignment::Center);
+
+            let header_sep = container(iced::widget::Space::new(Length::Fill, Length::Fixed(1.0)))
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
+                    ..Default::default()
+                });
 
             let mut menu_items = column![].spacing(4);
 
@@ -5619,9 +5594,9 @@ impl Application for CortenPanelApp {
             .on_press(Message::ToggleAutohideMode);
             menu_items = menu_items.push(autohide_btn);
 
-            let menu_card = container(column![header, menu_items].spacing(8))
+            let menu_card = container(column![header, header_sep, menu_items].spacing(8))
                 .padding([12, 14])
-                .width(Length::Fixed(240.0))
+                .width(Length::Fixed(260.0))
                 .style(move |_| {
                     let mut style = acrylic_glass_style(palette, 16.0);
                     if let Some(iced::Background::Color(color)) = style.background {
@@ -5632,9 +5607,13 @@ impl Application for CortenPanelApp {
                     style
                 });
 
-            iced::widget::column![menu_card, dock_cluster]
+            let inner_card = mouse_area(menu_card).on_press(Message::NoOp);
+            let content_col = iced::widget::column![inner_card, dock_cluster]
                 .spacing(12)
-                .align_x(Alignment::Center)
+                .align_x(Alignment::Center);
+
+            mouse_area(content_col)
+                .on_press(Message::CloseDockContextMenu)
                 .into()
         } else if self.show_mini_task_manager {
             let header = row![
@@ -6432,7 +6411,7 @@ impl Application for CortenPanelApp {
         let _panel_height = if !self.panel_visible {
             1.0
         } else if self.show_control_center || self.show_power_menu || self.show_calendar || self.show_clipboard_modal || self.show_notification_center || self.show_downloads_stack || self.show_mini_task_manager || self.dock_context_menu.is_some() || self.active_window_previews.is_some() || self.show_net_speed_details || self.show_desktop_context_hub {
-            540.0
+            560.0
         } else {
             (self.config.height as f32).max(1.0)
         };
@@ -6538,5 +6517,30 @@ mod tests {
         assert!(parsed_json.is_err());
         let first_line = raw_text.lines().next().unwrap().trim();
         assert_eq!(first_line, "Standard Plain Output");
+    }
+
+    #[test]
+    fn test_dock_context_menu_view_rendering() {
+        use super::*;
+        let config_manager = ConfigManager::<PanelConfig>::load_or_default("panel").unwrap();
+        let flags = PanelAppFlags {
+            config_manager,
+            ipc_rx: None,
+            output_name: None,
+        };
+        let (mut app, _) = CortenPanelApp::new(flags);
+        app.dock_context_menu = Some(DockMenuTarget::Pinned(ActiveApp::Terminal, 0));
+        let _ = app.view();
+
+        app.dock_context_menu = Some(DockMenuTarget::Dynamic {
+            win_id: 123,
+            app_id: "firefox".into(),
+            title: "Mozilla Firefox".into(),
+        });
+        let _ = app.view();
+
+        app.show_calendar = true;
+        app.dock_context_menu = None;
+        let _ = app.view();
     }
 }

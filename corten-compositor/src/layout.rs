@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use smithay::desktop::Window;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Point, Rectangle, Size};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::XdgToplevelSurfaceData;
@@ -105,6 +105,39 @@ pub fn window_metadata(window: &Window) -> (String, String) {
             .unwrap_or_default();
         (app_id, title)
     })
+}
+
+/// Returns true if the window is alive and not a dummy/hidden winit boot surface.
+pub fn is_window_mapped(window: &Window) -> bool {
+    let (app_id, title) = window_metadata(window);
+    if title == "winit window" || app_id == "winit window" {
+        return false;
+    }
+    window.alive()
+}
+
+/// Retrieves the requested minimum dimensions (width, height) of a window.
+pub fn window_min_size(window: &Window) -> (i32, i32) {
+    if let Some(x11) = window.x11_surface() {
+        if let Some(hints) = x11.size_hints() {
+            if let Some(min) = hints.min_size {
+                return (min.0.max(160), min.1.max(100));
+            }
+        }
+    }
+    if let Some(toplevel) = window.toplevel() {
+        let (min_w, min_h) = with_states(toplevel.wl_surface(), |states| {
+            let mut guard = states
+                .cached_state
+                .get::<smithay::wayland::shell::xdg::SurfaceCachedState>();
+            let cached = guard.current();
+            (cached.min_size.w.max(0), cached.min_size.h.max(0))
+        });
+        if min_w > 0 || min_h > 0 {
+            return (min_w.max(200), min_h.max(140));
+        }
+    }
+    (200, 140)
 }
 
 /// Checks whether a Wayland `xdg_toplevel` or X11 window is a transient dialog, modal,
@@ -791,6 +824,9 @@ impl LayoutManager {
             return false;
         }
         let (app_id, title) = window_metadata(window);
+        if title == "winit window" {
+            return false;
+        }
         let auto_float = should_auto_float(window);
         if app_id.is_empty() && title.is_empty() && !auto_float {
             return false;

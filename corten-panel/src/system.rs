@@ -2,24 +2,26 @@ use chrono::Local;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-static COMPOSITOR_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-static COMPOSITOR_CONN: OnceLock<zbus::Connection> = OnceLock::new();
+static COMPOSITOR_RUNTIME: OnceLock<Option<tokio::runtime::Runtime>> = OnceLock::new();
+static COMPOSITOR_CONN: OnceLock<Option<zbus::Connection>> = OnceLock::new();
 
 fn get_or_init_dbus() -> Option<(&'static tokio::runtime::Runtime, &'static zbus::Connection)> {
-    let rt = COMPOSITOR_RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to initialize persistent D-Bus runtime")
-    });
-
-    let conn = COMPOSITOR_CONN.get_or_init(|| {
-        rt.block_on(async {
-            zbus::Connection::session()
-                .await
-                .expect("Failed to establish persistent D-Bus session connection")
+    let rt = COMPOSITOR_RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()
         })
-    });
+        .as_ref()?;
+
+    let conn = COMPOSITOR_CONN
+        .get_or_init(|| {
+            rt.block_on(async {
+                zbus::Connection::session().await.ok()
+            })
+        })
+        .as_ref()?;
 
     Some((rt, conn))
 }
