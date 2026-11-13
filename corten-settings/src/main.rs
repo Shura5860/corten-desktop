@@ -13,7 +13,7 @@ use corten_config::ConfigManager;
 use corten_theme::iced_styles::{card_style, primary_button_style, secondary_button_style};
 use corten_theme::{
     Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Transition, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES,
+    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
 };
 use iced::widget::{
     button, column, container, horizontal_space, row, scrollable, slider, text,
@@ -35,10 +35,17 @@ pub fn main() -> iced::Result {
         size: iced::Size::new(1040.0, 720.0),
         min_size: Some(iced::Size::new(880.0, 580.0)),
         resizable: true,
+        #[cfg(target_os = "linux")]
+        platform_specific: iced::window::settings::PlatformSpecific {
+            application_id: "corten-settings".into(),
+            ..Default::default()
+        },
         ..Default::default()
     })
     .subscription(CortenSettingsApp::subscription)
     .font(LUCIDE_FONT_BYTES)
+    .font(NOTO_SANS_BYTES)
+    .default_font(NOTO_SANS)
     .run()
 }
 
@@ -115,6 +122,34 @@ impl SettingsCategory {
             Self::Accessibility => "Erişilebilirlik ve Kapsayıcılık",
             Self::About => "Sistem Hakkında",
         }
+    }
+
+    pub fn search_keywords(self) -> &'static str {
+        match self {
+            Self::Appearance => "görünüm tema koyu açık antrasit patina bakır pas verdigris titanyum altın duvar kağıdı wallpaper yoğunluk rahat kompakt",
+            Self::Panel => "panel dock rıhtım üst alt yüzen adacık saat ses ağ pil sistem tepsisi",
+            Self::Launcher => "başlatıcı arama spotlight menü dashboard pano clipboard geçmiş super+v",
+            Self::Widgets => "masaüstü bileşenleri araçlar widget müzik görselleştirici ekolayzer sistem izleyici cpu ram hava durumu not defteri",
+            Self::Input => "klavye fare touchpad dokunmatik doğal kaydırma tap to click capslock ctrl esc tr-q us sanal klavye",
+            Self::Displays => "ekranlar monitör çözünürlük yenileme hızı hz ölçek hidpi retina parlaklık gece ışığı night light mavi ışık vrr freesync tearing hdr icc renk uzayı srgb dci-p3",
+            Self::Sound => "ses hoparlör kulaklık mikrofon pipewire ses seviyesi sessiz mute profil",
+            Self::Bluetooth => "bluetooth kablosuz kulaklık cihaz eşleşme bluez",
+            Self::Power => "güç pil batarya enerji tasarrufu dengeli performans uyku ekran kararma upower",
+            Self::Notifications => "bildirimler süre zaman aşımı otomatik kapatma rahatsız etme",
+            Self::Compositor => "pencere yöneticisi döşeme tiling serbest floating master-stack sarmal dwindle bsp monocle boşluk gap kenar",
+            Self::Shortcuts => "klavye kısayolları tuş atamaları super terminal dosya yöneticisi ekran görüntüsü çalışma alanı workspace kilitle",
+            Self::Ai => "yapay zeka corten ai asistan yerel model eco dengeli pro gpu vram oyun modu ollama aura",
+            Self::Accessibility => "erişilebilirlik yüksek karşıtlık kontrast wcag renk körlüğü protanopi döteranopi tritanopi monokrom metin ölçekleme büyük imleç odak çerçevesi ekran okuyucu orca",
+            Self::About => "corten hakkında sürüm sistem mimari wayland smithay rust",
+        }
+    }
+
+    pub fn matches_query(self, query: &str) -> bool {
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return true;
+        }
+        self.label().to_lowercase().contains(&q) || self.search_keywords().contains(&q)
     }
 }
 
@@ -204,6 +239,7 @@ pub enum Message {
     SaveSettings,
     ReloadResult(Vec<String>),
     KeyboardEvent(Event),
+    AiEndpointChecked(bool),
 }
 
 struct CortenSettingsApp {
@@ -226,6 +262,8 @@ struct CortenSettingsApp {
     selected_display: usize,
     bluetooth_devices: Vec<corten_services::bluetooth::BluetoothDevice>,
     bluetooth_powered: bool,
+    /// `None` = not yet checked / checking, `Some(true)` = TCP reachable
+    ai_endpoint_reachable: Option<bool>,
 }
 
 impl Default for CortenSettingsApp {
@@ -298,6 +336,7 @@ impl Default for CortenSettingsApp {
             selected_display: 0,
             bluetooth_devices: Vec::new(),
             bluetooth_powered: false,
+            ai_endpoint_reachable: None,
         }
     }
 }
@@ -351,6 +390,11 @@ impl CortenSettingsApp {
                 if self.accessibility.screen_reader || corten_services::a11y::is_screen_reader_enabled() {
                     corten_services::a11y::announce_screen_reader(cat.label());
                 }
+                if cat == SettingsCategory::Ai {
+                    self.ai_endpoint_reachable = None;
+                    let url = self.ai.backend_url.clone();
+                    return iced::Task::perform(check_endpoint_reachable(url), Message::AiEndpointChecked);
+                }
                 if cat == SettingsCategory::Bluetooth {
                     return iced::Task::perform(
                         async move {
@@ -365,7 +409,18 @@ impl CortenSettingsApp {
             Message::AnimationTick => {
                 self.category_transition.tick(16);
             }
+            Message::AiEndpointChecked(ok) => {
+                self.ai_endpoint_reachable = Some(ok);
+            }
             Message::SearchChanged(q) => {
+                if !q.trim().is_empty() && !self.category.matches_query(&q) {
+                    if let Some(&first_match) = Self::categories()
+                        .iter()
+                        .find(|c| c.matches_query(&q))
+                    {
+                        self.category = first_match;
+                    }
+                }
                 self.search_query = q;
             }
             Message::ToggleThemeMode(mode) => {
@@ -401,7 +456,7 @@ impl CortenSettingsApp {
                     .arg("/usr/share/sounds/freedesktop/stereo/complete.oga")
                     .spawn()
                     .or_else(|_| Command::new("canberra-gtk-play").args(["-i", "bell"]).spawn());
-                self.status_message = Some("🔊 Ses testi çalındı.".into());
+                self.status_message = Some("Ses testi çalındı.".into());
             }
             Message::ChooseWallpaper => {
                 return iced::Task::perform(
@@ -864,53 +919,89 @@ impl CortenSettingsApp {
 
         let query = self.search_query.trim().to_lowercase();
 
-        let mut nav_items_vec = Vec::new();
-        let items: &[(SettingsCategory, char, &'static str)] = &[
-            (SettingsCategory::Appearance, Icon::SUN, "Görünüm ve Stil"),
-            (SettingsCategory::Panel, Icon::APP_WINDOW, "Panel ve Dock"),
+        type NavItemSpec = (SettingsCategory, char, &'static str);
+        let groups: &[(&'static str, &[NavItemSpec])] = &[
             (
-                SettingsCategory::Launcher,
-                Icon::SEARCH,
-                "Uygulama Başlatıcı",
+                "KİŞİSELLEŞTİRME",
+                &[
+                    (SettingsCategory::Appearance, Icon::SUN, "Görünüm ve Stil"),
+                    (SettingsCategory::Panel, Icon::APP_WINDOW, "Panel ve Dock"),
+                    (SettingsCategory::Launcher, Icon::SEARCH, "Uygulama Başlatıcı"),
+                    (SettingsCategory::Widgets, Icon::MUSIC, "Masaüstü Bileşenleri"),
+                ],
             ),
             (
-                SettingsCategory::Widgets,
-                Icon::MUSIC,
-                "Masaüstü Bileşenleri",
-            ),
-            (SettingsCategory::Input, Icon::KEYBOARD, "Klavye ve Fare"),
-            (SettingsCategory::Displays, Icon::MONITOR, "Ekranlar"),
-            (SettingsCategory::Sound, Icon::VOLUME, "Ses"),
-            (SettingsCategory::Bluetooth, Icon::WIFI, "Bluetooth"),
-            (SettingsCategory::Power, Icon::BATTERY, "Güç ve Pil"),
-            (SettingsCategory::Notifications, Icon::BELL, "Bildirimler"),
-            (
-                SettingsCategory::Compositor,
-                Icon::TERMINAL,
-                "Pencere Yöneticisi",
+                "DONANIM",
+                &[
+                    (SettingsCategory::Displays, Icon::MONITOR, "Ekranlar"),
+                    (SettingsCategory::Sound, Icon::VOLUME, "Ses"),
+                    (SettingsCategory::Bluetooth, Icon::WIFI, "Bluetooth"),
+                    (SettingsCategory::Input, Icon::KEYBOARD, "Klavye ve Fare"),
+                    (SettingsCategory::Power, Icon::BATTERY, "Güç ve Pil"),
+                ],
             ),
             (
-                SettingsCategory::Shortcuts,
-                Icon::CODE,
-                "Klavye Kısayolları",
+                "SİSTEM",
+                &[
+                    (SettingsCategory::Compositor, Icon::TERMINAL, "Pencere Yöneticisi"),
+                    (SettingsCategory::Shortcuts, Icon::CODE, "Klavye Kısayolları"),
+                    (SettingsCategory::Notifications, Icon::BELL, "Bildirimler"),
+                    (SettingsCategory::Ai, Icon::CPU, "Yapay Zeka (Corten AI)"),
+                ],
             ),
             (
-                SettingsCategory::Ai,
-                Icon::TERMINAL,
-                "Yapay Zeka (Corten AI)",
+                "GENEL",
+                &[
+                    (SettingsCategory::Accessibility, Icon::EYE, "Erişilebilirlik"),
+                    (SettingsCategory::About, Icon::SHIELD, "Corten Hakkında"),
+                ],
             ),
-            (
-                SettingsCategory::Accessibility,
-                Icon::EYE,
-                "Erişilebilirlik",
-            ),
-            (SettingsCategory::About, Icon::SHIELD, "Corten Hakkında"),
         ];
 
-        for (cat, icon, label) in items {
-            if query.is_empty() || label.to_lowercase().contains(&query) {
-                nav_items_vec.push(nav_item(*cat, *icon, label).into());
+        let mut nav_items_vec: Vec<Element<'_, Message>> = Vec::new();
+        for (group_title, items) in groups {
+            let matching: Vec<_> = items
+                .iter()
+                .filter(|(cat, _, label)| {
+                    query.is_empty()
+                        || label.to_lowercase().contains(&query)
+                        || cat.matches_query(&query)
+                })
+                .collect();
+
+            if !matching.is_empty() {
+                if !nav_items_vec.is_empty() {
+                    nav_items_vec.push(vertical_space().height(Spacing::XS).into());
+                }
+                nav_items_vec.push(
+                    container(
+                        text(*group_title)
+                            .size(Typography::OVERLINE)
+                            .font(iced::Font {
+                                weight: iced::font::Weight::Bold,
+                                ..Default::default()
+                            })
+                            .color(palette.text_muted.to_iced()),
+                    )
+                    .padding([Spacing::XXS, Spacing::MD])
+                    .into(),
+                );
+                for (cat, icon, label) in matching {
+                    nav_items_vec.push(nav_item(*cat, *icon, label).into());
+                }
             }
+        }
+
+        if nav_items_vec.is_empty() {
+            nav_items_vec.push(
+                container(
+                    text("Eşleşen ayar bulunamadı")
+                        .size(Typography::BODY_SM)
+                        .color(palette.text_muted.to_iced()),
+                )
+                .padding(Spacing::MD)
+                .into(),
+            );
         }
 
         let nav_scrollable = scrollable(column(nav_items_vec).spacing(4))
@@ -950,9 +1041,7 @@ impl CortenSettingsApp {
             .width(Length::Fill)
             .padding(Spacing::LG)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.07, 0.08, 0.11, 0.94,
-                ))),
+                background: Some(iced::Background::Color(palette.stage().to_iced())),
                 border: Border {
                     color: iced::Color::from_rgba(
                         palette.primary.r,
@@ -1115,8 +1204,8 @@ impl CortenSettingsApp {
             (palette.primary.to_iced(), palette.primary.to_iced())
         } else {
             (
-                Color::from_rgba(0.16, 0.18, 0.23, 0.95),
-                Color::from_rgba(0.24, 0.28, 0.35, 0.8),
+                palette.surface_hover.to_iced(),
+                palette.border.to_iced(),
             )
         };
 
@@ -1180,7 +1269,7 @@ impl CortenSettingsApp {
         palette: Palette,
     ) -> Element<'a, Message> {
         button(text(label).size(Typography::BODY_SM).color(if selected {
-            Color::WHITE
+            palette.on_primary().to_iced()
         } else {
             palette.text_muted.to_iced()
         }))
@@ -1198,7 +1287,7 @@ impl CortenSettingsApp {
             button::Style {
                 background: Some(bg.into()),
                 text_color: if selected {
-                    Color::WHITE
+                    palette.on_primary().to_iced()
                 } else {
                     palette.text_muted.to_iced()
                 },
@@ -1255,11 +1344,11 @@ impl CortenSettingsApp {
                         ..Default::default()
                     }),
                 container(text(match current_patina {
-                    PatinaVariant::Rust => "🍂 Pas (Rust)",
-                    PatinaVariant::Verdigris => "🌊 Zümrüt (Verdigris)",
-                    PatinaVariant::Titanium => "⚡ Çelik (Titanium)",
-                    PatinaVariant::Molten => "🌋 Akkor (Molten)",
-                }).size(10.0).color(palette.primary.to_iced()))
+                    PatinaVariant::Rust => "● Pas (Rust)",
+                    PatinaVariant::Verdigris => "● Zümrüt (Verdigris)",
+                    PatinaVariant::Titanium => "● Çelik (Titanium)",
+                    PatinaVariant::Molten => "● Akkor (Molten)",
+                }).size(Typography::CAPTION).color(palette.primary.to_iced()))
                     .padding([2, 8])
                     .style(move |_| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16))),
@@ -1270,7 +1359,7 @@ impl CortenSettingsApp {
                         },
                         ..Default::default()
                     }),
-                container(text(if is_compact { "📐 Kompakt" } else { "📐 Ferah" }).size(10.0).color(palette.text_muted.to_iced()))
+                container(text(if is_compact { "Kompakt" } else { "Ferah" }).size(Typography::CAPTION).color(palette.text_muted.to_iced()))
                     .padding([2, 8])
                     .style(move |_| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
@@ -1370,7 +1459,7 @@ impl CortenSettingsApp {
         )
         .padding([4, 16])
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(0.09, 0.10, 0.13, 0.94))),
+            background: Some(iced::Background::Color(iced::Color { a: 0.96, ..palette.surface.to_iced() })),
             border: Border {
                 color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.40),
                 width: 1.0,
@@ -1593,7 +1682,7 @@ impl CortenSettingsApp {
                         text(name).size(Typography::BODY_SM).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
                         horizontal_space(),
                         if is_active {
-                            container(text("Aktif ✓").size(10.0).color(Color::WHITE))
+                            container(text("Aktif ✓").size(10.0).color(palette.on_primary().to_iced()))
                                 .padding([2, 6])
                                 .style(move |_| container::Style {
                                     background: Some(iced::Background::Color(palette.primary.to_iced())),
@@ -1722,7 +1811,7 @@ impl CortenSettingsApp {
 
         dock_items = dock_items.push(
             row![
-                container(text("1").size(9.0).color(Color::WHITE))
+                container(text("1").size(9.0).color(palette.on_primary().to_iced()))
                     .padding([1, 5])
                     .style(move |_| container::Style {
                         background: Some(iced::Background::Color(palette.primary.to_iced())),
@@ -1784,7 +1873,7 @@ impl CortenSettingsApp {
         let simulated_dock = container(dock_items)
             .padding([5, 14])
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(0.09, 0.10, 0.13, 0.94))),
+                background: Some(iced::Background::Color(iced::Color { a: 0.96, ..palette.surface.to_iced() })),
                 border: Border {
                     color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.45),
                     width: 1.0,
@@ -1938,7 +2027,7 @@ impl CortenSettingsApp {
                 ),
                 Self::setting_item(
                     "Ses ve Canlı Medya Bileşeni",
-                    "Gerçek zamanlı PipeWire ses düzeyini ve stereo VU metre göstergesini göster",
+                    "Panelde ses seviyesi göstergesini ve medya denetimlerini göster",
                     audio_cb,
                     palette,
                 ),
@@ -2004,7 +2093,7 @@ impl CortenSettingsApp {
         .padding([8, 14])
         .width(Length::Fixed(320.0))
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(0.09, 0.10, 0.13, 0.94))),
+            background: Some(iced::Background::Color(iced::Color { a: 0.96, ..palette.surface.to_iced() })),
             border: Border {
                 color: palette.primary.to_iced(),
                 width: 1.5,
@@ -2224,7 +2313,7 @@ impl CortenSettingsApp {
                 row![
                     row![
                         text(Icon::ACTIVITY).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
-                        text("CANLI MASAÜSTÜ BİLEŞEN YERLEŞİMİ")
+                        text("MASAÜSTÜ BİLEŞEN YERLEŞİMİ · ÖNİZLEME")
                             .size(Typography::CAPTION)
                             .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
                             .color(palette.primary.to_iced()),
@@ -2251,7 +2340,7 @@ impl CortenSettingsApp {
                         row![
                             // Top left scratchpad
                             if self.widgets.scratchpad_enabled {
-                                container(text("📝 Hızlı Notlar").size(Typography::CAPTION).color(palette.text_primary.to_iced()))
+                                container(text("Hızlı Notlar").size(Typography::CAPTION).color(palette.text_primary.to_iced()))
                                     .padding([4, 8])
                                     .style(move |_| container::Style {
                                         background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8))),
@@ -2267,7 +2356,7 @@ impl CortenSettingsApp {
                                 container(
                                     row![
                                         text(Icon::CPU).font(LUCIDE_FONT).size(12).color(palette.primary.to_iced()),
-                                        text("CPU 14% • RAM 3.2 GB").size(Typography::CAPTION).color(palette.text_primary.to_iced()),
+                                        text("Sistem İzleyici").size(Typography::CAPTION).color(palette.text_primary.to_iced()),
                                     ]
                                     .spacing(4)
                                     .align_y(Alignment::Center)
@@ -2291,7 +2380,7 @@ impl CortenSettingsApp {
                                 container(
                                     row![
                                         text(Icon::MUSIC).font(LUCIDE_FONT).size(12).color(palette.primary.to_iced()),
-                                        text("▂▄▆█ 128 BPM").size(Typography::CAPTION).color(palette.primary.to_iced()),
+                                        text("Müzik Görselleştirici").size(Typography::CAPTION).color(palette.primary.to_iced()),
                                     ]
                                     .spacing(4)
                                     .align_y(Alignment::Center)
@@ -2311,7 +2400,7 @@ impl CortenSettingsApp {
                                 container(
                                     row![
                                         text(Icon::SUN).font(LUCIDE_FONT).size(12).color(palette.primary.to_iced()),
-                                        text("22°C Güneşli").size(Typography::CAPTION).color(palette.text_primary.to_iced()),
+                                        text("Hava Durumu").size(Typography::CAPTION).color(palette.text_primary.to_iced()),
                                     ]
                                     .spacing(4)
                                     .align_y(Alignment::Center)
@@ -2333,7 +2422,7 @@ impl CortenSettingsApp {
                 .padding(Spacing::MD)
                 .width(Length::Fill)
                 .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(0.05, 0.06, 0.08, 0.7))),
+                    background: Some(iced::Background::Color(palette.background.to_iced())),
                     border: Border {
                         color: palette.border.to_iced(),
                         width: 1.0,
@@ -2349,7 +2438,7 @@ impl CortenSettingsApp {
         let bento_media = Self::bento_card(
             Icon::MUSIC,
             "Medya & Sistem İzleme",
-            Some("Canlı Metrikler"),
+            Some("Masaüstü Katmanı"),
             column![
                 Self::setting_item(
                     "Müzik & Ses Dalga Görselleştiricisi",
@@ -2421,13 +2510,13 @@ impl CortenSettingsApp {
         let is_tr = self.input.keyboard_layout == "tr";
         let layout_control = row![
             Self::segment_button(
-                "Turkish (TR-Q)",
+                "Türkçe (TR-Q)",
                 is_tr,
                 Message::SetKeyboardLayout("tr".into()),
                 palette,
             ),
             Self::segment_button(
-                "English (US)",
+                "İngilizce (US)",
                 !is_tr,
                 Message::SetKeyboardLayout("us".into()),
                 palette,
@@ -2599,7 +2688,7 @@ impl CortenSettingsApp {
                         container(
                             text("1")
                                 .size(11.0)
-                                .color(Color::WHITE),
+                                .color(palette.on_primary().to_iced()),
                         )
                         .padding([2, 6])
                         .style(move |_| container::Style {
@@ -2670,7 +2759,7 @@ impl CortenSettingsApp {
                         container(
                             text("2")
                                 .size(11.0)
-                                .color(Color::WHITE),
+                                .color(palette.on_primary().to_iced()),
                         )
                         .padding([2, 6])
                         .style(move |_| container::Style {
@@ -3170,8 +3259,7 @@ impl CortenSettingsApp {
         let vol_val = self.sound.output_volume;
         let is_muted = self.sound.mute_output;
 
-        let vu_l = ((vol_val as f32 / 100.0) * 0.90).clamp(0.05, 0.95);
-        let vu_r = ((vol_val as f32 / 100.0) * 0.86).clamp(0.05, 0.95);
+        let vol_level = (vol_val as f32 / 100.0).clamp(0.0, 1.0);
 
         let vu_bar = |val: f32, label: &'static str| {
             let bars = if val < 0.20 {
@@ -3200,7 +3288,7 @@ impl CortenSettingsApp {
                 .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
                 .color(palette.text_muted.to_iced()),
             horizontal_space(),
-            container(text(if is_muted { "● Susturuldu" } else { "● Canlı Stereo Çıkış" }).size(10.0).color(if is_muted { palette.danger.to_iced() } else { palette.primary.to_iced() }))
+            container(text(if is_muted { "● Susturuldu" } else { "● Çıkış Etkin" }).size(10.0).color(if is_muted { palette.danger.to_iced() } else { palette.primary.to_iced() }))
                 .padding([2, 8])
                 .style(move |_| container::Style {
                     background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14))),
@@ -3267,8 +3355,7 @@ impl CortenSettingsApp {
             .align_y(Alignment::Center),
             horizontal_space(),
             column![
-                vu_bar(if is_muted { 0.0 } else { vu_l }, "L"),
-                vu_bar(if is_muted { 0.0 } else { vu_r }, "R"),
+                vu_bar(if is_muted { 0.0 } else { vol_level }, "SEVİYE"),
             ]
             .spacing(3),
             horizontal_space(),
@@ -3426,7 +3513,7 @@ impl CortenSettingsApp {
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
                     container(
-                        text(if self.bluetooth_powered { "● Adaptör Aktif & Keşif Modunda" } else { "○ Adaptör Kapalı" })
+                        text(if self.bluetooth_powered { "● Adaptör Açık" } else { "○ Adaptör Kapalı" })
                             .size(Typography::CAPTION)
                             .color(if self.bluetooth_powered { palette.success.to_iced() } else { palette.text_muted.to_iced() })
                     )
@@ -3482,7 +3569,7 @@ impl CortenSettingsApp {
                 let action_btn = button(
                     text(if is_conn { "Bağlantıyı Kes" } else { "Bağlan" })
                         .size(Typography::BODY_SM)
-                        .color(if is_conn { palette.danger.to_iced() } else { Color::WHITE }),
+                        .color(if is_conn { palette.danger.to_iced() } else { palette.on_primary().to_iced() }),
                 )
                 .padding([Spacing::XS, Spacing::MD])
                 .style(move |_, status| {
@@ -3754,7 +3841,7 @@ impl CortenSettingsApp {
                 row![
                     row![
                         text(Icon::BELL).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
-                        text("CANLI BİLDİRİM KARTI SİMÜLATÖRÜ")
+                        text("BİLDİRİM KARTI · ÖNİZLEME")
                             .size(Typography::CAPTION)
                             .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
                             .color(palette.primary.to_iced()),
@@ -3820,7 +3907,7 @@ impl CortenSettingsApp {
                 .padding(Spacing::MD)
                 .width(Length::Fixed(360.0))
                 .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(0.12, 0.13, 0.17, 0.95))),
+                    background: Some(iced::Background::Color(iced::Color { a: 0.96, ..palette.surface.to_iced() })),
                     border: Border {
                         color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.4),
                         width: 1.0,
@@ -3904,11 +3991,11 @@ impl CortenSettingsApp {
 
         // Compositor Stage: Interactive wireframe of current layout
         let current_layout_name = match self.compositor.layout_mode {
-            corten_config::LayoutMode::Floating => "Floating (Serbest Yüzen)",
-            corten_config::LayoutMode::MasterStack => "Master-Stack (Dinamik İkili)",
-            corten_config::LayoutMode::Dwindle => "Dwindle (Altın Oran Sarmal)",
-            corten_config::LayoutMode::Bsp => "BSP (İkili Ağaç Bölümleme)",
-            corten_config::LayoutMode::Monocle => "Monocle (Tek Odaklı Tam Ekran)",
+            corten_config::LayoutMode::Floating => "Serbest Yüzen · Floating",
+            corten_config::LayoutMode::MasterStack => "Ana-Yığın · Master-Stack",
+            corten_config::LayoutMode::Dwindle => "Altın Oran Sarmal · Dwindle",
+            corten_config::LayoutMode::Bsp => "İkili Ağaç · BSP",
+            corten_config::LayoutMode::Monocle => "Tek Odak · Monocle",
         };
 
         let gap_px = self.compositor.gap;
@@ -3926,21 +4013,21 @@ impl CortenSettingsApp {
 
             let titlebar = row![
                 text(title)
-                    .size(9.0)
+                    .size(Typography::CAPTION)
                     .color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
                 horizontal_space(),
                 row![
-                    container(horizontal_space()).width(Length::Fixed(4.0)).height(Length::Fixed(4.0)).style(move |_| container::Style {
+                    container(horizontal_space()).width(Length::Fixed(5.0)).height(Length::Fixed(5.0)).style(move |_| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgba(0.9, 0.3, 0.3, 0.8))),
-                        border: Border { radius: border::Radius::from(2.0), ..Default::default() },
+                        border: Border { radius: border::Radius::from(2.5), ..Default::default() },
                         ..Default::default()
                     }),
-                    container(horizontal_space()).width(Length::Fixed(4.0)).height(Length::Fixed(4.0)).style(move |_| container::Style {
+                    container(horizontal_space()).width(Length::Fixed(5.0)).height(Length::Fixed(5.0)).style(move |_| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgba(0.9, 0.7, 0.2, 0.8))),
-                        border: Border { radius: border::Radius::from(2.0), ..Default::default() },
+                        border: Border { radius: border::Radius::from(2.5), ..Default::default() },
                         ..Default::default()
                     }),
-                ].spacing(2.0)
+                ].spacing(3.0)
             ]
             .align_y(Alignment::Center)
             .width(Length::Fill);
@@ -3950,10 +4037,10 @@ impl CortenSettingsApp {
                     titlebar,
                     vertical_space(),
                     text(if is_active { "● Odaklı" } else { "○ Arka Plan" })
-                        .size(8.0)
+                        .size(Typography::CAPTION)
                         .color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
                 ]
-                .padding(4.0)
+                .padding(6.0)
                 .width(Length::Fill)
                 .height(Length::Fill)
             )
@@ -4035,7 +4122,7 @@ impl CortenSettingsApp {
                 row![
                     row![
                         text(Icon::APP_WINDOW).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
-                        text("CANLI DÖŞEME ÖNİZLEMESİ")
+                        text("DÖŞEME DÜZENİ · ÖNİZLEME")
                             .size(Typography::CAPTION)
                             .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
                             .color(palette.primary.to_iced()),
@@ -4081,31 +4168,31 @@ impl CortenSettingsApp {
 
         let layout_control = row![
             Self::segment_button(
-                "Floating",
+                "Serbest",
                 self.compositor.layout_mode == corten_config::LayoutMode::Floating,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::Floating),
                 palette,
             ),
             Self::segment_button(
-                "Master-Stack",
+                "Ana-Yığın",
                 self.compositor.layout_mode == corten_config::LayoutMode::MasterStack,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::MasterStack),
                 palette,
             ),
             Self::segment_button(
-                "Dwindle",
+                "Sarmal",
                 self.compositor.layout_mode == corten_config::LayoutMode::Dwindle,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::Dwindle),
                 palette,
             ),
             Self::segment_button(
-                "BSP",
+                "İkili Ağaç",
                 self.compositor.layout_mode == corten_config::LayoutMode::Bsp,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::Bsp),
                 palette,
             ),
             Self::segment_button(
-                "Monocle",
+                "Tek Odak",
                 self.compositor.layout_mode == corten_config::LayoutMode::Monocle,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::Monocle),
                 palette,
@@ -4581,13 +4668,13 @@ impl CortenSettingsApp {
                             .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
                             .color(palette.text_primary.to_iced()),
                         container(
-                            text("v0.1.0 (Geliştirme Sürümü)")
+                            text(format!("v{} · Geliştirme Sürümü", env!("CARGO_PKG_VERSION")))
                                 .size(Typography::CAPTION)
                                 .color(palette.success.to_iced())
                         )
                         .padding([2, 8])
                         .style(move |_| container::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgba(0.2, 0.8, 0.4, 0.15))),
+                            background: Some(iced::Background::Color(iced::Color { a: 0.15, ..palette.success.to_iced() })),
                             border: Border { color: palette.success.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
                             ..Default::default()
                         }),
@@ -4607,27 +4694,32 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "bilinmiyor".into());
+        let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "—".into());
+
         let bento_stack = Self::bento_card(
             Icon::CPU,
             "Sistem & Protokol Mimarisi",
-            Some("Smithay 0.3"),
+            Some("Smithay"),
             column![
                 Self::setting_item(
                     "Grafik Kompozitörü",
-                    "Smithay tabanlı saf Rust Wayland sunucusu (Hardware Direct Scanout, DRM/KMS, EGL/Vulkan)",
+                    "Smithay tabanlı, Rust ile yazılmış Wayland sunucusu (DRM/KMS)",
                     text("corten-compositor").size(Typography::BODY_SM).color(palette.text_primary.to_iced()),
                     palette,
                 ),
                 Self::setting_item(
-                    "Wayland Protokolleri",
-                    "wl_compositor v6, xdg-shell v5, wlr-layer-shell v4, ext-session-lock v1",
-                    text("Tam Uyumlu").size(Typography::BODY_SM).color(palette.success.to_iced()),
+                    "Oturum Türü",
+                    "Bu uygulamanın çalıştığı oturum ve Wayland soketi",
+                    text(format!("{} · {}", session_type, wayland_display))
+                        .size(Typography::BODY_SM)
+                        .color(palette.text_primary.to_iced()),
                     palette,
                 ),
                 Self::setting_item(
-                    "Kullanıcı Arayüz Motoru",
-                    "Donanım ivmelendirmeli wgpu / iced GUI araç seti",
-                    text("Iced v0.13").size(Typography::BODY_SM).color(palette.text_primary.to_iced()),
+                    "Kullanıcı Arayüz Araç Seti",
+                    "iced GUI kütüphanesi, tiny-skia (CPU) çizim motoru",
+                    text("iced · tiny-skia").size(Typography::BODY_SM).color(palette.text_primary.to_iced()),
                     palette,
                 ),
             ]
@@ -4635,21 +4727,21 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let active_theme = format!(
+            "{} · {}",
+            if self.appearance.theme_mode == ThemeModeChoice::Dark { "Koyu Antrasit" } else { "Sıcak Açık" },
+            PatinaVariant::from_code(&self.appearance.patina).name(),
+        );
+
         let bento_design = Self::bento_card(
             Icon::SMILE,
-            "Tasarım Kimliği & Felsefe",
+            "Tasarım Kimliği",
             Some("Corten Identity"),
             column![
                 Self::setting_item(
                     "Endüstriyel Ham Çelik & Metalik Patina",
                     "Koyu antrasit zeminler üzerinde dövme bakır, korozyon yeşili ve titanyum vurgular",
-                    text("Aktif").size(Typography::BODY_SM).color(palette.primary.to_iced()),
-                    palette,
-                ),
-                Self::setting_item(
-                    "Bellek Güvenliği & Sıfır Bellek Sızıntısı",
-                    "Arayüz ve kompozitör kod tabanında sıfır güvensiz kod (zero unsafe in UI logic)",
-                    text("Doğrulandı").size(Typography::BODY_SM).color(palette.success.to_iced()),
+                    text(active_theme).size(Typography::BODY_SM).color(palette.primary.to_iced()),
                     palette,
                 ),
             ]
@@ -4698,7 +4790,7 @@ impl CortenSettingsApp {
             };
             button::Style {
                 background: Some(bg.into()),
-                text_color: Color::WHITE,
+                text_color: palette.on_primary().to_iced(),
                 border: Border {
                     radius: border::Radius::from(Radius::SM),
                     ..Default::default()
@@ -4847,8 +4939,22 @@ impl CortenSettingsApp {
                 ),
                 Self::setting_item(
                     "Yerel Motor Adresi",
-                    "AURA-CORE veya Ollama API soket bağlantı noktası: http://127.0.0.1:8000",
-                    text("127.0.0.1:8000 (Aktif)").size(Typography::BODY_SM).color(palette.success.to_iced()),
+                    "AURA-CORE veya Ollama API adresi (ayarlar açıldığında bağlantı denenir)",
+                    {
+                        let (label, color) = match self.ai_endpoint_reachable {
+                            None => ("Kontrol ediliyor…", palette.text_muted),
+                            Some(true) => ("Erişilebilir", palette.success),
+                            Some(false) => ("Yanıt yok", palette.danger),
+                        };
+                        column![
+                            text(label).size(Typography::BODY_SM).color(color.to_iced()),
+                            text(endpoint_host_port(&self.ai.backend_url))
+                                .size(Typography::CAPTION)
+                                .color(palette.text_muted.to_iced()),
+                        ]
+                        .spacing(2)
+                        .align_x(Alignment::End)
+                    },
                     palette,
                 ),
             ]
@@ -4870,6 +4976,36 @@ impl CortenSettingsApp {
     }
 }
 
+/// Extracts `host:port` from an http(s) URL (defaults: 80 / 443).
+fn endpoint_host_port(url: &str) -> String {
+    let (rest, default_port) = if let Some(r) = url.strip_prefix("https://") {
+        (r, 443)
+    } else if let Some(r) = url.strip_prefix("http://") {
+        (r, 80)
+    } else {
+        (url, 80)
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    if authority.contains(':') {
+        authority.to_string()
+    } else {
+        format!("{}:{}", authority, default_port)
+    }
+}
+
+/// Real reachability probe: TCP connect with a short timeout.
+async fn check_endpoint_reachable(url: String) -> bool {
+    let addr = endpoint_host_port(&url);
+    matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(800),
+            tokio::net::TcpStream::connect(addr),
+        )
+        .await,
+        Ok(Ok(_))
+    )
+}
+
 fn next_category_index(current: usize, direction: i32, count: usize) -> usize {
     if count == 0 {
         return 0;
@@ -4886,6 +5022,14 @@ fn next_category_index(current: usize, direction: i32, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{next_category_index, CortenSettingsApp};
+
+    #[test]
+    fn endpoint_host_port_parsing() {
+        use super::endpoint_host_port;
+        assert_eq!(endpoint_host_port("http://127.0.0.1:8000"), "127.0.0.1:8000");
+        assert_eq!(endpoint_host_port("http://localhost/api"), "localhost:80");
+        assert_eq!(endpoint_host_port("https://example.org/v1"), "example.org:443");
+    }
 
     #[test]
     fn keyboard_category_navigation_wraps() {
@@ -4911,5 +5055,21 @@ mod tests {
 
         let _ = app.update(Message::SetDisplayOffsetY(-120));
         assert_eq!(app.displays.offset_y, -120);
+    }
+
+    #[test]
+    fn search_switches_to_matching_category() {
+        use super::{Message, SettingsCategory};
+        let mut app = CortenSettingsApp::default();
+        assert_eq!(app.category, SettingsCategory::Appearance);
+
+        let _ = app.update(Message::SearchChanged("gece ışığı".into()));
+        assert_eq!(app.category, SettingsCategory::Displays);
+
+        let _ = app.update(Message::SearchChanged("mikrofon".into()));
+        assert_eq!(app.category, SettingsCategory::Sound);
+
+        let _ = app.update(Message::SearchChanged("orca".into()));
+        assert_eq!(app.category, SettingsCategory::Accessibility);
     }
 }

@@ -541,8 +541,8 @@ impl Application for CortenWelcomeApp {
                             weight: iced::font::Weight::Semibold,
                             ..Default::default()
                         })
-                        .color(Color::WHITE),
-                    text("→").size(15).color(Color::WHITE),
+                        .color(palette.on_primary().to_iced()),
+                    text("→").size(15).color(palette.on_primary().to_iced()),
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center),
@@ -1362,8 +1362,8 @@ impl CortenWelcomeApp {
                             weight: iced::font::Weight::Bold,
                             ..Default::default()
                         })
-                        .color(Color::WHITE),
-                    text("→").size(18).color(Color::WHITE),
+                        .color(palette.on_primary().to_iced()),
+                    text("→").size(18).color(palette.on_primary().to_iced()),
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),

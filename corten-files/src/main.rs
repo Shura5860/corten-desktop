@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use corten_config::ConfigManager;
 use corten_theme::iced_styles::{card_style, input_style, primary_button_style, secondary_button_style};
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT, LUCIDE_FONT_BYTES,
+    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT,
+    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
 };
 use fs_ops::{
     breadcrumbs, copy_entry_recursive, create_archive, create_file, create_folder,
@@ -175,10 +176,17 @@ pub fn main() -> iced::Result {
         size: iced::Size::new(1160.0, 740.0),
         min_size: Some(iced::Size::new(860.0, 540.0)),
         resizable: true,
+        #[cfg(target_os = "linux")]
+        platform_specific: iced::window::settings::PlatformSpecific {
+            application_id: "corten-files".into(),
+            ..Default::default()
+        },
         ..Default::default()
     })
     .subscription(CortenFilesApp::subscription)
     .font(LUCIDE_FONT_BYTES)
+    .font(NOTO_SANS_BYTES)
+    .default_font(NOTO_SANS)
     .run()
 }
 
@@ -1307,14 +1315,17 @@ impl CortenFilesApp {
     }
 
     fn context_menu_item(
-        icon: &'static str,
+        icon: char,
         label: &'static str,
         msg: Message,
         palette: Palette,
     ) -> Element<'static, Message> {
         button(
             row![
-                text(icon).size(13),
+                text(icon)
+                    .font(LUCIDE_FONT)
+                    .size(14)
+                    .color(palette.primary.to_iced()),
                 text(label)
                     .size(Typography::BODY_SM)
                     .color(palette.text_primary.to_iced()),
@@ -1377,7 +1388,7 @@ impl CortenFilesApp {
 
         // 1. Open
         items = items.push(Self::context_menu_item(
-            "🚀",
+            Icon::CHEVRON_RIGHT,
             "Aç",
             Message::ActivateIndex(idx),
             palette,
@@ -1386,7 +1397,7 @@ impl CortenFilesApp {
         // 2. Open in New Tab (if directory)
         if entry.is_dir {
             items = items.push(Self::context_menu_item(
-                "⧉",
+                Icon::FOLDER,
                 "Yeni Sekmede Aç",
                 Message::OpenInNewTab(entry.path.clone()),
                 palette,
@@ -1395,13 +1406,13 @@ impl CortenFilesApp {
 
         // 3. Copy / Cut
         items = items.push(Self::context_menu_item(
-            "📋",
+            Icon::CLIPBOARD,
             "Kopyala (Ctrl+C)",
             Message::CopySelected,
             palette,
         ));
         items = items.push(Self::context_menu_item(
-            "✂️",
+            Icon::CLIPBOARD,
             "Kes (Ctrl+X)",
             Message::CutSelected,
             palette,
@@ -1409,7 +1420,7 @@ impl CortenFilesApp {
 
         // 4. Rename
         items = items.push(Self::context_menu_item(
-            "✏️",
+            Icon::CODE,
             "Yeniden Adlandır (F2)",
             Message::PromptRename,
             palette,
@@ -1418,7 +1429,7 @@ impl CortenFilesApp {
         // 5. Extract (if archive)
         if is_archive {
             items = items.push(Self::context_menu_item(
-                "📦",
+                Icon::DOWNLOAD,
                 "Arşivi Buraya Çıkar",
                 Message::ExtractSelectedArchive,
                 palette,
@@ -1427,7 +1438,7 @@ impl CortenFilesApp {
 
         // 6. Terminal here
         items = items.push(Self::context_menu_item(
-            "💻",
+            Icon::TERMINAL,
             "Terminalde Aç",
             Message::OpenTerminalHere,
             palette,
@@ -1435,7 +1446,7 @@ impl CortenFilesApp {
 
         // 7. AI Analysis
         items = items.push(Self::context_menu_item(
-            "🛡️",
+            Icon::SHIELD,
             "Yapay Zeka ile İncele",
             Message::AnalyzeWithAi(entry.path.clone()),
             palette,
@@ -1443,7 +1454,7 @@ impl CortenFilesApp {
 
         // 8. Delete / Trash
         items = items.push(Self::context_menu_item(
-            "🗑️",
+            Icon::TRASH,
             "Çöpe Gönder (Del)",
             Message::TrashSelected,
             palette,
@@ -2062,14 +2073,18 @@ impl CortenFilesApp {
                 };
                 let path_clone = path.clone();
                 row![
-                    text("🛡️ Corten Gatekeeper:")
+                    text(Icon::SHIELD)
+                        .font(LUCIDE_FONT)
+                        .size(14)
+                        .color(palette.warning.to_iced()),
+                    text("Corten Gatekeeper:")
                         .size(Typography::BODY_SM)
                         .color(palette.warning.to_iced()),
                     text(format!("\"{}\" (SHA256: {}) dış kaynaktan indirildi veya çalıştırılabilir betik.", name, short_hash))
                         .size(Typography::BODY_SM)
                         .color(palette.text_primary.to_iced()),
                     horizontal_space(),
-                    Self::small_button("⚡ AI Analizi", "", Message::AnalyzeWithAi(path_clone), palette),
+                    Self::small_button("AI Analizi", "", Message::AnalyzeWithAi(path_clone), palette),
                     Self::accent_button("Yine de Çalıştır", Message::ConfirmModal, palette),
                     Self::small_button("İptal", "", Message::CancelModal, palette),
                 ]

@@ -8,7 +8,8 @@ use corten_theme::iced_styles::{
     card_style, input_style, primary_button_style, secondary_button_style,
 };
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT, LUCIDE_FONT_BYTES,
+    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT,
+    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
 };
 use iced::widget::{
     button, column, container, horizontal_space, progress_bar, row, scrollable, text, text_input,
@@ -456,10 +457,17 @@ pub fn main() -> iced::Result {
         size: iced::Size::new(980.0, 680.0),
         min_size: Some(iced::Size::new(760.0, 500.0)),
         resizable: true,
+        #[cfg(target_os = "linux")]
+        platform_specific: iced::window::settings::PlatformSpecific {
+            application_id: "corten-monitor".into(),
+            ..Default::default()
+        },
         ..Default::default()
     })
     .subscription(CortenMonitorApp::subscription)
     .font(LUCIDE_FONT_BYTES)
+    .font(NOTO_SANS_BYTES)
+    .default_font(NOTO_SANS)
     .run()
 }
 

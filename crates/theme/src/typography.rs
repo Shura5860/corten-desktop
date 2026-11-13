@@ -3,9 +3,10 @@
 pub struct Typography;
 
 impl Typography {
-    pub const UI_FONT: &'static str = "Inter";
+    pub const UI_FONT: &'static str = "Noto Sans";
     pub const MONO_FONT: &'static str = "JetBrains Mono";
 
+    pub const OVERLINE: f32 = 11.0;
     pub const CAPTION: f32 = 11.0;
     pub const BODY_SM: f32 = 13.0;
     pub const BODY: f32 = 14.0;

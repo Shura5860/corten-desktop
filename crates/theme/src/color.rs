@@ -252,8 +252,8 @@ impl Palette {
             surface: Color::from_hex(0xFFFFFF),
             surface_hover: Color::from_hex(0xEBE7DE),
             border: Color::from_hex(0xD0CBC0),
-            primary: Color::from_hex(0xC45A32),
-            primary_hover: Color::from_hex(0xAC4B26),
+            primary: Color::from_hex(0xB85230), // Deep rust (≥ 4.5:1 with white text)
+            primary_hover: Color::from_hex(0xA0451F),
             text_primary: Color::from_hex(0x1A1C1E),
             text_muted: Color::from_hex(0x5C616B),
             text_disabled: Color::from_hex(0x8D929D),
@@ -307,6 +307,30 @@ impl Palette {
         }
     }
 
+    /// Text / icon color for content placed on a filled `primary` surface.
+    /// Picks white or anthracite ink — whichever gives the higher WCAG contrast —
+    /// so every patina variant (incl. bright Molten / Titanium) stays legible.
+    pub fn on_primary(&self) -> Color {
+        let white = Color::from_hex(0xFFFFFF);
+        let ink = Color::from_hex(0x141517);
+        if white.contrast_ratio(&self.primary) >= ink.contrast_ratio(&self.primary) {
+            white
+        } else {
+            ink
+        }
+    }
+
+    /// Sunken "stage" surface used behind live previews / hero canvases.
+    /// Darker than the background in dark themes, a soft stone tone in light themes.
+    pub fn stage(&self) -> Color {
+        if self.background.relative_luminance() < 0.5 {
+            let b = self.background;
+            Color::from_rgba(b.r * 0.72, b.g * 0.72, b.b * 0.72, 1.0)
+        } else {
+            self.surface_hover
+        }
+    }
+
     pub fn with_patina(mut self, patina: PatinaVariant) -> Self {
         let (prim, prim_hover) = patina.colors();
         self.primary = prim;
@@ -354,6 +378,28 @@ mod tests {
         assert_eq!(PatinaVariant::match_from_rgb(80, 120, 180), PatinaVariant::Titanium);
         assert_eq!(PatinaVariant::match_from_rgb(240, 170, 40), PatinaVariant::Molten);
         assert_eq!(PatinaVariant::match_from_rgb(100, 100, 100), PatinaVariant::Titanium);
+    }
+
+    #[test]
+    fn test_on_primary_meets_wcag_aa_for_all_patinas() {
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            let base = Palette::for_mode(mode);
+            let mut palettes = vec![base];
+            palettes.extend(PatinaVariant::ALL.iter().map(|p| base.with_patina(*p)));
+            for pal in palettes {
+                let ratio = pal.on_primary().contrast_ratio(&pal.primary);
+                assert!(ratio >= 4.5, "{:?} primary {:?} on_primary contrast {:.2}", mode, pal.primary, ratio);
+            }
+        }
+    }
+
+    #[test]
+    fn test_stage_contrasts_with_text() {
+        for mode in [ThemeMode::Dark, ThemeMode::Light] {
+            let pal = Palette::for_mode(mode);
+            assert!(pal.text_primary.contrast_ratio(&pal.stage()) >= 4.5);
+            assert!(pal.text_muted.contrast_ratio(&pal.stage()) >= 3.0);
+        }
     }
 
     #[test]

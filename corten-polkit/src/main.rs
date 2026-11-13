@@ -14,7 +14,7 @@ use corten_theme::{
     Icon, Palette, PatinaVariant, Spacing, ThemeMode, Typography, LUCIDE_FONT, LUCIDE_FONT_BYTES,
 };
 use iced::widget::{button, column, container, horizontal_space, row, text, text_input, vertical_space};
-use iced::{Alignment, Color, Element, Length, Subscription};
+use iced::{Alignment, Element, Length, Subscription};
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
@@ -456,7 +456,7 @@ impl Application for CortenPolkitApp {
                         .style(move |_, status| secondary_button_style(palette, status))
                         .on_press(Message::CancelAuth),
                     horizontal_space(),
-                    button(text("Kimliği Doğrula").size(Typography::BODY_SM).color(Color::WHITE))
+                    button(text("Kimliği Doğrula").size(Typography::BODY_SM).color(palette.on_primary().to_iced()))
                         .padding([Spacing::SM, Spacing::LG])
                         .style(move |_, status| primary_button_style(palette, status))
                         .on_press(Message::SubmitAuth),

@@ -79,10 +79,11 @@ pub fn input_style(palette: Palette) -> container::Style {
 
 /// Primary button style with Corten Rust accent and clean rounded corners
 pub fn primary_button_style(palette: Palette, status: button::Status) -> button::Style {
+    let on = palette.on_primary().to_iced();
     let (bg, text_color) = match status {
-        button::Status::Active => (palette.primary.to_iced(), iced::Color::WHITE),
-        button::Status::Hovered => (palette.primary_hover.to_iced(), iced::Color::WHITE),
-        button::Status::Pressed => (palette.primary.to_iced(), iced::Color::WHITE),
+        button::Status::Active => (palette.primary.to_iced(), on),
+        button::Status::Hovered => (palette.primary_hover.to_iced(), on),
+        button::Status::Pressed => (palette.primary.to_iced(), on),
         button::Status::Disabled => (
             palette.surface_hover.to_iced(),
             palette.text_disabled.to_iced(),

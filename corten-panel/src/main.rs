@@ -4430,7 +4430,7 @@ impl Application for CortenPanelApp {
                                     }
                                 })
                                 .on_press(Message::MprisPrevious(bus.clone())),
-                            button(text(play_icon).size(13.0).color(iced::Color::WHITE))
+                            button(text(play_icon).size(13.0).color(palette.on_primary().to_iced()))
                                 .padding([4, 10])
                                 .style(move |_, status| {
                                     let bg = match status {
@@ -4782,7 +4782,7 @@ impl Application for CortenPanelApp {
                             .padding([8, 14])
                             .on_press(Message::CancelSystemAction)
                             .width(Length::FillPortion(1)),
-                        button(text(t.btn_confirm).size(12.0).color(iced::Color::WHITE))
+                        button(text(t.btn_confirm).size(12.0).color(palette.on_primary().to_iced()))
                             .padding([8, 14])
                             .style(move |_, _| button::Style {
                                 background: Some(iced::Background::Color(palette.danger.to_iced())),
@@ -4981,7 +4981,7 @@ impl Application for CortenPanelApp {
                 let day_chip = container(
                     text(format!("{}", d))
                         .size(11.0)
-                        .color(if is_today { iced::Color::WHITE } else { palette.text_primary.to_iced() })
+                        .color(if is_today { palette.on_primary().to_iced() } else { palette.text_primary.to_iced() })
                 )
                 .width(Length::Fixed(40.0))
                 .height(Length::Fixed(24.0))
@@ -6037,7 +6037,7 @@ impl Application for CortenPanelApp {
                             }
                         })
                         .on_press(Message::TriggerWallpaperCycle),
-                    button(text("Sonraki ›").size(11.0).color(iced::Color::WHITE))
+                    button(text("Sonraki ›").size(11.0).color(palette.on_primary().to_iced()))
                         .padding([4, 8])
                         .style(move |_, status| {
                             let bg = match status {

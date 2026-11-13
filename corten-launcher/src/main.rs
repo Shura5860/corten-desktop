@@ -3786,7 +3786,7 @@ impl Application for CortenLauncherApp {
                         .padding([4, 8])
                         .style(move |_, _| button::Style {
                             background: Some(iced::Background::Color(palette.primary.to_iced())),
-                            text_color: iced::Color::WHITE,
+                            text_color: palette.on_primary().to_iced(),
                             border: iced::Border {
                                 radius: iced::border::Radius::from(Radius::SM),
                                 ..Default::default()
