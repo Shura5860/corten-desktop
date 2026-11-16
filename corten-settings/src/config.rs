@@ -71,7 +71,7 @@ fn default_autohide_mode() -> String {
 }
 
 fn default_pinned_apps() -> Vec<String> {
-    vec!["settings".into(), "files".into(), "corten-ai".into()]
+    vec!["files".into(), "settings".into(), "corten-forge".into()]
 }
 
 impl Default for PanelSettingsConfig {
@@ -212,6 +212,20 @@ pub struct WidgetsSettingsConfig {
     pub scratchpad_enabled: bool,
     #[serde(default = "default_true")]
     pub weather_enabled: bool,
+    #[serde(default = "default_true")]
+    pub network_enabled: bool,
+    #[serde(default = "default_true")]
+    pub clock_enabled: bool,
+    #[serde(default = "default_true")]
+    pub gpu_enabled: bool,
+    #[serde(default = "default_true")]
+    pub weather_forecast_enabled: bool,
+    #[serde(default = "default_true")]
+    pub quick_actions_enabled: bool,
+    #[serde(default = "default_true")]
+    pub disk_enabled: bool,
+    #[serde(default = "default_true")]
+    pub pomodoro_enabled: bool,
     #[serde(default)]
     pub position: WidgetsPositionChoice,
     #[serde(default = "default_widgets_margin")]
@@ -233,6 +247,13 @@ impl Default for WidgetsSettingsConfig {
             sysinfo_enabled: true,
             scratchpad_enabled: true,
             weather_enabled: true,
+            network_enabled: true,
+            clock_enabled: true,
+            gpu_enabled: true,
+            weather_forecast_enabled: true,
+            quick_actions_enabled: true,
+            disk_enabled: true,
+            pomodoro_enabled: true,
             position: WidgetsPositionChoice::TopRight,
             margin: default_widgets_margin(),
         }

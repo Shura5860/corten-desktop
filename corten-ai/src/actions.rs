@@ -31,7 +31,9 @@ impl ActionExecutor {
         let q = query.to_lowercase().trim().to_string();
 
         // Workspace switching
-        if q.contains("çalışma alanı") || q.contains("masaüstü") || q.contains("workspace") {
+        if (q.contains("çalışma alan") || q.contains("workspace") || q.starts_with("masaüstü"))
+            && (q.contains("geç") || q.contains("değiştir") || q.contains("git") || q.starts_with("workspace") || q.starts_with("çalışma alanı") || q.starts_with("masaüstü"))
+        {
             if let Some(num) = extract_number(&q) {
                 if (1..=9).contains(&num) {
                     return DesktopAction::SwitchWorkspace(num as u8);
@@ -40,28 +42,28 @@ impl ActionExecutor {
         }
 
         // Overview / Exposé
-        if q.contains("genel bakış") || q.contains("overview") || q.contains("exposé") || q.contains("tüm pencereler") {
+        if q.contains("genel bakış") || q == "overview" || q == "exposé" || q.contains("tüm pencereleri göster") {
             return DesktopAction::ToggleOverview;
         }
 
         // App launchers
-        if q.contains("terminal aç") || q.contains("konsol aç") || q.contains("terminal başlat") {
+        if q.contains("terminal aç") || q.contains("konsol aç") || q.contains("terminal başlat") || q == "terminal" {
             return DesktopAction::LaunchTerminal;
         }
-        if q.contains("dosya yöneticisi") || q.contains("dosyaları aç") || q.contains("dosya yöneticisini aç") {
+        if q.contains("dosya yöneticisi aç") || q.contains("dosyaları aç") || q.contains("dosya yöneticisini aç") || q == "dosyalar" {
             return DesktopAction::LaunchFileManager;
         }
-        if q.contains("ayarları aç") || q.contains("sistem ayarları") || q.contains("ayarlar") {
+        if q.contains("ayarları aç") || q.contains("sistem ayarları") || q == "ayarlar" || q == "ayarları başlat" {
             return DesktopAction::LaunchSettings;
         }
 
         // Disk summary
-        if q.contains("disk") || q.contains("depolama") || q.contains("boş alan") {
+        if q == "disk" || q == "depolama" || (q.contains("disk") || q.contains("depolama")) && (q.contains("alan") || q.contains("durum") || q.contains("boş") || q.contains("doluluk")) {
             return DesktopAction::DiskSummary;
         }
 
         // Show desktop / Minimize all
-        if q.contains("masaüstünü göster") || q.contains("tüm pencereleri küçült") || q.contains("show desktop") {
+        if q.contains("masaüstünü göster") || q.contains("tüm pencereleri küçült") || q == "show desktop" {
             return DesktopAction::ToggleShowDesktop;
         }
 
@@ -72,12 +74,14 @@ impl ActionExecutor {
         if q.contains("sağa yasla") || q.contains("sağa böl") || q.contains("snap right") {
             return DesktopAction::SnapRight;
         }
-        if q.contains("ekranı kapla") || q.contains("tam ekran") || q.contains("maximize") {
+        if q.contains("ekranı kapla") || q == "tam ekran" || q.contains("pencereyi büyüt") || q == "maximize" {
             return DesktopAction::MaximizeWindow;
         }
 
         // Night light intents
-        if q.contains("gece ışığı") || q.contains("mavi ışık") || q.contains("sıcak renk") || q.contains("night light") {
+        if (q.contains("gece ışığı") || q.contains("mavi ışık") || q.contains("sıcak renk") || q.contains("night light"))
+            && (q.contains("aç") || q.contains("kapat") || q.contains("değiştir") || q.contains("toggle") || q == "gece ışığı")
+        {
             return DesktopAction::ToggleNightLight;
         }
 
@@ -94,39 +98,39 @@ impl ActionExecutor {
             if q.contains("kıs") || q.contains("azalt") || q.contains("down") {
                 return DesktopAction::SetVolume(30);
             }
-            if q.contains("aç") || q.contains("artır") || q.contains("up") {
+            if q.contains("aç") || q.contains("artır") || q.contains("yükselt") || q.contains("up") {
                 return DesktopAction::SetVolume(70);
             }
-            if q.contains("sessiz") || q.contains("mute") {
+            if q.contains("sessiz") || q.contains("mute") || q.contains("kapat") {
                 return DesktopAction::SetVolume(0);
             }
         }
 
         // Brightness intents
-        if q.contains("parlaklık") || q.contains("parlaklığ") || q.contains("ışık") || q.contains("brightness") {
+        if q.contains("parlaklık") || q.contains("parlaklığ") || q.contains("ekran ışığı") || q.contains("brightness") {
             if let Some(pct) = extract_percentage(&q) {
                 return DesktopAction::SetBrightness(pct);
             }
-            if q.contains("kıs") || q.contains("azalt") || q.contains("dim") {
+            if q.contains("kıs") || q.contains("azalt") || q.contains("dim") || q.contains("düşür") {
                 return DesktopAction::SetBrightness(30);
             }
-            if q.contains("aç") || q.contains("artır") || q.contains("bright") {
+            if q.contains("aç") || q.contains("artır") || q.contains("bright") || q.contains("yükselt") {
                 return DesktopAction::SetBrightness(85);
             }
         }
 
         // Screenshot intents
-        if q.contains("ekran görüntüsü") || q.contains("screenshot") || q.contains("kırp") || q.contains("yakala") {
+        if q.contains("ekran görüntüsü") || q.contains("screenshot") || q.contains("ekranı yakala") || q.contains("ekran resmi") {
             return DesktopAction::TakeScreenshot;
         }
 
         // Lock screen intents
-        if q.contains("kilitle") || q.contains("kilit") || q.contains("lock") {
+        if q == "kilitle" || q == "ekranı kilitle" || q.contains("oturumu kilitle") || q == "lock" {
             return DesktopAction::LockScreen;
         }
 
         // System status
-        if q.contains("sistem durumu") || q.contains("ram") || q.contains("cpu") || q.contains("donanım") {
+        if q == "sistem durumu" || q == "sistem bilgisi" || q.contains("sistem durumunu göster") || q.contains("donanım durumu") || q == "cpu ve ram" {
             return DesktopAction::SystemSummary;
         }
 

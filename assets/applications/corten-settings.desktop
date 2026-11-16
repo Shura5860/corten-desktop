@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Corten Settings
+GenericName=Sistem Ayarları
+Comment=Corten Wayland masaüstü ayarları ve yapılandırması
+Exec=corten-settings
+Icon=corten-settings
+Terminal=false
+Type=Application
+Categories=System;Settings;
+Keywords=settings;configuration;preferences;display;audio;appearance;
+StartupNotify=true
+

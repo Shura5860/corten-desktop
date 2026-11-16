@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -46,7 +48,10 @@ jobs:
 
       - name: Package Release Tarball & SHA256
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          VERSION="${GITHUB_REF_NAME:-v0.2.0}"
+          if [[ "${VERSION}" == "main" || "${VERSION}" == "master" ]]; then
+            VERSION="v$(date +'%Y.%m.%d')"
+          fi
           PKG_NAME="corten-desktop-${VERSION}-x86_64-linux"
           mkdir -p "${PKG_NAME}/bin" "${PKG_NAME}/assets" "${PKG_NAME}/systemd" "${PKG_NAME}/packaging"
           for bin in \
@@ -54,7 +59,7 @@ jobs:
             corten-launcher corten-notify corten-settings corten-lock \
             corten-greeter corten-widgets corten-files corten-monitor \
             corten-snipper corten-wallpaper corten-polkit corten-portal \
-            cortenctl corten-ai; do
+            cortenctl corten-ai corten-forge corten-update; do
             cp "target/release/${bin}" "${PKG_NAME}/bin/"
           done
           cp -r assets/* "${PKG_NAME}/assets/"

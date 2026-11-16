@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Corten Welcome
+GenericName=Hoş Geldiniz Sihirbazı
+Comment=Corten Wayland ilk açılış rehberi ve tanıtım sihirbazı
+Exec=corten-welcome
+Icon=corten-welcome
+Terminal=false
+Type=Application
+Categories=System;Settings;Documentation;
+Keywords=welcome;guide;setup;tour;wizard;corten;
+StartupNotify=true
+

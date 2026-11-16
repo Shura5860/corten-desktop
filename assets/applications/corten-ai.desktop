@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Corten AI
+GenericName=Yapay Zeka Asistanı
+Comment=Corten Wayland yerel AI masaüstü asistanı
+Exec=corten-ai
+Icon=corten-ai
+Terminal=false
+Type=Application
+Categories=System;Utility;AI;
+Keywords=ai;assistant;intelligence;gemini;corten;
+StartupNotify=true
+

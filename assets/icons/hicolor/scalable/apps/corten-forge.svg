@@ -1,0 +1,40 @@
+<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <linearGradient id="steel_base" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#282D38"/>
+      <stop offset="45%" stop-color="#1B1E26"/>
+      <stop offset="100%" stop-color="#0E1015"/>
+    </linearGradient>
+    <linearGradient id="copper" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F69256"/>
+      <stop offset="50%" stop-color="#E06C3A"/>
+      <stop offset="100%" stop-color="#9C3A14"/>
+    </linearGradient>
+    <linearGradient id="copper_bright" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFA875"/>
+      <stop offset="100%" stop-color="#E06C3A"/>
+    </linearGradient>
+    <linearGradient id="inner_glow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.02"/>
+    </linearGradient>
+    <filter id="shadow_deep" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.75"/>
+    </filter>
+    <filter id="glyph_shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+  <!-- Outer Squircle with Corten Bevel -->
+  <rect x="6" y="6" width="116" height="116" rx="30" ry="30" fill="url(#steel_base)" stroke="#E06C3A" stroke-width="2.2" stroke-opacity="0.60" filter="url(#shadow_deep)"/>
+  <!-- Specular Inset Rim -->
+  <rect x="8" y="8" width="112" height="112" rx="28" ry="28" fill="url(#inner_glow)" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="1.2"/>
+
+  <!-- Anvil Body -->
+  <path d="M28 46 L100 46 L100 56 L85 61 L85 76 L95 86 L95 94 L33 94 L33 86 L43 76 L43 61 L28 56 Z" fill="url(#copper)" filter="url(#glyph_shadow)"/>
+  <!-- Top Steel Hammer Head / Ingot -->
+  <rect x="46" y="28" width="36" height="12" rx="3" fill="#E2E8F0" stroke="#1B1E26" stroke-width="1.5"/>
+  <!-- Download Beam Energy Arrow -->
+  <path d="M64 36 L64 70 M53 59 L64 70 L75 59" stroke="#101217" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

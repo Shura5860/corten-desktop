@@ -7,6 +7,8 @@ use tracing::info;
 use zbus::connection::Builder;
 use zbus::{proxy, Connection};
 
+pub mod doctor;
+
 #[derive(Error, Debug)]
 pub enum IpcError {
     #[error("D-Bus connection error: {0}")]

@@ -1014,22 +1014,17 @@ impl AuraReActAgent {
             ));
         }
 
-        // Default multi-step fallback: Semantic RAG Search + System Info
+        // Default multi-step fallback
         if planned_calls.is_empty() {
-            planned_calls.push((
-                "web_search",
-                clean.to_string(),
-                format!("`{}` konusu için yerel HNSW vektör veritabanında anlamsal arama yapmalıyım.", clean),
-            ));
             planned_calls.push((
                 "system_info",
                 "".into(),
-                "Yanıtı sistemin güncel çalışma durumuyla zenginleştirmeliyim.".into(),
+                "Sistem telemetrisini ve durumunu kontrol etmeliyim.".into(),
             ));
         }
 
         let mut steps = Vec::new();
-        for (idx, (tool_name, tool_input, thought)) in planned_calls.into_iter().take(4).enumerate() {
+        for (idx, (tool_name, tool_input, thought)) in planned_calls.into_iter().take(3).enumerate() {
             let obs = AuraToolRegistry::execute_tool(tool_name, &tool_input);
             steps.push(ReActStep {
                 step_num: idx + 1,
@@ -1043,12 +1038,21 @@ impl AuraReActAgent {
         let mut trace_blocks = Vec::new();
         let mut summary_points = Vec::new();
         for s in &steps {
+            let compact_obs = {
+                let lines: Vec<&str> = s.observation.lines().collect();
+                if lines.len() > 6 {
+                    format!("{}\n... *(özetlendi)*", lines.iter().take(5).cloned().collect::<Vec<_>>().join("\n"))
+                } else {
+                    s.observation.clone()
+                }
+            };
+
             trace_blocks.push(format!(
                 "**[Adım {}]**\n\
                 💭 **Düşünce (Thought):** {}\n\
                 🛠️ **Eylem (Action):** `{}` *(Girdi: `{}`)*\n\
                 👁️ **Gözlem (Observation):**\n{}",
-                s.step_num, s.thought, s.action, s.action_input, s.observation
+                s.step_num, s.thought, s.action, s.action_input, compact_obs
             ));
             summary_points.push(format!("• `{}` aracı çalıştırıldı.", s.action));
         }

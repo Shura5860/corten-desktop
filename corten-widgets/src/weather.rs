@@ -4,13 +4,24 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForecastDay {
+    pub day_name: String,
+    pub max_temp: i32,
+    pub min_temp: i32,
+    pub condition: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WeatherData {
     pub location: String,
     pub temperature: f32,
+    pub feels_like: f32,
     pub condition: String,
     pub icon: String,
     pub humidity: u8,
     pub wind_speed: f32,
+    pub pressure_hpa: u32,
+    pub forecast: Vec<ForecastDay>,
 }
 
 impl Default for WeatherData {
@@ -18,10 +29,32 @@ impl Default for WeatherData {
         Self {
             location: "İstanbul".to_string(),
             temperature: 19.5,
+            feels_like: 19.0,
             condition: "Güneşli".to_string(),
             icon: "☀️".to_string(),
             humidity: 62,
             wind_speed: 14.0,
+            pressure_hpa: 1016,
+            forecast: vec![
+                ForecastDay {
+                    day_name: "Yarın".to_string(),
+                    max_temp: 21,
+                    min_temp: 14,
+                    condition: "Parçalı Bulutlu".to_string(),
+                },
+                ForecastDay {
+                    day_name: "Çarşamba".to_string(),
+                    max_temp: 19,
+                    min_temp: 12,
+                    condition: "Güneşli".to_string(),
+                },
+                ForecastDay {
+                    day_name: "Perşembe".to_string(),
+                    max_temp: 17,
+                    min_temp: 11,
+                    condition: "Yağmurlu".to_string(),
+                },
+            ],
         }
     }
 }
@@ -90,9 +123,12 @@ impl WeatherService {
         struct CurrentCondition {
             #[serde(rename = "temp_C")]
             temp_c: String,
+            #[serde(rename = "FeelsLikeC")]
+            feels_like_c: Option<String>,
             humidity: String,
             #[serde(rename = "windspeedKmph")]
             wind_kmph: String,
+            pressure: Option<String>,
             #[serde(rename = "weatherDesc")]
             weather_desc: Vec<ValueObj>,
         }
@@ -112,8 +148,18 @@ impl WeatherService {
         let cur = parsed.current_condition.first().ok_or(())?;
 
         let temp = cur.temp_c.parse::<f32>().unwrap_or(19.0);
+        let feels_like = cur
+            .feels_like_c
+            .as_deref()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(temp);
         let humidity = cur.humidity.parse::<u8>().unwrap_or(60);
         let wind = cur.wind_kmph.parse::<f32>().unwrap_or(10.0);
+        let pressure = cur
+            .pressure
+            .as_deref()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1015);
 
         let desc = cur
             .weather_desc
@@ -128,13 +174,18 @@ impl WeatherService {
 
         let (condition, icon) = map_condition(desc);
 
+        let default_forecast = WeatherData::default().forecast;
+
         Ok(WeatherData {
             location,
             temperature: temp,
+            feels_like,
             condition,
             icon,
             humidity,
             wind_speed: wind,
+            pressure_hpa: pressure,
+            forecast: default_forecast,
         })
     }
 }

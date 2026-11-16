@@ -1,5 +1,6 @@
 //! `cortenctl` - Official command-line control and event streaming tool for Corten Desktop.
 
+use corten_ipc::doctor;
 use corten_ipc::{
     event_socket_path, get_session_connection, CompositorControlProxy,
     NotificationControlProxy, PanelControlProxy,
@@ -28,6 +29,8 @@ USAGE:
     cortenctl notify dnd                    Toggle Do-Not-Disturb mode
     cortenctl notify clear                  Dismiss all active notifications
 
+    cortenctl doctor [--markdown]           Run system health and hardware diagnostics
+
 OPTIONS:
     -h, --help                              Print this help message
     -v, --version                           Print version information
@@ -49,6 +52,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     match args[1].as_str() {
+        "doctor" | "diagnose" | "diag" => {
+            let markdown = args.iter().any(|a| a == "--markdown" || a == "-m");
+            let mut doc = doctor::SystemDoctor::new();
+            doc.run_all_diagnostics();
+            doc.print_report(markdown);
+            return Ok(());
+        }
         "subscribe" => {
             let sock_path = event_socket_path();
             if !sock_path.exists() {

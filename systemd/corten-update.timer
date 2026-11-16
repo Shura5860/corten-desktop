@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodic Check for Corten Desktop OTA Updates
+Documentation=https://github.com/Shura5860/corten-desktop
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=4h
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
+

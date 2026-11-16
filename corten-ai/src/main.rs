@@ -1,10 +1,14 @@
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::info;
 
-use corten_config::{AppearanceConfig, ConfigManager};
+use corten_config::{AiSettingsConfig, AppearanceConfig, ConfigManager};
 use corten_theme::iced_styles::input_style;
-use corten_theme::{Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT_BYTES};
+use corten_theme::{
+    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT,
+    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
+};
 use iced::keyboard::key::Named;
 use iced::keyboard::Key;
 use iced::widget::{
@@ -42,7 +46,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             "--version" | "-V" => {
-                println!("corten-ai 0.2.0 (Pure Rust AURA-CORE)");
+                println!("corten-ai 0.2.0 (Pure Rust AURA-CORE — Executive Side-Deck)");
                 return Ok(());
             }
             "--ask" | "-q" if args.len() > 2 => {
@@ -57,6 +61,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                     while let Some(chunk) = rx.recv().await {
                         match chunk {
                             StreamChunk::Token(tok) => print!("{tok}"),
+                            StreamChunk::Thought(_) => {}
                             StreamChunk::ActionExecuted(act) => println!("\n{act}"),
                             StreamChunk::Error(err) => eprintln!("Hata: {err}"),
                             StreamChunk::Done => {
@@ -92,7 +97,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    info!("Starting Corten AI Assistant HUD (corten-ai v0.2.0)...");
+    info!("Starting Corten AI Assistant Executive Side-Deck (corten-ai v0.2.0)...");
 
     let initial_query = if args.len() > 1 && args[1] == "--prompt" && args.len() > 2 {
         Some(args[2..].join(" "))
@@ -115,18 +120,21 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     CortenAiApp::run(Settings {
         id: Some("corten-ai".into()),
         flags,
-        fonts: vec![Cow::Borrowed(LUCIDE_FONT_BYTES)],
+        fonts: vec![
+            Cow::Borrowed(LUCIDE_FONT_BYTES),
+            Cow::Borrowed(NOTO_SANS_BYTES),
+        ],
         layer_settings: LayerShellSettings {
-            anchor: Anchor::empty(), // Centered floating window
+            anchor: Anchor::Top | Anchor::Bottom | Anchor::Right,
             layer: Layer::Top,
-            margin: (0, 0, 0, 0),
+            margin: (44, 12, 12, 0),
             exclusive_zone: 0,
-            size: Some((740, 540)),
+            size: Some((500, 0)),
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
             binded_output_name: None,
         },
-        default_font: iced::Font::default(),
-        default_text_size: iced::Pixels(14.0),
+        default_font: NOTO_SANS,
+        default_text_size: iced::Pixels(13.5),
         antialiasing: true,
         virtual_keyboard_support: None,
     })?;
@@ -138,16 +146,28 @@ pub struct AppFlags {
     pub initial_query: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeckLayoutMode {
+    SideDeck,
+    FloatingHub,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
+    InitCompleted(BackendType, Option<String>),
     QueryInputChanged(String),
     SubmitQuery,
+    StopStreaming,
     QuickAction(String),
     AnalyzeScreenRequested,
     RefreshBackend,
     BackendDetected(BackendType),
+    SelectModelTier(String),
+    ToggleDeckMode,
     StreamStarted(Arc<Mutex<UnboundedReceiver<StreamChunk>>>),
     StreamChunkReceived(StreamChunk),
+    ToggleThought(usize),
+    ToggleActiveThought,
     ClearChat,
     CopyCode(String, usize),
     ResetCopyStatus,
@@ -170,8 +190,10 @@ impl TryInto<LayershellCustomActions> for Message {
 
 pub struct CortenAiApp {
     backend: BackendType,
+    ai_config: AiSettingsConfig,
     history: Vec<ChatMessage>,
     active_stream_content: String,
+    active_stream_thought: String,
     stream_rx: Option<Arc<Mutex<UnboundedReceiver<StreamChunk>>>>,
     query_input: String,
     is_loading: bool,
@@ -179,6 +201,9 @@ pub struct CortenAiApp {
     active_patina: PatinaVariant,
     copied_index: Option<usize>,
     cursor_blink: bool,
+    expanded_thoughts: HashSet<usize>,
+    active_thought_expanded: bool,
+    layout_mode: DeckLayoutMode,
 }
 
 impl Application for CortenAiApp {
@@ -192,12 +217,18 @@ impl Application for CortenAiApp {
             .map(|c| PatinaVariant::from_code(&c.get().patina))
             .unwrap_or(PatinaVariant::Rust);
 
+        let ai_config = ConfigManager::<AiSettingsConfig>::load_or_default("ai")
+            .map(|c| c.get().clone())
+            .unwrap_or_default();
+
         let initial_query = flags.initial_query;
 
         let app = Self {
             backend: BackendType::Offline,
+            ai_config: ai_config.clone(),
             history: Vec::new(),
             active_stream_content: String::new(),
+            active_stream_thought: String::new(),
             stream_rx: None,
             query_input: initial_query.clone().unwrap_or_default(),
             is_loading: initial_query.is_some(),
@@ -205,21 +236,17 @@ impl Application for CortenAiApp {
             active_patina,
             copied_index: None,
             cursor_blink: true,
+            expanded_thoughts: HashSet::new(),
+            active_thought_expanded: false,
+            layout_mode: DeckLayoutMode::SideDeck,
         };
 
-        // Initialize backend probe and optionally submit initial query
         let init_task = Task::perform(
             async move {
-                let detected = AiEngine::auto_detect().await;
+                let detected = AiEngine::auto_detect_with_config(Some(&ai_config)).await;
                 (detected, initial_query)
             },
-            |(detected, opt_q)| {
-                if opt_q.is_some() {
-                    Message::SubmitQuery
-                } else {
-                    Message::BackendDetected(detected)
-                }
-            },
+            |(detected, opt_q)| Message::InitCompleted(detected, opt_q),
         );
 
         (app, init_task)
@@ -239,18 +266,106 @@ impl Application for CortenAiApp {
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         match message {
+            Message::InitCompleted(detected, opt_q) => {
+                self.backend = detected;
+                if let Some(q) = opt_q {
+                    self.query_input = q;
+                    return Task::done(Message::SubmitQuery);
+                }
+            }
+            Message::ToggleThought(idx) => {
+                if self.expanded_thoughts.contains(&idx) {
+                    self.expanded_thoughts.remove(&idx);
+                } else {
+                    self.expanded_thoughts.insert(idx);
+                }
+            }
+            Message::ToggleActiveThought => {
+                self.active_thought_expanded = !self.active_thought_expanded;
+            }
+            Message::StopStreaming => {
+                if self.is_loading {
+                    self.is_loading = false;
+                    self.stream_rx = None;
+                    let thought = if self.active_stream_thought.trim().is_empty() {
+                        None
+                    } else {
+                        Some(self.active_stream_thought.clone())
+                    };
+                    let mut content = self.active_stream_content.clone();
+                    if !content.trim().is_empty() {
+                        content.push_str("\n\n*(Üretim kullanıcı tarafından durduruldu)*");
+                        self.history.push(ChatMessage {
+                            role: MessageRole::Assistant,
+                            content,
+                            thought,
+                        });
+                    }
+                    self.active_stream_content.clear();
+                    self.active_stream_thought.clear();
+                }
+            }
             Message::QueryInputChanged(val) => {
                 self.query_input = val;
             }
             Message::RefreshBackend => {
-                return Task::perform(AiEngine::auto_detect(), Message::BackendDetected);
+                let cfg = self.ai_config.clone();
+                return Task::perform(
+                    async move { AiEngine::auto_detect_with_config(Some(&cfg)).await },
+                    Message::BackendDetected,
+                );
             }
             Message::BackendDetected(b) => {
                 self.backend = b;
             }
+            Message::SelectModelTier(new_tier) => {
+                if self.ai_config.model_tier != new_tier {
+                    self.ai_config.model_tier = new_tier;
+                    if let Ok(mut mgr) = ConfigManager::<AiSettingsConfig>::load_or_default("ai") {
+                        let _ = mgr.update(self.ai_config.clone());
+                    }
+                    let cfg = self.ai_config.clone();
+                    return Task::perform(
+                        async move { AiEngine::auto_detect_with_config(Some(&cfg)).await },
+                        Message::BackendDetected,
+                    );
+                }
+            }
+            Message::ToggleDeckMode => {
+                self.layout_mode = match self.layout_mode {
+                    DeckLayoutMode::SideDeck => DeckLayoutMode::FloatingHub,
+                    DeckLayoutMode::FloatingHub => DeckLayoutMode::SideDeck,
+                };
+                return match self.layout_mode {
+                    DeckLayoutMode::SideDeck => Task::batch(vec![
+                        Task::done(Message::LayerAction(LayershellCustomActions::AnchorChange(
+                            Anchor::Top | Anchor::Bottom | Anchor::Right,
+                        ))),
+                        Task::done(Message::LayerAction(LayershellCustomActions::MarginChange(
+                            (44, 12, 12, 0),
+                        ))),
+                        Task::done(Message::LayerAction(LayershellCustomActions::SizeChange((
+                            500, 0,
+                        )))),
+                    ]),
+                    DeckLayoutMode::FloatingHub => Task::batch(vec![
+                        Task::done(Message::LayerAction(LayershellCustomActions::AnchorChange(
+                            Anchor::empty(),
+                        ))),
+                        Task::done(Message::LayerAction(LayershellCustomActions::MarginChange(
+                            (0, 0, 0, 0),
+                        ))),
+                        Task::done(Message::LayerAction(LayershellCustomActions::SizeChange((
+                            780, 640,
+                        )))),
+                    ]),
+                };
+            }
             Message::ClearChat => {
                 self.history.clear();
                 self.active_stream_content.clear();
+                self.active_stream_thought.clear();
+                self.expanded_thoughts.clear();
                 self.is_loading = false;
             }
             Message::SubmitQuery => {
@@ -258,12 +373,13 @@ impl Application for CortenAiApp {
                 if !q.is_empty() && !self.is_loading {
                     self.is_loading = true;
                     self.active_stream_content.clear();
+                    self.active_stream_thought.clear();
                     self.query_input.clear();
 
-                    // Push user message to history
                     self.history.push(ChatMessage {
                         role: MessageRole::User,
                         content: q.clone(),
+                        thought: None,
                     });
 
                     let backend = self.backend.clone();
@@ -290,12 +406,15 @@ impl Application for CortenAiApp {
             Message::AnalyzeScreenRequested => {
                 if !self.is_loading {
                     self.is_loading = true;
-                    self.active_stream_content = "Ekran görüntüsü alınıyor ve görsel analiz yapılıyor...".into();
+                    self.active_stream_content =
+                        "📸 Ekran görüntüsü yakalandı. Görsel analiz yapılıyor...".into();
+                    self.active_stream_thought.clear();
 
                     let query = "Şu an ekranda ne var? Açık pencereleri, içeriği ve önemli ayrıntıları analiz et.".to_string();
                     self.history.push(ChatMessage {
                         role: MessageRole::User,
-                        content: "📸 [Ekran Analiz Talebi]".into(),
+                        content: "📸 [Ekran Görsel Analiz Talebi]".into(),
+                        thought: None,
                     });
 
                     let backend = self.backend.clone();
@@ -306,7 +425,8 @@ impl Application for CortenAiApp {
                             let screen_base64 = AiEngine::capture_screen_base64();
                             let (tx, rx) = unbounded_channel();
                             tokio::spawn(async move {
-                                AiEngine::stream_query(backend, history, query, screen_base64, tx).await;
+                                AiEngine::stream_query(backend, history, query, screen_base64, tx)
+                                    .await;
                             });
                             Arc::new(Mutex::new(rx))
                         },
@@ -316,10 +436,14 @@ impl Application for CortenAiApp {
             }
             Message::StreamStarted(rx_arc) => {
                 self.active_stream_content.clear();
+                self.active_stream_thought.clear();
                 self.stream_rx = Some(rx_arc);
             }
             Message::StreamChunkReceived(chunk) => {
                 match chunk {
+                    StreamChunk::Thought(t) => {
+                        self.active_stream_thought.push_str(&t);
+                    }
                     StreamChunk::Token(token) => {
                         self.active_stream_content.push_str(&token);
                     }
@@ -330,23 +454,38 @@ impl Application for CortenAiApp {
                         self.active_stream_content.push_str(&format!("\n\n⚠️ Hata: {}", err));
                         self.is_loading = false;
                         self.stream_rx = None;
+                        let thought = if self.active_stream_thought.trim().is_empty() {
+                            None
+                        } else {
+                            Some(self.active_stream_thought.clone())
+                        };
                         if !self.active_stream_content.trim().is_empty() {
                             self.history.push(ChatMessage {
                                 role: MessageRole::Assistant,
                                 content: self.active_stream_content.clone(),
+                                thought,
                             });
                         }
+                        self.active_stream_content.clear();
+                        self.active_stream_thought.clear();
                     }
                     StreamChunk::Done => {
                         self.is_loading = false;
                         self.stream_rx = None;
+                        let thought = if self.active_stream_thought.trim().is_empty() {
+                            None
+                        } else {
+                            Some(self.active_stream_thought.clone())
+                        };
                         if !self.active_stream_content.trim().is_empty() {
                             self.history.push(ChatMessage {
                                 role: MessageRole::Assistant,
                                 content: self.active_stream_content.clone(),
+                                thought,
                             });
                         }
                         self.active_stream_content.clear();
+                        self.active_stream_thought.clear();
                     }
                 }
             }
@@ -382,6 +521,17 @@ impl Application for CortenAiApp {
                         self.active_patina = new_patina;
                     }
                 }
+                if let Ok(ai_cfg_mgr) = ConfigManager::<AiSettingsConfig>::load_or_default("ai") {
+                    let current_ai = ai_cfg_mgr.get().clone();
+                    if current_ai != self.ai_config {
+                        self.ai_config = current_ai;
+                        let cfg = self.ai_config.clone();
+                        return Task::perform(
+                            async move { AiEngine::auto_detect_with_config(Some(&cfg)).await },
+                            Message::BackendDetected,
+                        );
+                    }
+                }
             }
             Message::CloseRequested => {
                 std::process::exit(0);
@@ -390,6 +540,9 @@ impl Application for CortenAiApp {
                 key: Key::Named(Named::Escape),
                 ..
             })) => {
+                if self.is_loading {
+                    return Task::done(Message::StopStreaming);
+                }
                 std::process::exit(0);
             }
             Message::EventTriggered(_) => {}
@@ -401,115 +554,298 @@ impl Application for CortenAiApp {
     fn view(&self) -> Element<'_, Self::Message> {
         let palette = Palette::for_mode(self.theme_mode).with_patina(self.active_patina);
 
-        // Header: Brand, Backend badge pill, Clear button, Close button
-        let (badge_text, badge_color) = match &self.backend {
-            BackendType::NativeGguf { model_name, .. } => {
-                (format!("● Saf Rust GGUF ({})", model_name), palette.success.to_iced())
-            }
-            BackendType::Ollama { model, .. } => (format!("● Ollama ({})", model), palette.success.to_iced()),
-            BackendType::LlamaCpp { model, .. } => (format!("● llama-server ({})", model), palette.success.to_iced()),
-            BackendType::AuraCore { .. } => ("● AURA-CORE (8000)".into(), palette.primary.to_iced()),
-            BackendType::Offline => ("○ Çevrimdışı / Vektör & Eylem Modu".into(), palette.warning.to_iced()),
+        // 1. Header: Brand, Mode Switcher, Clear & Close Buttons
+        let mode_label = if self.layout_mode == DeckLayoutMode::SideDeck {
+            "⧉ Yüzen Mod"
+        } else {
+            "⇲ Kenar Deck"
         };
 
-        let badge_btn = button(
-            container(
-                text(if self.is_loading { "Düşünüyor...".to_string() } else { badge_text })
-                    .size(Typography::CAPTION)
-                    .color(if self.is_loading { palette.warning.to_iced() } else { badge_color }),
-            )
-            .padding([3, 8])
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(Radius::FULL),
-                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10),
-                    width: 1.0,
-                },
-                ..Default::default()
-            }),
-        )
-        .padding(0)
-        .style(|_, _| button::Style::default())
-        .on_press(Message::RefreshBackend);
-
-        let clear_btn = button(
-            text("🧹 Temizle")
-                .size(Typography::CAPTION)
-                .color(palette.text_muted.to_iced()),
-        )
-        .padding([4, 8])
-        .style(|_, status| {
-            let bg = match status {
-                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10),
-                _ => iced::Color::TRANSPARENT,
-            };
-            button::Style {
-                background: Some(iced::Background::Color(bg)),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(Radius::SM),
+        let header_row = row![
+            row![
+                text("⬡ CORTEN AURA")
+                    .size(Typography::TITLE_SM)
+                    .color(palette.primary.to_iced()),
+                container(
+                    text("v0.2.0")
+                        .size(10.0)
+                        .color(palette.text_muted.to_iced())
+                )
+                .padding([2, 6])
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(Radius::SM),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
-        .on_press(Message::ClearChat);
-
-        let title_row = row![
-            text("⚡ Corten AI")
-                .size(Typography::TITLE_SM)
-                .color(palette.primary.to_iced()),
-            badge_btn,
+                }),
+            ]
+            .spacing(Spacing::XS)
+            .align_y(Alignment::Center),
             horizontal_space(),
-            clear_btn,
-            button(text("✕ ESC").size(Typography::CAPTION).color(palette.text_muted.to_iced()))
-                .padding([4, 8])
-                .style(|_, _| button::Style::default())
-                .on_press(Message::CloseRequested),
+            button(
+                text(mode_label)
+                    .size(11.0)
+                    .color(palette.text_primary.to_iced()),
+            )
+            .padding([4, 8])
+            .style(move |_, status| {
+                let bg = match status {
+                    button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10),
+                    _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::ToggleDeckMode),
+            button(
+                text("🧹 Temizle")
+                    .size(11.0)
+                    .color(palette.text_muted.to_iced()),
+            )
+            .padding([4, 8])
+            .style(move |_, status| {
+                let bg = match status {
+                    button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10),
+                    _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::ClearChat),
+            button(
+                text("✕ ESC")
+                    .size(11.0)
+                    .color(palette.text_muted.to_iced()),
+            )
+            .padding([4, 8])
+            .style(move |_, status| {
+                let bg = match status {
+                    button::Status::Hovered => iced::Color::from_rgba(0.85, 0.25, 0.2, 0.35),
+                    _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::CloseRequested),
         ]
-        .spacing(Spacing::SM)
+        .spacing(Spacing::XS)
         .align_y(Alignment::Center);
 
-        // Chat conversation history + live stream container
-        let mut chat_column = column![].spacing(Spacing::MD).padding(Spacing::SM);
+        // 2. Bento Telemetry Box: Status & Model Tier Pills
+        let (status_label, engine_detail) = match &self.backend {
+            BackendType::NativeGguf { model_name, .. } => (
+                format!("Saf Rust GGUF ({})", model_name),
+                "Yerel Bellek • Optimize",
+            ),
+            BackendType::Ollama {
+                model,
+                tier_label,
+                has_vision,
+                ..
+            } => (
+                format!("Ollama: {} [{}]", model, tier_label),
+                if *has_vision {
+                    "Aktif • 👁 Görsel Destekli"
+                } else {
+                    "Aktif Motor • 11434"
+                },
+            ),
+            BackendType::LlamaCpp { model, .. } => (
+                format!("llama-server: {}", model),
+                "Aktif Motor • 8080",
+            ),
+            BackendType::AuraCore { .. } => (
+                "AURA-CORE (8000)".to_string(),
+                "Yüksek Başarım Motoru",
+            ),
+            BackendType::Offline => (
+                "Çevrimdışı (Masaüstü Eylem Modu)".to_string(),
+                "Yerel Araçlar • Çevrimdışı",
+            ),
+        };
 
-        if self.history.is_empty() && self.active_stream_content.is_empty() {
-            // Welcome card
-            let welcome = container(
-                column![
-                    text("👋 Merhaba! Ben Corten Desktop Yerel Yapay Zekâ Asistanınız.")
-                        .size(Typography::BODY)
-                        .color(palette.primary.to_iced()),
-                    vertical_space().height(4),
-                    text("Tamamen yerel ve gizlilik odaklı mimariyle doğrudan masaüstünüzü yönetebilirim:\n\
-                          • \"Sesi %50 yap\" veya \"gece ışığını aç\"\n\
-                          • \"Ekran görüntüsü al\" veya \"ekranı analiz et\"\n\
-                          • \"En çok RAM kullanan uygulamalar\"\n\
-                          • \"3. çalışma alanına geç\"\n\
-                          • Kod yazma, hata ayıklama ve sistem analizi...")
-                        .size(Typography::BODY_SM)
+        let is_eco = self.ai_config.model_tier.to_lowercase() == "eco";
+        let is_balanced = self.ai_config.model_tier.to_lowercase() == "balanced";
+        let is_pro = self.ai_config.model_tier.to_lowercase() == "pro";
+
+        let telemetry_bento = container(
+            column![
+                row![
+                    button(
+                        row![
+                            text(Icon::CPU).font(LUCIDE_FONT).size(13.0).color(palette.primary.to_iced()),
+                            text(if self.is_loading {
+                                "Düşünüyor / Üretiyor...".to_string()
+                            } else {
+                                status_label.clone()
+                            })
+                            .size(11.5)
+                            .color(palette.text_primary.to_iced()),
+                        ]
+                        .spacing(6)
+                        .align_y(Alignment::Center)
+                    )
+                    .padding(0)
+                    .style(|_, _| button::Style::default())
+                    .on_press(Message::RefreshBackend),
+                    horizontal_space(),
+                    text(engine_detail)
+                        .size(10.5)
                         .color(palette.text_muted.to_iced()),
+                ]
+                .align_y(Alignment::Center),
+                row![
+                    text("Kademe:")
+                        .size(11.0)
+                        .color(palette.text_muted.to_iced()),
+                    Self::tier_pill_button("Eco (1.5B)", "eco", is_eco, palette),
+                    Self::tier_pill_button("Dengeli (3B)", "balanced", is_balanced, palette),
+                    Self::tier_pill_button("Pro (7B)", "pro", is_pro, palette),
+                ]
+                .spacing(Spacing::XS)
+                .align_y(Alignment::Center),
+            ]
+            .spacing(Spacing::XS),
+        )
+        .padding([8, 12])
+        .width(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.025))),
+            border: iced::Border {
+                color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                width: 1.0,
+                radius: iced::border::Radius::from(Radius::MD),
+            },
+            ..Default::default()
+        });
+
+        // 3. Bento Quick Action Strip
+        let chips_row = row![
+            Self::chip_button("📸 Ekran Analizi", palette, Message::AnalyzeScreenRequested),
+            Self::chip_button(
+                "⚡ Sistem Durumu",
+                palette,
+                Message::QuickAction("sistem durumu ve donanım kullanımını özetle".into())
+            ),
+            Self::chip_button(
+                "🤖 ReAct Ajan",
+                palette,
+                Message::QuickAction("react: açık pencereleri ve masaüstü durumunu listele".into())
+            ),
+            Self::chip_button(
+                "🔍 Vektör Ara",
+                palette,
+                Message::QuickAction("vektör ara: wayland".into())
+            ),
+            Self::chip_button("🧠 Hafıza", palette, Message::QuickAction("hafıza".into())),
+        ]
+        .spacing(Spacing::XS);
+
+        // 4. Conversation Feed
+        let mut chat_column = column![].spacing(Spacing::MD).padding(Spacing::XS);
+
+        if self.history.is_empty()
+            && self.active_stream_content.is_empty()
+            && self.active_stream_thought.is_empty()
+        {
+            let welcome_bento = container(
+                column![
+                    row![
+                        text("⚡")
+                            .size(Typography::TITLE)
+                            .color(palette.primary.to_iced()),
+                        column![
+                            text("Corten Executive Copilot")
+                                .size(Typography::BODY)
+                                .color(palette.text_primary.to_iced()),
+                            text("Saf Rust mimarili, yerel ve tam gizlilik odaklı masaüstü asistanı.")
+                                .size(Typography::CAPTION)
+                                .color(palette.text_muted.to_iced()),
+                        ]
+                        .spacing(2),
+                    ]
+                    .spacing(Spacing::SM)
+                    .align_y(Alignment::Center),
+                    vertical_space().height(Spacing::XXS),
+                    row![
+                        Self::feature_mini_card(
+                            "🖥️ Masaüstü Yönetimi",
+                            "Ses, parlaklık, pencere ve çalışma alanlarını doğrudan yönetin.",
+                            palette
+                        ),
+                        Self::feature_mini_card(
+                            "📸 Multimodal Görsel",
+                            "Ekranda ne olduğunu tek tıkla inceletip teşhis alın.",
+                            palette
+                        ),
+                    ]
+                    .spacing(Spacing::XS),
+                    row![
+                        Self::feature_mini_card(
+                            "🛠️ Sistem Teşhisi",
+                            "Donanım, bellek ve disk durumunu anında raporlayın.",
+                            palette
+                        ),
+                        Self::feature_mini_card(
+                            "🔒 %100 Yerel Mimari",
+                            "Verileriniz cihazınızda kalır, telemetri sızdırılmaz.",
+                            palette
+                        ),
+                    ]
+                    .spacing(Spacing::XS),
+                    vertical_space().height(Spacing::XXS),
+                    text("Hızlı İpuçları:")
+                        .size(11.0)
+                        .color(palette.text_muted.to_iced()),
+                    row![
+                        Self::prompt_chip("\"Gece ışığını aç ve sesi %50 yap\"", palette),
+                        Self::prompt_chip("\"En çok RAM kullanan uygulamalar\"", palette),
+                    ]
+                    .spacing(Spacing::XS),
                 ]
                 .spacing(Spacing::XS),
             )
             .padding(Spacing::MD)
             .width(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
                 border: iced::Border {
-                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05),
                     width: 1.0,
-                    radius: iced::border::Radius::from(Radius::MD),
+                    radius: iced::border::Radius::from(Radius::LG),
                 },
                 ..Default::default()
             });
 
-            chat_column = chat_column.push(welcome);
+            chat_column = chat_column.push(welcome_bento);
         }
 
         let mut code_block_idx = 0;
 
-        for msg in &self.history {
+        for (msg_idx, msg) in self.history.iter().enumerate() {
             match msg.role {
                 MessageRole::User => {
                     let user_bubble = container(
@@ -523,10 +859,15 @@ impl Application for CortenAiApp {
                             palette.primary.r,
                             palette.primary.g,
                             palette.primary.b,
-                            0.20,
+                            0.18,
                         ))),
                         border: iced::Border {
-                            color: palette.primary.to_iced(),
+                            color: iced::Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.45,
+                            ),
                             width: 1.0,
                             radius: iced::border::Radius::from(Radius::MD),
                         },
@@ -540,63 +881,214 @@ impl Application for CortenAiApp {
                     );
                 }
                 MessageRole::Assistant | MessageRole::System => {
+                    let mut assistant_box = column![].spacing(Spacing::XS).width(Length::Fill);
+
+                    if let Some(ref thought) = msg.thought {
+                        let is_open = self.expanded_thoughts.contains(&msg_idx);
+                        let toggle_btn = button(
+                            text(if is_open {
+                                "▾ 💭 Düşünce Süreci (Gizle)"
+                            } else {
+                                "▸ 💭 Düşünce Süreci (Aç)"
+                            })
+                            .size(11.0)
+                            .color(palette.text_muted.to_iced()),
+                        )
+                        .padding([3, 7])
+                        .style(move |_, status| {
+                            let bg = match status {
+                                button::Status::Hovered => {
+                                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+                                }
+                                _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03),
+                            };
+                            button::Style {
+                                background: Some(iced::Background::Color(bg)),
+                                border: iced::Border {
+                                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                                    width: 1.0,
+                                    radius: iced::border::Radius::from(Radius::SM),
+                                },
+                                ..Default::default()
+                            }
+                        })
+                        .on_press(Message::ToggleThought(msg_idx));
+
+                        let thought_box = if is_open {
+                            column![
+                                toggle_btn,
+                                container(
+                                    text(thought)
+                                        .size(11.0)
+                                        .color(palette.text_muted.to_iced())
+                                )
+                                .padding([8, 10])
+                                .width(Length::Fill)
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(
+                                        iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                                    )),
+                                    border: iced::Border {
+                                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                                        width: 1.0,
+                                        radius: iced::border::Radius::from(Radius::SM),
+                                    },
+                                    ..Default::default()
+                                }),
+                            ]
+                            .spacing(4)
+                        } else {
+                            column![toggle_btn]
+                        };
+                        assistant_box = assistant_box.push(thought_box);
+                    }
+
                     let rendered = Self::render_rich_message(
                         &msg.content,
                         palette,
                         &mut code_block_idx,
                         self.copied_index,
                     );
-                    chat_column = chat_column.push(rendered);
+                    assistant_box = assistant_box.push(rendered);
+
+                    let wrapped_card = container(assistant_box)
+                        .padding([10, 12])
+                        .width(Length::Fill)
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                1.0, 1.0, 1.0, 0.02,
+                            ))),
+                            border: iced::Border {
+                                color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                                width: 1.0,
+                                radius: iced::border::Radius::from(Radius::MD),
+                            },
+                            ..Default::default()
+                        });
+
+                    chat_column = chat_column.push(wrapped_card);
                 }
             }
         }
 
-        // Active streaming message
-        if !self.active_stream_content.is_empty() || self.is_loading {
+        // Active streaming thought
+        if !self.active_stream_thought.is_empty() {
+            let is_open = self.active_thought_expanded;
+            let toggle_btn = button(
+                text(if is_open {
+                    "▾ 💭 Düşünce Akışı (Gizle)"
+                } else {
+                    "▸ 💭 Düşünce Akışı (Göster)"
+                })
+                .size(11.0)
+                .color(palette.warning.to_iced()),
+            )
+            .padding([3, 7])
+            .style(move |_, status| {
+                let bg = match status {
+                    button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03),
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::ToggleActiveThought);
+
+            let thought_box = if is_open {
+                column![
+                    toggle_btn,
+                    container(
+                        text(&self.active_stream_thought)
+                            .size(11.0)
+                            .color(palette.text_muted.to_iced())
+                    )
+                    .padding([8, 10])
+                    .width(Length::Fill)
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(
+                            0.0, 0.0, 0.0, 0.35,
+                        ))),
+                        border: iced::Border {
+                            color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                            width: 1.0,
+                            radius: iced::border::Radius::from(Radius::SM),
+                        },
+                        ..Default::default()
+                    }),
+                ]
+                .spacing(4)
+            } else {
+                column![toggle_btn]
+            };
+            chat_column = chat_column.push(thought_box);
+        }
+
+        // Active streaming content
+        if !self.active_stream_content.is_empty()
+            || (self.is_loading && self.active_stream_thought.is_empty())
+        {
             let mut stream_text = self.active_stream_content.clone();
             if self.is_loading {
                 stream_text.push_str(if self.cursor_blink { " ▋" } else { "  " });
             }
-            let rendered = Self::render_rich_message(
-                &stream_text,
-                palette,
-                &mut code_block_idx,
-                self.copied_index,
-            );
+            let rendered = if !stream_text.contains("```") {
+                container(
+                    text(stream_text)
+                        .size(Typography::BODY_SM)
+                        .color(palette.text_primary.to_iced()),
+                )
+                .padding([10, 12])
+                .width(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.02,
+                    ))),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(Radius::MD),
+                    },
+                    ..Default::default()
+                })
+                .into()
+            } else {
+                Self::render_rich_message(
+                    &stream_text,
+                    palette,
+                    &mut code_block_idx,
+                    self.copied_index,
+                )
+            };
             chat_column = chat_column.push(rendered);
         }
 
-        let chat_box = container(
-            scrollable(chat_column).height(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35))),
-            border: iced::Border {
-                color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-                width: 1.0,
-                radius: iced::border::Radius::from(Radius::MD),
-            },
-            ..Default::default()
-        });
+        let chat_box = container(scrollable(chat_column).height(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.0, 0.0, 0.0, 0.35,
+                ))),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(Radius::MD),
+                },
+                ..Default::default()
+            });
 
-        // Quick action chips
-        let chips_row = row![
-            Self::chip_button("🤖 ReAct Ajan", palette, Message::QuickAction("react: git durumunu ve sistem bilgisini kontrol et".into())),
-            Self::chip_button("🧠 Hafıza & Profil", palette, Message::QuickAction("hafıza".into())),
-            Self::chip_button("🛠️ Araçlar (20)", palette, Message::QuickAction("araçlar".into())),
-            Self::chip_button("🔍 Vektörel Ara", palette, Message::QuickAction("vektör ara: wayland shader".into())),
-            Self::chip_button("📸 Ekranı Analiz Et", palette, Message::AnalyzeScreenRequested),
-            Self::chip_button("📊 Sistem Durumu", palette, Message::QuickAction("sistem durumu".into())),
-        ]
-        .spacing(Spacing::XS);
-
-        // Prompt input field & actions
+        // 5. Input Capsule & Control Deck
         let screen_btn = button(
             text("📸")
-                .size(Typography::BODY_SM)
-                .color(palette.text_muted.to_iced()),
+                .size(Typography::BODY)
+                .color(palette.primary.to_iced()),
         )
         .padding([Spacing::SM, Spacing::MD])
         .style(move |_, status| {
@@ -616,7 +1108,7 @@ impl Application for CortenAiApp {
         .on_press(Message::AnalyzeScreenRequested);
 
         let input_elem = text_input(
-            "Corten AI'a bir soru sorun, eylem isteyin veya kod analiz edin...",
+            "Corten AURA'ya sor, eylem iste veya kod analiz et...",
             &self.query_input,
         )
         .padding([Spacing::SM, Spacing::MD])
@@ -629,79 +1121,182 @@ impl Application for CortenAiApp {
             icon: palette.primary.to_iced(),
             placeholder: palette.text_muted.to_iced(),
             value: palette.text_primary.to_iced(),
-            selection: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.4),
+            selection: iced::Color::from_rgba(
+                palette.primary.r,
+                palette.primary.g,
+                palette.primary.b,
+                0.4,
+            ),
         });
 
-        let send_btn = button(
-            text(if self.is_loading { "⏳" } else { "Gönder ↵" })
-                .size(Typography::BODY_SM)
-                .color(palette.text_primary.to_iced()),
-        )
-        .padding([Spacing::SM, Spacing::LG])
-        .style(move |_, _| button::Style {
-            background: Some(iced::Background::Color(palette.primary.to_iced())),
-            border: iced::Border {
-                radius: iced::border::Radius::from(Radius::SM),
+        let send_or_stop_btn = if self.is_loading {
+            button(
+                row![
+                    text("⏹ Durdur")
+                        .size(Typography::BODY_SM)
+                        .color(palette.text_primary.to_iced()),
+                    container(text("Esc").size(9.0).color(palette.text_primary.to_iced()))
+                        .padding([1, 4])
+                        .style(|_| container::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                0.0, 0.0, 0.0, 0.3,
+                            ))),
+                            border: iced::Border {
+                                radius: iced::border::Radius::from(Radius::SM),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center),
+            )
+            .padding([Spacing::SM, Spacing::MD])
+            .style(move |_, status| {
+                let bg = match status {
+                    button::Status::Hovered => iced::Color::from_rgba(0.9, 0.28, 0.22, 0.95),
+                    _ => iced::Color::from_rgba(0.8, 0.22, 0.18, 0.85),
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(Radius::SM),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::StopStreaming)
+        } else {
+            button(
+                text("Gönder ↵")
+                    .size(Typography::BODY_SM)
+                    .color(palette.text_primary.to_iced()),
+            )
+            .padding([Spacing::SM, Spacing::LG])
+            .style(move |_, _| button::Style {
+                background: Some(iced::Background::Color(palette.primary.to_iced())),
+                border: iced::Border {
+                    radius: iced::border::Radius::from(Radius::SM),
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-            ..Default::default()
-        })
-        .on_press(Message::SubmitQuery);
+            })
+            .on_press(Message::SubmitQuery)
+        };
 
         let input_container = container(
-            row![screen_btn, input_elem, send_btn]
+            row![screen_btn, input_elem, send_or_stop_btn]
                 .spacing(Spacing::XS)
                 .align_y(Alignment::Center),
         )
         .style(move |_| input_style(palette));
 
-        let main_card = container(
-            column![
-                title_row,
-                vertical_space().height(Spacing::XXS),
-                chat_box,
-                vertical_space().height(Spacing::XXS),
-                chips_row,
-                input_container,
-            ]
-            .spacing(Spacing::SM),
-        )
-        .width(Length::Fixed(720.0))
-        .height(Length::Fixed(520.0))
-        .padding(Spacing::LG)
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(0.07, 0.08, 0.10, 0.96))),
-            border: iced::Border {
-                color: palette.primary.to_iced(),
-                width: 1.5,
-                radius: iced::border::Radius::from(Radius::LG),
-            },
-            shadow: iced::Shadow {
-                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.40),
-                offset: iced::Vector::new(0.0, 4.0),
-                blur_radius: 18.0,
-            },
-            ..Default::default()
-        });
+        let micro_footer = row![
+            text("Enter = Gönder • Esc = Kapat / Durdur")
+                .size(10.5)
+                .color(palette.text_muted.to_iced()),
+            horizontal_space(),
+            text(format!(
+                "Tier: {} • {}",
+                self.ai_config.model_tier.to_uppercase(),
+                status_label
+            ))
+            .size(10.5)
+            .color(palette.text_muted.to_iced()),
+        ]
+        .align_y(Alignment::Center);
 
-        container(main_card)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into()
+        // 6. Assemble Main Bento Card
+        let main_card_column = column![
+            header_row,
+            telemetry_bento,
+            chips_row,
+            chat_box,
+            input_container,
+            micro_footer,
+        ]
+        .spacing(Spacing::SM);
+
+        let is_floating = self.layout_mode == DeckLayoutMode::FloatingHub;
+
+        let main_card = if is_floating {
+            container(main_card_column)
+                .width(Length::Fixed(780.0))
+                .height(Length::Fixed(640.0))
+                .padding(Spacing::LG)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        0.07, 0.08, 0.10, 0.96,
+                    ))),
+                    border: iced::Border {
+                        color: palette.primary.to_iced(),
+                        width: 1.5,
+                        radius: iced::border::Radius::from(Radius::LG),
+                    },
+                    shadow: iced::Shadow {
+                        color: iced::Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.40,
+                        ),
+                        offset: iced::Vector::new(0.0, 6.0),
+                        blur_radius: 24.0,
+                    },
+                    ..Default::default()
+                })
+        } else {
+            container(main_card_column)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(Spacing::MD)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        0.07, 0.08, 0.10, 0.96,
+                    ))),
+                    border: iced::Border {
+                        color: palette.primary.to_iced(),
+                        width: 1.5,
+                        radius: iced::border::Radius::from(Radius::LG),
+                    },
+                    shadow: iced::Shadow {
+                        color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.60),
+                        offset: iced::Vector::new(-4.0, 0.0),
+                        blur_radius: 24.0,
+                    },
+                    ..Default::default()
+                })
+        };
+
+        if is_floating {
+            container(main_card)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into()
+        } else {
+            container(main_card)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        }
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
         let events = event::listen().map(Message::EventTriggered);
-        let tick = iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Message::CursorTick);
+        let tick =
+            iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Message::CursorTick);
         let mut subs = vec![events, tick];
 
         if self.is_loading {
-            subs.push(iced::time::every(std::time::Duration::from_millis(350)).map(|_| Message::CursorTick));
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(350))
+                    .map(|_| Message::CursorTick),
+            );
         }
 
-        // Live stream subscription
         if let Some(rx_arc) = &self.stream_rx {
             let rx_clone = Arc::clone(rx_arc);
             let stream = futures::stream::unfold(rx_clone, |rx| async move {
@@ -744,7 +1339,11 @@ fn parse_response(raw: &str) -> Vec<ResponseSegment> {
                 None => ("KOD".to_string(), part.trim()),
             };
             segments.push(ResponseSegment::Code {
-                lang: if lang.is_empty() { "KOD".into() } else { lang },
+                lang: if lang.is_empty() {
+                    "KOD".into()
+                } else {
+                    lang
+                },
                 code: code_content.to_string(),
             });
         }
@@ -756,6 +1355,143 @@ fn parse_response(raw: &str) -> Vec<ResponseSegment> {
 }
 
 impl CortenAiApp {
+    fn tier_pill_button<'a>(
+        title: &'static str,
+        tier_id: &'static str,
+        is_active: bool,
+        palette: Palette,
+    ) -> Element<'a, Message> {
+        button(
+            container(
+                text(title)
+                    .size(11.0)
+                    .font(iced::Font {
+                        weight: if is_active { iced::font::Weight::Semibold } else { iced::font::Weight::Normal },
+                        ..Default::default()
+                    })
+                    .color(if is_active {
+                        palette.primary.to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    })
+            )
+            .padding([4, 10]),
+        )
+        .padding(0)
+        .style(move |_, status| {
+            let bg = if is_active {
+                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.22)
+            } else {
+                match status {
+                    button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03),
+                }
+            };
+            let border_color = if is_active {
+                palette.primary.to_iced()
+            } else {
+                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.07)
+            };
+            button::Style {
+                background: Some(iced::Background::Color(bg)),
+                border: iced::Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: iced::border::Radius::from(Radius::FULL),
+                },
+                ..Default::default()
+            }
+        })
+        .on_press(Message::SelectModelTier(tier_id.to_string()))
+        .into()
+    }
+
+    fn chip_button<'a>(label: &'static str, palette: Palette, msg: Message) -> Element<'a, Message> {
+        button(
+            text(label)
+                .size(11.0)
+                .color(palette.text_muted.to_iced()),
+        )
+        .padding([4, 8])
+        .style(move |_, status| {
+            let bg = match status {
+                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+                _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+            };
+            button::Style {
+                background: Some(iced::Background::Color(bg)),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(Radius::SM),
+                },
+                ..Default::default()
+            }
+        })
+        .on_press(msg)
+        .into()
+    }
+
+    fn feature_mini_card<'a>(
+        title: &'static str,
+        desc: &'static str,
+        palette: Palette,
+    ) -> Element<'a, Message> {
+        container(
+            column![
+                text(title).size(11.5).color(palette.primary.to_iced()),
+                text(desc).size(10.0).color(palette.text_muted.to_iced()),
+            ]
+            .spacing(2),
+        )
+        .padding([6, 8])
+        .width(Length::FillPortion(1))
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                1.0, 1.0, 1.0, 0.03,
+            ))),
+            border: iced::Border {
+                color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05),
+                width: 1.0,
+                radius: iced::border::Radius::from(Radius::SM),
+            },
+            ..Default::default()
+        })
+        .into()
+    }
+
+    fn prompt_chip<'a>(prompt: &'static str, palette: Palette) -> Element<'a, Message> {
+        let clean = prompt.trim_matches('"').to_string();
+        button(
+            text(prompt)
+                .size(10.5)
+                .color(palette.text_primary.to_iced()),
+        )
+        .padding([3, 7])
+        .style(move |_, status| {
+            let bg = match status {
+                button::Status::Hovered => iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.15,
+                ),
+                _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+            };
+            button::Style {
+                background: Some(iced::Background::Color(bg)),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(Radius::FULL),
+                },
+                ..Default::default()
+            }
+        })
+        .on_press(Message::QuickAction(clean))
+        .into()
+    }
+
     fn render_rich_message<'a>(
         raw: &str,
         palette: Palette,
@@ -781,30 +1517,38 @@ impl CortenAiApp {
                     let code_clone = code.clone();
 
                     let header = row![
-                        container(
-                            text(lang)
-                                .size(10.0)
-                                .color(palette.primary.to_iced())
-                        )
-                        .padding([2, 6])
-                        .style(move |_| container::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
-                            border: iced::Border {
-                                radius: iced::border::Radius::from(Radius::SM),
+                        container(text(lang).size(10.0).color(palette.primary.to_iced()))
+                            .padding([2, 6])
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    1.0, 1.0, 1.0, 0.08,
+                                ))),
+                                border: iced::Border {
+                                    radius: iced::border::Radius::from(Radius::SM),
+                                    ..Default::default()
+                                },
                                 ..Default::default()
-                            },
-                            ..Default::default()
-                        }),
+                            }),
                         horizontal_space(),
                         button(
-                            text(if is_copied { "✓ Kopyalandı!" } else { "📋 Kopyala" })
-                                .size(11.0)
-                                .color(if is_copied { palette.success.to_iced() } else { palette.text_muted.to_iced() })
+                            text(if is_copied {
+                                "✓ Kopyalandı!"
+                            } else {
+                                "📋 Kopyala"
+                            })
+                            .size(11.0)
+                            .color(if is_copied {
+                                palette.success.to_iced()
+                            } else {
+                                palette.text_muted.to_iced()
+                            }),
                         )
                         .padding([2, 8])
                         .style(move |_, status| {
                             let bg = match status {
-                                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+                                button::Status::Hovered => {
+                                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12)
+                                }
                                 _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05),
                             };
                             button::Style {
@@ -835,7 +1579,9 @@ impl CortenAiApp {
                     .padding([8, 12])
                     .width(Length::Fill)
                     .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba(0.04, 0.05, 0.07, 0.95))),
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(
+                            0.04, 0.05, 0.07, 0.95,
+                        ))),
                         border: iced::Border {
                             color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
                             width: 1.0,
@@ -853,7 +1599,9 @@ impl CortenAiApp {
             .padding([10, 14])
             .width(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.02,
+                ))),
                 border: iced::Border {
                     color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                     width: 1.0,
@@ -862,30 +1610,5 @@ impl CortenAiApp {
                 ..Default::default()
             })
             .into()
-    }
-
-    fn chip_button<'a>(label: &'static str, palette: Palette, msg: Message) -> Element<'a, Message> {
-        button(
-            text(label)
-                .size(Typography::CAPTION)
-                .color(palette.text_muted.to_iced()),
-        )
-        .padding([4, 8])
-        .style(move |_, status| {
-            let bg = match status {
-                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
-                _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05),
-            };
-            button::Style {
-                background: Some(iced::Background::Color(bg)),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(Radius::SM),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
-        .on_press(msg)
-        .into()
     }
 }

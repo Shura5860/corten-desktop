@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Corten Monitor
+GenericName=Görev Yöneticisi
+Comment=Corten Wayland sistem kaynak izleyici ve görev yöneticisi
+Exec=corten-monitor
+Icon=corten-monitor
+Terminal=false
+Type=Application
+Categories=System;Monitor;
+Keywords=task;manager;system;cpu;ram;process;performance;monitor;
+StartupNotify=true
+

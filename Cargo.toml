@@ -29,6 +29,8 @@ members = [
     "corten-polkit",
     "corten-ai",
     "corten-welcome",
+    "corten-forge",
+    "corten-update",
 ]
 
 [workspace.package]

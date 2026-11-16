@@ -10,6 +10,7 @@ pub mod udev;
 mod xwayland;
 
 use std::borrow::BorrowMut;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -687,6 +688,44 @@ mod tests {
         let (_buf, w, h) = res.unwrap();
         assert!(w > 120);
         assert!(h >= 16);
+    }
+
+    #[test]
+    fn test_render_circular_button_to_buffer_all_states() {
+        use super::render_circular_button_to_buffer;
+        for kind in ['c', 'm', 'M', 'R'] {
+            for is_active in [true, false] {
+                for is_hovered in [true, false] {
+                    let res = render_circular_button_to_buffer(kind, is_active, is_hovered, 1.0);
+                    assert!(res.is_some());
+                    let (_buf, w, h) = res.unwrap();
+                    assert_eq!(w, 24);
+                    assert_eq!(h, 24);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_render_titlebar_app_icon_all_states() {
+        use super::render_titlebar_app_icon;
+        let test_apps = [
+            ("corten-terminal", "Corten Terminal"),
+            ("corten-files", "Corten Files — ~/Documents"),
+            ("corten-settings", "Sistem Ayarları"),
+            ("corten-forge", "Corten Forge"),
+            ("corten-ai", "Corten AI Asistanı"),
+            ("corten-monitor", "Corten Monitor"),
+            ("unknown-app-xyz", "Bilinmeyen Uygulama"),
+        ];
+
+        for (app_id, title) in test_apps {
+            let res = render_titlebar_app_icon(app_id, title, 20, 1.0);
+            assert!(res.is_some(), "Failed to render titlebar icon for {}", app_id);
+            let (_buf, w, h) = res.unwrap();
+            assert_eq!(w, 20);
+            assert_eq!(h, 20);
+        }
     }
 }
 
@@ -3508,6 +3547,514 @@ pub(crate) fn render_title_text_to_buffer(
     }
 }
 
+/// Rasterizes an anti-aliased circular window control button (`'c'` close, `'M'` maximize,
+/// `'R'` restore, `'m'` minimize) into a `MemoryRenderBuffer`.
+/// Close uses signature Corten orange; Minimize and Maximize use modern dark graphite gray.
+pub(crate) fn render_circular_button_to_buffer(
+    kind: char,
+    is_active: bool,
+    is_hovered: bool,
+    scale: f64,
+) -> Option<(MemoryRenderBuffer, i32, i32)> {
+    let buf_scale = scale.round().max(1.0) as i32;
+    let s = scale as f32;
+    let raw_sz = (24.0 * scale).round() as i32;
+    let total_sz = ((raw_sz.max(buf_scale) + buf_scale - 1) / buf_scale) * buf_scale;
+
+    let cx = (total_sz as f32 - 1.0) * 0.5;
+    let cy = (total_sz as f32 - 1.0) * 0.5;
+    let radius = if is_hovered { 10.2 * s } else { 9.5 * s };
+    let stroke_r = (0.88 * s).max(0.82);
+
+    let (top_rgb, bot_rgb, rim_rgb, rim_alpha, glow_rgb, sym_rgb, sym_alpha) = if kind == 'c' {
+        // Corten Rust Orange for Close
+        if is_hovered {
+            (
+                [244.0f32, 118.0, 58.0],
+                [214.0f32, 86.0, 30.0],
+                [255.0f32, 180.0, 138.0],
+                0.75f32,
+                [238.0f32, 104.0, 44.0],
+                [255.0f32, 255.0, 255.0],
+                1.0f32,
+            )
+        } else if is_active {
+            (
+                [224.0, 98.0, 42.0],
+                [190.0, 72.0, 24.0],
+                [250.0, 145.0, 95.0],
+                0.48,
+                [224.0, 98.0, 42.0],
+                [252.0, 248.0, 245.0],
+                0.92,
+            )
+        } else {
+            (
+                [132.0, 66.0, 38.0],
+                [104.0, 50.0, 28.0],
+                [165.0, 90.0, 58.0],
+                0.28,
+                [132.0, 66.0, 38.0],
+                [225.0, 215.0, 210.0],
+                0.65,
+            )
+        }
+    } else {
+        // Modern Dark Graphite Gray for Minimize & Maximize
+        if is_hovered {
+            (
+                [72.0, 80.0, 96.0],
+                [52.0, 58.0, 72.0],
+                [138.0, 150.0, 175.0],
+                0.65,
+                [95.0, 108.0, 132.0],
+                [255.0, 255.0, 255.0],
+                1.0,
+            )
+        } else if is_active {
+            (
+                [48.0, 53.0, 64.0],
+                [35.0, 39.0, 48.0],
+                [95.0, 106.0, 126.0],
+                0.45,
+                [48.0, 53.0, 64.0],
+                [230.0, 235.0, 245.0],
+                0.86,
+            )
+        } else {
+            (
+                [34.0, 38.0, 46.0],
+                [26.0, 29.0, 36.0],
+                [65.0, 72.0, 86.0],
+                0.25,
+                [34.0, 38.0, 46.0],
+                [175.0, 182.0, 196.0],
+                0.52,
+            )
+        }
+    };
+
+    let mut pixels = vec![0u8; (total_sz * total_sz * 4) as usize];
+
+    for py in 0..total_sz {
+        for px in 0..total_sz {
+            let dx = px as f32 - cx;
+            let dy = py as f32 - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let d_circle = dist - radius;
+
+            // 1. Soft outer ambient halo when hovered
+            let glow_cov = if is_hovered && d_circle > -0.5 && d_circle < 2.2 * s {
+                let norm = (1.0 - d_circle.max(0.0) / (2.2 * s)).clamp(0.0, 1.0);
+                norm * norm * 0.36
+            } else {
+                0.0
+            };
+
+            // 2. Anti-aliased circular disc coverage
+            let circle_cov = (0.5 - d_circle).clamp(0.0, 1.0);
+            if circle_cov <= 0.0 && glow_cov <= 0.0 {
+                continue;
+            }
+
+            let mut out_r = glow_rgb[0];
+            let mut out_g = glow_rgb[1];
+            let mut out_b = glow_rgb[2];
+            let mut out_a = glow_cov;
+
+            if circle_cov > 0.0 {
+                let t = ((dy / radius) * 0.5 + 0.5).clamp(0.0, 1.0);
+                let mut col_r = top_rgb[0] + (bot_rgb[0] - top_rgb[0]) * t;
+                let mut col_g = top_rgb[1] + (bot_rgb[1] - top_rgb[1]) * t;
+                let mut col_b = top_rgb[2] + (bot_rgb[2] - top_rgb[2]) * t;
+
+                // Subtle 1px inner glass rim highlight
+                let d_rim = (d_circle + 0.75 * s).abs();
+                let rim_cov = ((0.85 * s - d_rim) / (0.85 * s)).clamp(0.0, 1.0);
+                let rim_weight = rim_cov * rim_alpha * (1.0 - t * 0.55);
+                col_r = col_r * (1.0 - rim_weight) + rim_rgb[0] * rim_weight;
+                col_g = col_g * (1.0 - rim_weight) + rim_rgb[1] * rim_weight;
+                col_b = col_b * (1.0 - rim_weight) + rim_rgb[2] * rim_weight;
+
+                // 3. Foreground symbol SDF
+                let d_sym = match kind {
+                    'c' => {
+                        let u = (dx + dy) * std::f32::consts::FRAC_1_SQRT_2;
+                        let v = (dx - dy) * std::f32::consts::FRAC_1_SQRT_2;
+                        let l_diag = 3.9 * s;
+                        let d1 = ((u.abs() - l_diag).max(0.0).powi(2) + v * v).sqrt() - stroke_r;
+                        let d2 = ((v.abs() - l_diag).max(0.0).powi(2) + u * u).sqrt() - stroke_r;
+                        d1.min(d2)
+                    }
+                    'm' => {
+                        let l_min = 3.8 * s;
+                        ((dx.abs() - l_min).max(0.0).powi(2) + dy * dy).sqrt() - stroke_r
+                    }
+                    'R' => {
+                        let bs = 2.8 * s;
+                        let cr = 0.85 * s;
+                        let fx = dx + 1.0 * s;
+                        let fy = dy - 1.0 * s;
+                        let qfx = fx.abs() - (bs - cr);
+                        let qfy = fy.abs() - (bs - cr);
+                        let d_front_box = (qfx.max(0.0).powi(2) + qfy.max(0.0).powi(2)).sqrt()
+                            + qfx.max(qfy).min(0.0)
+                            - cr;
+                        let d_front = d_front_box.abs() - stroke_r;
+
+                        let bx = dx - 1.2 * s;
+                        let by = dy + 1.2 * s;
+                        let qbx = bx.abs() - (bs - cr);
+                        let qby = by.abs() - (bs - cr);
+                        let d_back_box = (qbx.max(0.0).powi(2) + qby.max(0.0).powi(2)).sqrt()
+                            + qbx.max(qby).min(0.0)
+                            - cr;
+                        let d_back =
+                            (d_back_box.abs() - stroke_r).max(-(d_front_box - stroke_r * 0.6));
+                        d_front.min(d_back)
+                    }
+                    _ => {
+                        // 'M': rounded square outline
+                        let box_s = 3.5 * s;
+                        let cr = 1.15 * s;
+                        let qx = dx.abs() - (box_s - cr);
+                        let qy = dy.abs() - (box_s - cr);
+                        let d_box = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt()
+                            + qx.max(qy).min(0.0)
+                            - cr;
+                        d_box.abs() - stroke_r
+                    }
+                };
+
+                let sym_cov = (0.5 - d_sym).clamp(0.0, 1.0) * sym_alpha;
+                col_r = col_r * (1.0 - sym_cov) + sym_rgb[0] * sym_cov;
+                col_g = col_g * (1.0 - sym_cov) + sym_rgb[1] * sym_cov;
+                col_b = col_b * (1.0 - sym_cov) + sym_rgb[2] * sym_cov;
+
+                // Composite circle over outer glow
+                out_r = col_r * circle_cov + out_r * (1.0 - circle_cov);
+                out_g = col_g * circle_cov + out_g * (1.0 - circle_cov);
+                out_b = col_b * circle_cov + out_b * (1.0 - circle_cov);
+                out_a = circle_cov + glow_cov * (1.0 - circle_cov);
+            }
+
+            let a_u8 = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+            if a_u8 > 0 {
+                let idx = ((py * total_sz + px) * 4) as usize;
+                let r_u8 = out_r.round().clamp(0.0, 255.0) as u32;
+                let g_u8 = out_g.round().clamp(0.0, 255.0) as u32;
+                let b_u8 = out_b.round().clamp(0.0, 255.0) as u32;
+                let a_u32 = a_u8 as u32;
+                // Premultiplied ARGB8888 (little-endian BGRA bytes)
+                pixels[idx] = ((b_u8 * a_u32) / 255) as u8;
+                pixels[idx + 1] = ((g_u8 * a_u32) / 255) as u8;
+                pixels[idx + 2] = ((r_u8 * a_u32) / 255) as u8;
+                pixels[idx + 3] = a_u8;
+            }
+        }
+    }
+
+    let mut buffer = MemoryRenderBuffer::new(
+        Fourcc::Argb8888,
+        (total_sz, total_sz),
+        buf_scale,
+        Transform::Normal,
+        None,
+    );
+    let draw_res = buffer.render().draw(|buf| {
+        buf.copy_from_slice(&pixels);
+        Result::<_, ()>::Ok(vec![smithay::utils::Rectangle::from_size(
+            (total_sz, total_sz).into(),
+        )])
+    });
+
+    if draw_res.is_ok() {
+        Some((buffer, total_sz, total_sz))
+    } else {
+        None
+    }
+}
+
+fn decode_png_rgba(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    let file = std::fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file);
+    let decoder = png::Decoder::new(reader);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let (w, h) = (info.width, info.height);
+
+    match info.color_type {
+        png::ColorType::Rgba => {
+            buf.truncate((w * h * 4) as usize);
+            Some((w, h, buf))
+        }
+        png::ColorType::Rgb => {
+            let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+            for chunk in buf.chunks_exact(3) {
+                rgba.push(chunk[0]);
+                rgba.push(chunk[1]);
+                rgba.push(chunk[2]);
+                rgba.push(255);
+            }
+            Some((w, h, rgba))
+        }
+        png::ColorType::GrayscaleAlpha => {
+            let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+            for chunk in buf.chunks_exact(2) {
+                let g = chunk[0];
+                let a = chunk[1];
+                rgba.push(g);
+                rgba.push(g);
+                rgba.push(g);
+                rgba.push(a);
+            }
+            Some((w, h, rgba))
+        }
+        png::ColorType::Grayscale => {
+            let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+            for &g in buf.iter().take((w * h) as usize) {
+                rgba.push(g);
+                rgba.push(g);
+                rgba.push(g);
+                rgba.push(255);
+            }
+            Some((w, h, rgba))
+        }
+        _ => None,
+    }
+}
+
+fn resample_rgba(
+    src_rgba: &[u8],
+    src_w: u32,
+    src_h: u32,
+    dst_w: u32,
+    dst_h: u32,
+) -> Vec<u8> {
+    let mut dst = vec![0u8; (dst_w * dst_h * 4) as usize];
+    if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 {
+        return dst;
+    }
+
+    let x_ratio = (src_w as f32) / (dst_w as f32);
+    let y_ratio = (src_h as f32) / (dst_h as f32);
+
+    for dy in 0..dst_h {
+        let sy = (dy as f32 + 0.5) * y_ratio - 0.5;
+        let y0 = (sy.floor() as i32).clamp(0, src_h as i32 - 1) as u32;
+        let y1 = (y0 + 1).min(src_h - 1);
+        let fy = (sy - y0 as f32).clamp(0.0, 1.0);
+
+        for dx in 0..dst_w {
+            let sx = (dx as f32 + 0.5) * x_ratio - 0.5;
+            let x0 = (sx.floor() as i32).clamp(0, src_w as i32 - 1) as u32;
+            let x1 = (x0 + 1).min(src_w - 1);
+            let fx = (sx - x0 as f32).clamp(0.0, 1.0);
+
+            let idx00 = ((y0 * src_w + x0) * 4) as usize;
+            let idx10 = ((y0 * src_w + x1) * 4) as usize;
+            let idx01 = ((y1 * src_w + x0) * 4) as usize;
+            let idx11 = ((y1 * src_w + x1) * 4) as usize;
+
+            let w00 = (1.0 - fx) * (1.0 - fy);
+            let w10 = fx * (1.0 - fy);
+            let w01 = (1.0 - fx) * fy;
+            let w11 = fx * fy;
+
+            let dst_idx = ((dy * dst_w + dx) * 4) as usize;
+            for c in 0..4 {
+                let v = src_rgba[idx00 + c] as f32 * w00
+                    + src_rgba[idx10 + c] as f32 * w10
+                    + src_rgba[idx01 + c] as f32 * w01
+                    + src_rgba[idx11 + c] as f32 * w11;
+                dst[dst_idx + c] = v.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    dst
+}
+
+fn resolve_app_icon_png(app_id: &str, title: &str) -> Option<PathBuf> {
+    let lower_id = app_id.to_ascii_lowercase();
+    let lower_title = title.to_ascii_lowercase();
+    let clean_id = lower_id.strip_suffix(".desktop").unwrap_or(&lower_id);
+    let combined = format!("{} {}", clean_id, lower_title);
+
+    let corten_candidates: &[(&str, &[&str])] = &[
+        ("corten-terminal", &["corten-terminal", "alacritty", "kitty", "foot", "konsole", "terminal", "bash", "zsh"]),
+        ("corten-files", &["corten-files", "nautilus", "dolphin", "thunar", "file", "dosya"]),
+        ("corten-settings", &["corten-settings", "setting", "config", "control", "ayar", "preferences"]),
+        ("corten-forge", &["corten-forge", "forge", "store", "software", "package", "flathub", "discover"]),
+        ("corten-ai", &["corten-ai", "ai", "assistant", "intelligence", "gemini"]),
+        ("corten-monitor", &["corten-monitor", "system-monitor", "htop", "btop", "monitor"]),
+        ("corten-welcome", &["corten-welcome", "welcome", "tour"]),
+        ("corten-snipper", &["corten-snipper", "snipper", "screenshot", "capture"]),
+        ("corten-lock", &["corten-lock", "lock", "screenlock"]),
+        ("corten-browser", &["corten-browser", "firefox", "chromium", "chrome", "brave", "zen", "browser", "web"]),
+        ("corten-editor", &["corten-editor", "code", "nvim", "rust", "text", "kate", "gedit", "editor"]),
+    ];
+
+    let prefixes = [
+        "",
+        "/home/shura/Projects/WaylandDesktopProject/",
+    ];
+
+    for (target_app, keywords) in corten_candidates {
+        if keywords.iter().any(|&kw| combined.contains(kw)) {
+            for prefix in &prefixes {
+                let p48 = PathBuf::from(format!("{}assets/icons/hicolor/48x48/apps/{}.png", prefix, target_app));
+                if p48.exists() {
+                    return Some(p48);
+                }
+                let p64 = PathBuf::from(format!("{}assets/icons/hicolor/64x64/apps/{}.png", prefix, target_app));
+                if p64.exists() {
+                    return Some(p64);
+                }
+            }
+        }
+    }
+
+    for prefix in &prefixes {
+        let p48 = PathBuf::from(format!("{}assets/icons/hicolor/48x48/apps/{}.png", prefix, clean_id));
+        if p48.exists() {
+            return Some(p48);
+        }
+        let p64 = PathBuf::from(format!("{}assets/icons/hicolor/64x64/apps/{}.png", prefix, clean_id));
+        if p64.exists() {
+            return Some(p64);
+        }
+    }
+
+    let sys_paths = [
+        format!("/usr/share/icons/hicolor/48x48/apps/{}.png", clean_id),
+        format!("/usr/share/icons/hicolor/64x64/apps/{}.png", clean_id),
+        format!("/usr/share/pixmaps/{}.png", clean_id),
+        format!("/usr/share/icons/oxygen/base/48x48/apps/{}.png", clean_id),
+        format!("/usr/share/icons/AdwaitaLegacy/48x48/legacy/{}.png", clean_id),
+    ];
+    for sp in &sys_paths {
+        let p = PathBuf::from(sp);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    None
+}
+
+fn render_fallback_squircle_icon(
+    _app_id: &str,
+    total_sz: i32,
+    scale: f64,
+) -> Option<Vec<u8>> {
+    let s = scale as f32;
+    let radius = (total_sz as f32) * 0.28;
+    let cx = (total_sz as f32 - 1.0) * 0.5;
+    let cy = (total_sz as f32 - 1.0) * 0.5;
+    let box_s = (total_sz as f32) * 0.44;
+
+    let mut pixels = vec![0u8; (total_sz * total_sz * 4) as usize];
+    let top_rgb = [42.0f32, 47.0, 58.0];
+    let bot_rgb = [22.0f32, 25.0, 32.0];
+    let rim_rgb = [217.0f32, 119.0, 54.0];
+
+    for py in 0..total_sz {
+        for px in 0..total_sz {
+            let dx = (px as f32 - cx).abs();
+            let dy = (py as f32 - cy).abs();
+            let qx = dx - (box_s - radius);
+            let qy = dy - (box_s - radius);
+            let d_box = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt()
+                + qx.max(qy).min(0.0)
+                - radius;
+
+            let cov = (0.5 - d_box).clamp(0.0, 1.0);
+            if cov <= 0.0 {
+                continue;
+            }
+
+            let t = ((py as f32 / total_sz as f32)).clamp(0.0, 1.0);
+            let mut col_r = top_rgb[0] + (bot_rgb[0] - top_rgb[0]) * t;
+            let mut col_g = top_rgb[1] + (bot_rgb[1] - top_rgb[1]) * t;
+            let mut col_b = top_rgb[2] + (bot_rgb[2] - top_rgb[2]) * t;
+
+            let d_border = (d_box + 0.5 * s).abs();
+            let border_cov = ((0.85 * s - d_border) / (0.85 * s)).clamp(0.0, 1.0);
+            col_r = col_r * (1.0 - border_cov * 0.8) + rim_rgb[0] * border_cov * 0.8;
+            col_g = col_g * (1.0 - border_cov * 0.8) + rim_rgb[1] * border_cov * 0.8;
+            col_b = col_b * (1.0 - border_cov * 0.8) + rim_rgb[2] * border_cov * 0.8;
+
+            let idx = ((py * total_sz + px) * 4) as usize;
+            let a_u8 = (cov * 255.0).round().clamp(0.0, 255.0) as u8;
+            let a_u32 = a_u8 as u32;
+            let r_u8 = col_r.round().clamp(0.0, 255.0) as u32;
+            let g_u8 = col_g.round().clamp(0.0, 255.0) as u32;
+            let b_u8 = col_b.round().clamp(0.0, 255.0) as u32;
+
+            pixels[idx] = ((b_u8 * a_u32) / 255) as u8;
+            pixels[idx + 1] = ((g_u8 * a_u32) / 255) as u8;
+            pixels[idx + 2] = ((r_u8 * a_u32) / 255) as u8;
+            pixels[idx + 3] = a_u8;
+        }
+    }
+    Some(pixels)
+}
+
+pub(crate) fn render_titlebar_app_icon(
+    app_id: &str,
+    title: &str,
+    target_size: i32,
+    scale: f64,
+) -> Option<(MemoryRenderBuffer, i32, i32)> {
+    let buf_scale = scale.round().max(1.0) as i32;
+    let total_sz = ((target_size.max(buf_scale) + buf_scale - 1) / buf_scale) * buf_scale;
+
+    let pixels = if let Some(png_path) = resolve_app_icon_png(app_id, title) {
+        if let Some((src_w, src_h, src_rgba)) = decode_png_rgba(&png_path) {
+            let resampled = resample_rgba(&src_rgba, src_w, src_h, total_sz as u32, total_sz as u32);
+            let mut px = vec![0u8; (total_sz * total_sz * 4) as usize];
+            for i in 0..(total_sz * total_sz) as usize {
+                let s_idx = i * 4;
+                let r = resampled[s_idx] as u32;
+                let g = resampled[s_idx + 1] as u32;
+                let b = resampled[s_idx + 2] as u32;
+                let a = resampled[s_idx + 3] as u32;
+
+                px[s_idx] = ((b * a) / 255) as u8;
+                px[s_idx + 1] = ((g * a) / 255) as u8;
+                px[s_idx + 2] = ((r * a) / 255) as u8;
+                px[s_idx + 3] = a as u8;
+            }
+            px
+        } else {
+            render_fallback_squircle_icon(app_id, total_sz, scale)?
+        }
+    } else {
+        render_fallback_squircle_icon(app_id, total_sz, scale)?
+    };
+
+    let mut buffer = MemoryRenderBuffer::new(
+        Fourcc::Argb8888,
+        (total_sz, total_sz),
+        buf_scale,
+        Transform::Normal,
+        None,
+    );
+    let draw_res = buffer.render().draw(|buf| {
+        buf.copy_from_slice(&pixels);
+        Result::<_, ()>::Ok(vec![smithay::utils::Rectangle::from_size(
+            (total_sz, total_sz).into(),
+        )])
+    });
+
+    if draw_res.is_ok() {
+        Some((buffer, total_sz, total_sz))
+    } else {
+        None
+    }
+}
+
 /// Draws an industrial Corten titlebar with app icon, window title, and bold min-max-close control buttons.
 /// When `front_to_back` is `true` (DRM/udev backend), foreground glyphs and text are pushed BEFORE
 /// capsule and header plate backgrounds so Smithay renders them ON TOP with 100% visibility.
@@ -3630,93 +4177,42 @@ pub(crate) fn draw_window_titlebar(
             Kind::Unspecified,
         )));
 
-        // 4. Window Icon on the left side (capsule background first, then foreground icon glyph)
+        // 4. Window Icon on the left side (Paket A Bespoke Metallic Squircle Icon)
         let icon_size = (20.0 * scale).round() as i32;
         let icon_x = rect.loc.x + (10.0 * scale).round() as i32;
-        let icon_y = rect.loc.y + (header_h - icon_size) / 2;
-        let icon_rect = Rectangle::new(Point::from((icon_x, icon_y)), (icon_size, icon_size).into());
 
-        let icon_bg = Color32F::new(0.16, 0.19, 0.25, 0.96);
-        tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-            Id::new(),
-            icon_rect,
-            CommitCounter::default(),
-            icon_bg,
-            Kind::Unspecified,
-        )));
-
-        let hay = format!("{} {}", app_id, title).to_ascii_lowercase();
-        let stroke = (2.0 * scale).max(2.0) as i32;
-
-        if hay.contains("terminal") || hay.contains("foot") || hay.contains("konsole") || hay.contains("alacritty") {
-            let term_color = Color32F::new(0.28, 0.92, 0.58, 1.0);
-            let px = icon_x + (3.0 * scale) as i32;
-            let py = icon_y + (4.0 * scale) as i32;
-            for i in 0..4 {
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    Rectangle::new(Point::from((px + i * stroke, py + i * stroke)), (stroke, stroke).into()),
-                    CommitCounter::default(),
-                    term_color,
-                    Kind::Unspecified,
-                )));
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    Rectangle::new(Point::from((px + i * stroke, py + (6 - i) * stroke)), (stroke, stroke).into()),
-                    CommitCounter::default(),
-                    term_color,
-                    Kind::Unspecified,
-                )));
+        let scale_key = (scale * 100.0).round() as i32;
+        let icon_key = format!("__corten_titlebar_icon:{}:{}:{}", app_id, icon_size, scale_key);
+        let cached_icon = if let Some(found) = title_cache.get(&icon_key) {
+            Some(found.clone())
+        } else if let Some((buf, iw, ih)) = render_titlebar_app_icon(app_id, title, icon_size, scale) {
+            if title_cache.len() > 256 {
+                title_cache.clear();
             }
-            let ux = px + (7.0 * scale) as i32;
-            let uy = icon_y + icon_size - (4.0 * scale) as i32;
-            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                Id::new(),
-                Rectangle::new(Point::from((ux, uy)), ((5.0 * scale) as i32, stroke).into()),
-                CommitCounter::default(),
-                term_color,
-                Kind::Unspecified,
-            )));
-        } else if hay.contains("setting") || hay.contains("ayar") || hay.contains("config") {
-            let set_color = Color32F::new(0.98, 0.62, 0.22, 1.0);
-            let s_pad = (4.0 * scale) as i32;
-            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                Id::new(),
-                Rectangle::new(Point::from((icon_x + s_pad, icon_y + icon_size / 2 - stroke / 2)), (icon_size - s_pad * 2, stroke).into()),
-                CommitCounter::default(),
-                set_color,
-                Kind::Unspecified,
-            )));
-            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                Id::new(),
-                Rectangle::new(Point::from((icon_x + icon_size / 2 - stroke / 2, icon_y + s_pad)), (stroke, icon_size - s_pad * 2).into()),
-                CommitCounter::default(),
-                set_color,
-                Kind::Unspecified,
-            )));
-        } else if hay.contains("file") || hay.contains("dosya") || hay.contains("nautilus") || hay.contains("dolphin") {
-            let file_color = Color32F::new(0.95, 0.55, 0.18, 1.0);
-            let f_pad = (3.0 * scale) as i32;
-            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                Id::new(),
-                Rectangle::new(Point::from((icon_x + f_pad, icon_y + (5.0 * scale) as i32)), (icon_size - f_pad * 2, icon_size - (8.0 * scale) as i32).into()),
-                CommitCounter::default(),
-                file_color,
-                Kind::Unspecified,
-            )));
+            title_cache.insert(icon_key, (buf.clone(), iw, ih));
+            Some((buf, iw, ih))
         } else {
-            let dia_color = Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, 1.0);
-            let d_size = (8.0 * scale).round() as i32;
-            let dx = icon_x + (icon_size - d_size) / 2;
-            let dy = icon_y + (icon_size - d_size) / 2;
-            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                Id::new(),
-                Rectangle::new(Point::from((dx, dy)), (d_size, d_size).into()),
-                CommitCounter::default(),
-                dia_color,
+            None
+        };
+
+        if let Some((buf, _iw, ih)) = cached_icon {
+            let actual_y = rect.loc.y + (header_h - ih) / 2;
+            let icon_pos: smithay::utils::Point<f64, smithay::utils::Physical> =
+                smithay::utils::Point::from((icon_x as f64, actual_y as f64));
+            if let Ok(elem) = MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                icon_pos,
+                &buf,
+                Some(1.0),
+                None,
+                None,
                 Kind::Unspecified,
-            )));
+            ) {
+                tb_elements.push(CustomRenderElement::from(elem));
+            }
         }
+
+        let stroke = (2.0 * scale).max(2.0) as i32;
 
         // 4.5. Dynamic Context Badge & Unsaved Dirty Dot ('●')
         let mut badge_offset_x = 0;
@@ -3784,7 +4280,7 @@ pub(crate) fn draw_window_titlebar(
         let cached = if let Some(found) = title_cache.get(&cache_key) {
             Some(found.clone())
         } else if let Some((buf, tw, th)) = render_title_text_to_buffer(display_title, scale, text_color) {
-            if title_cache.len() > 100 {
+            if title_cache.len() > 256 {
                 title_cache.clear();
             }
             title_cache.insert(cache_key, (buf.clone(), tw, th));
@@ -3870,7 +4366,7 @@ pub(crate) fn draw_window_titlebar(
             }
         }
 
-        // 6. Haptic Window Control Action Capsules (Minimalist Dots when idle -> Full Action Capsules on header hover)
+        // 6. Modern Circular Window Control Buttons (Min/Max in Dark Graphite Gray, Close in Corten Orange)
         if rect.size.w > 140 {
             let log_rect = Rectangle::new(
                 Point::from((
@@ -3887,256 +4383,58 @@ pub(crate) fn draw_window_titlebar(
             let w_log = log_rect.size.w as f64;
 
             let flyout_hovered = crate::layout::is_maximize_or_flyout_hovered(log_rect, cursor_loc);
-            let header_hovered = (0.0..=40.0).contains(&rel_cy)
-                && (0.0..=w_log).contains(&rel_cx)
-                || flyout_hovered;
 
             let hover_close = (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 32.0) && rel_cx <= w_log;
-            let hover_max = (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 60.0) && rel_cx < (w_log - 32.0);
+            let hover_max = ((0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 60.0) && rel_cx < (w_log - 32.0))
+                || flyout_hovered;
             let hover_min = (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 88.0) && rel_cx < (w_log - 60.0);
 
-            let btn_size = (22.0 * scale).round() as i32;
-            let btn_y = rect.loc.y + (header_h - btn_size) / 2;
-            let btn_pad = (5.0 * scale).round() as i32;
-            let stroke = (2.0 * scale).round().max(2.0) as i32;
+            let close_x = rect.loc.x + rect.size.w - (31.0 * scale).round() as i32;
+            let max_x = rect.loc.x + rect.size.w - (59.0 * scale).round() as i32;
+            let min_x = rect.loc.x + rect.size.w - (87.0 * scale).round() as i32;
 
-            let close_x = rect.loc.x + rect.size.w - (30.0 * scale).round() as i32;
-            let max_x = rect.loc.x + rect.size.w - (58.0 * scale).round() as i32;
-            let min_x = rect.loc.x + rect.size.w - (86.0 * scale).round() as i32;
+            let max_kind = if is_maximized { 'R' } else { 'M' };
+            let scale_key = (scale * 100.0).round() as i32;
 
-            if !header_hovered && !is_maximized {
-                // Minimalist Industrial Micro-Dots when cursor is away from header
-                let dot_sz = (10.0 * scale).round().max(6.0) as i32;
-                let dot_y = rect.loc.y + (header_h - dot_sz) / 2;
-                let dot_off = (btn_size - dot_sz) / 2;
-
-                let close_dot_col = if is_active {
-                    Color32F::new(0.92, 0.30, 0.24, 0.88)
+            for (kind, bx, is_btn_hovered) in [
+                ('m', min_x, hover_min),
+                (max_kind, max_x, hover_max),
+                ('c', close_x, hover_close),
+            ] {
+                let btn_key = format!(
+                    "__corten_circle_btn:{}:{}:{}:{}",
+                    kind, is_active, is_btn_hovered, scale_key
+                );
+                let cached_btn = if let Some(found) = title_cache.get(&btn_key) {
+                    Some(found.clone())
+                } else if let Some((buf, bw, bh)) =
+                    render_circular_button_to_buffer(kind, is_active, is_btn_hovered, scale)
+                {
+                    if title_cache.len() > 256 {
+                        title_cache.clear();
+                    }
+                    title_cache.insert(btn_key, (buf.clone(), bw, bh));
+                    Some((buf, bw, bh))
                 } else {
-                    Color32F::new(0.45, 0.25, 0.24, 0.55)
-                };
-                let max_dot_col = if is_active {
-                    Color32F::new(0.95, 0.62, 0.22, 0.85)
-                } else {
-                    Color32F::new(0.42, 0.35, 0.25, 0.50)
-                };
-                let min_dot_col = if is_active {
-                    Color32F::new(0.38, 0.76, 0.62, 0.82)
-                } else {
-                    Color32F::new(0.30, 0.38, 0.42, 0.50)
+                    None
                 };
 
-                for (bx, col) in [
-                    (close_x + dot_off, close_dot_col),
-                    (max_x + dot_off, max_dot_col),
-                    (min_x + dot_off, min_dot_col),
-                ] {
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((bx, dot_y)), (dot_sz, dot_sz).into()),
-                        CommitCounter::default(),
-                        col,
+                if let Some((buf, _bw, bh)) = cached_btn {
+                    let by = rect.loc.y + (header_h - bh) / 2;
+                    let btn_pos: smithay::utils::Point<f64, smithay::utils::Physical> =
+                        smithay::utils::Point::from((bx as f64, by as f64));
+                    if let Ok(elem) = MemoryRenderBufferRenderElement::from_buffer(
+                        renderer,
+                        btn_pos,
+                        &buf,
+                        Some(1.0),
+                        None,
+                        None,
                         Kind::Unspecified,
-                    )));
+                    ) {
+                        tb_elements.push(CustomRenderElement::from(elem));
+                    }
                 }
-            } else {
-                // Expanded Haptic Action Capsules with hover pop
-                let grow = (1.0 * scale).round().max(1.0) as i32;
-                let close_rect = if hover_close {
-                    Rectangle::new(
-                        Point::from((close_x - grow, btn_y - grow)),
-                        (btn_size + grow * 2, btn_size + grow * 2).into(),
-                    )
-                } else {
-                    Rectangle::new(Point::from((close_x, btn_y)), (btn_size, btn_size).into())
-                };
-                let max_rect = if hover_max || flyout_hovered {
-                    Rectangle::new(
-                        Point::from((max_x - grow, btn_y - grow)),
-                        (btn_size + grow * 2, btn_size + grow * 2).into(),
-                    )
-                } else {
-                    Rectangle::new(Point::from((max_x, btn_y)), (btn_size, btn_size).into())
-                };
-                let min_rect = if hover_min {
-                    Rectangle::new(
-                        Point::from((min_x - grow, btn_y - grow)),
-                        (btn_size + grow * 2, btn_size + grow * 2).into(),
-                    )
-                } else {
-                    Rectangle::new(Point::from((min_x, btn_y)), (btn_size, btn_size).into())
-                };
-
-                let close_bg = if hover_close {
-                    Color32F::new(1.0, 0.32, 0.25, 1.0)
-                } else if is_active {
-                    Color32F::new(0.95, 0.25, 0.20, 1.0)
-                } else {
-                    Color32F::new(0.78, 0.24, 0.20, 0.96)
-                };
-                let max_bg = if hover_max || flyout_hovered {
-                    Color32F::new(0.88, 0.48, 0.18, 1.0)
-                } else if is_active {
-                    Color32F::new(0.25, 0.30, 0.38, 1.0)
-                } else {
-                    Color32F::new(0.19, 0.23, 0.30, 0.96)
-                };
-                let min_bg = if hover_min {
-                    Color32F::new(0.32, 0.38, 0.48, 1.0)
-                } else if is_active {
-                    Color32F::new(0.25, 0.30, 0.38, 1.0)
-                } else {
-                    Color32F::new(0.19, 0.23, 0.30, 0.96)
-                };
-                let cap_border = Color32F::new(0.55, 0.62, 0.75, 0.85);
-                let sym_white = Color32F::new(1.0, 1.0, 1.0, 1.0);
-
-                // --- A. Button Capsule Backgrounds & Borders ---
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    close_rect,
-                    CommitCounter::default(),
-                    close_bg,
-                    Kind::Unspecified,
-                )));
-                draw_glow_ring(&mut tb_elements, close_rect, 0, 1, Color32F::new(1.0, 0.50, 0.40, 0.85), 4);
-
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    max_rect,
-                    CommitCounter::default(),
-                    max_bg,
-                    Kind::Unspecified,
-                )));
-                draw_glow_ring(&mut tb_elements, max_rect, 0, 1, cap_border, 4);
-
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    min_rect,
-                    CommitCounter::default(),
-                    min_bg,
-                    Kind::Unspecified,
-                )));
-                draw_glow_ring(&mut tb_elements, min_rect, 0, 1, cap_border, 4);
-
-                // --- B. Button Foreground Symbols (Topmost layer of titlebar) ---
-                // 1. Close '✕' symbol
-                let cross_span = (btn_size - btn_pad * 2 - stroke).max(2);
-                for i in 0..=cross_span {
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(
-                            Point::from((close_x + btn_pad + i, btn_y + btn_pad + i)),
-                            (stroke, stroke).into(),
-                        ),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(
-                            Point::from((close_x + btn_size - btn_pad - stroke - i, btn_y + btn_pad + i)),
-                            (stroke, stroke).into(),
-                        ),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                }
-
-                // 2. Maximize / Restore '□' symbol
-                if is_maximized {
-                    let r_w = (9.0 * scale).round() as i32;
-                    let r_h = (9.0 * scale).round() as i32;
-                    let off = (3.0 * scale).round() as i32;
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_pad + off, btn_y + btn_pad)), (r_w, stroke).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_pad + off + r_w - stroke, btn_y + btn_pad)), (stroke, r_h).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad + off)), (r_w, stroke).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad + off + r_h - stroke)), (r_w, stroke).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad + off)), (stroke, r_h).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_pad + r_w - stroke, btn_y + btn_pad + off)), (stroke, r_h).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                } else {
-                    let sq_w = btn_size - btn_pad * 2;
-                    let sq_h = btn_size - btn_pad * 2;
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad)), (sq_w, stroke).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_size - btn_pad - stroke)), (sq_w, stroke).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad)), (stroke, sq_h).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        Rectangle::new(Point::from((max_x + btn_size - btn_pad - stroke, btn_y + btn_pad)), (stroke, sq_h).into()),
-                        CommitCounter::default(),
-                        sym_white,
-                        Kind::Unspecified,
-                    )));
-                }
-
-                // 3. Minimize '−' symbol
-                let dash_w = btn_size - btn_pad * 2;
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    Rectangle::new(
-                        Point::from((min_x + btn_pad, btn_y + (btn_size - stroke) / 2)),
-                        (dash_w, stroke).into(),
-                    ),
-                    CommitCounter::default(),
-                    sym_white,
-                    Kind::Unspecified,
-                )));
             }
 
             // 7. Interactive Snap Layouts Flyout Card when hovering Maximize ('□') button

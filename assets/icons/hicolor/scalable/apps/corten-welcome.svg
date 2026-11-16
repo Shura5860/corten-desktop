@@ -1,0 +1,40 @@
+<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <linearGradient id="steel_base" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#282D38"/>
+      <stop offset="45%" stop-color="#1B1E26"/>
+      <stop offset="100%" stop-color="#0E1015"/>
+    </linearGradient>
+    <linearGradient id="copper" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F69256"/>
+      <stop offset="50%" stop-color="#E06C3A"/>
+      <stop offset="100%" stop-color="#9C3A14"/>
+    </linearGradient>
+    <linearGradient id="copper_bright" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFA875"/>
+      <stop offset="100%" stop-color="#E06C3A"/>
+    </linearGradient>
+    <linearGradient id="inner_glow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.02"/>
+    </linearGradient>
+    <filter id="shadow_deep" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.75"/>
+    </filter>
+    <filter id="glyph_shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+  <!-- Outer Squircle with Corten Bevel -->
+  <rect x="6" y="6" width="116" height="116" rx="30" ry="30" fill="url(#steel_base)" stroke="#E06C3A" stroke-width="2.2" stroke-opacity="0.60" filter="url(#shadow_deep)"/>
+  <!-- Specular Inset Rim -->
+  <rect x="8" y="8" width="112" height="112" rx="28" ry="28" fill="url(#inner_glow)" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="1.2"/>
+
+  <!-- Beacon Waves -->
+  <circle cx="64" cy="64" r="38" fill="none" stroke="url(#copper)" stroke-width="1.5" stroke-opacity="0.3"/>
+  <circle cx="64" cy="64" r="28" fill="none" stroke="url(#copper)" stroke-width="2" stroke-opacity="0.6"/>
+  <!-- 4-Pointed Corten Star -->
+  <path d="M64 26 L73 55 L102 64 L73 73 L64 102 L55 73 L26 64 L55 55 Z" fill="url(#copper)" filter="url(#glyph_shadow)"/>
+  <circle cx="64" cy="64" r="5" fill="#FFFFFF"/>
+</svg>

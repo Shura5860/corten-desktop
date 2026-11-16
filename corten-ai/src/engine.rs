@@ -19,6 +19,7 @@ pub enum BackendType {
         host: String,
         port: u16,
         model: String,
+        tier_label: String,
         all_models: Vec<String>,
         has_vision: bool,
     },
@@ -46,14 +47,59 @@ pub enum MessageRole {
 pub struct ChatMessage {
     pub role: MessageRole,
     pub content: String,
+    pub thought: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub enum StreamChunk {
     Token(String),
+    Thought(String),
     ActionExecuted(String),
     Done,
     Error(String),
+}
+
+/// Helper that filters out `<think>...</think>` tags from model token streams
+/// and cleanly isolates reasoning thoughts from actual assistant responses.
+pub struct ThoughtStreamFilter {
+    in_think: bool,
+}
+
+impl ThoughtStreamFilter {
+    pub fn new() -> Self {
+        Self { in_think: false }
+    }
+
+    pub fn process(&mut self, token: &str, tx: &UnboundedSender<StreamChunk>) {
+        let mut cur = token;
+        while !cur.is_empty() {
+            if self.in_think {
+                if let Some(pos) = cur.find("</think>") {
+                    let thought_part = &cur[..pos];
+                    if !thought_part.is_empty() {
+                        let _ = tx.send(StreamChunk::Thought(thought_part.to_string()));
+                    }
+                    self.in_think = false;
+                    cur = &cur[pos + 8..]; // skip "</think>"
+                } else {
+                    let _ = tx.send(StreamChunk::Thought(cur.to_string()));
+                    break;
+                }
+            } else {
+                if let Some(pos) = cur.find("<think>") {
+                    let token_part = &cur[..pos];
+                    if !token_part.is_empty() {
+                        let _ = tx.send(StreamChunk::Token(token_part.to_string()));
+                    }
+                    self.in_think = true;
+                    cur = &cur[pos + 7..]; // skip "<think>"
+                } else {
+                    let _ = tx.send(StreamChunk::Token(cur.to_string()));
+                    break;
+                }
+            }
+        }
+    }
 }
 
 pub struct AiEngine {
@@ -69,10 +115,64 @@ impl Default for AiEngine {
     }
 }
 
+fn parse_url_host_port(url_str: &str) -> Option<(String, u16)> {
+    let s = url_str
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let host_port = s.split('/').next()?;
+    if let Some((h, p)) = host_port.split_once(':') {
+        let port: u16 = p.parse().ok()?;
+        Some((h.to_string(), port))
+    } else {
+        Some((host_port.to_string(), 80))
+    }
+}
+
 impl AiEngine {
-    /// Detect which local AI backend is running on loopback or embedded GGUF
+    /// Detect which local AI backend is running, respecting user settings from `ai.toml`
     pub async fn auto_detect() -> BackendType {
-        // 1. Check in-process Native Rust GGUF models first (0 external dependency, 100% pure Rust)
+        let cfg = corten_config::ConfigManager::<corten_config::AiSettingsConfig>::load_or_default("ai")
+            .map(|c| c.get().clone())
+            .unwrap_or_default();
+        Self::auto_detect_with_config(Some(&cfg)).await
+    }
+
+    pub async fn auto_detect_with_config(config: Option<&corten_config::AiSettingsConfig>) -> BackendType {
+        let (enabled, target_tier, custom_path, backend_url) = if let Some(c) = config {
+            (
+                c.enabled,
+                c.model_tier.as_str(),
+                c.custom_model_path.as_str(),
+                c.backend_url.as_str(),
+            )
+        } else {
+            (true, "eco", "", "http://127.0.0.1:8000")
+        };
+
+        if !enabled {
+            info!("Corten AI: Disabled in system settings (`ai.toml`)");
+            return BackendType::Offline;
+        }
+
+        // 1. Check custom model path if specified in settings
+        if !custom_path.is_empty() {
+            let p = std::path::PathBuf::from(custom_path);
+            if p.exists() && p.is_file() {
+                let name = p
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("custom-gguf")
+                    .to_string();
+                info!("Corten AI: Using custom model path from settings: {:?}", p);
+                return BackendType::NativeGguf {
+                    model_path: p,
+                    model_name: name,
+                };
+            }
+        }
+
+        // 2. Check in-process Native Rust GGUF models (0 external dependency, 100% pure Rust)
         let local_ggufs = corten_llm::discover_local_gguf_models();
         if let Some(first_gguf) = local_ggufs.first() {
             let model_name = first_gguf
@@ -87,17 +187,34 @@ impl AiEngine {
             };
         }
 
-        // 2. Probe Ollama (port 11434)
-        if let Ok(info) = Self::probe_ollama("127.0.0.1", 11434).await {
+        // 3. If configured backend_url points to a specific endpoint, probe it first
+        if let Some((host, port)) = parse_url_host_port(backend_url) {
+            if port == 8000 {
+                if let Ok(info) = Self::probe_aura_core(&host, port).await {
+                    return info;
+                }
+            } else if port == 11434 {
+                if let Ok(info) = Self::probe_ollama(&host, port, Some(target_tier)).await {
+                    return info;
+                }
+            } else if port == 8080 {
+                if let Ok(info) = Self::probe_llama_cpp(&host, port).await {
+                    return info;
+                }
+            }
+        }
+
+        // 4. Probe Ollama on standard port (11434)
+        if let Ok(info) = Self::probe_ollama("127.0.0.1", 11434, Some(target_tier)).await {
             return info;
         }
 
-        // 3. Probe llama.cpp / LocalAI / OpenAI-compatible (port 8080)
+        // 5. Probe llama.cpp on standard port (8080)
         if let Ok(info) = Self::probe_llama_cpp("127.0.0.1", 8080).await {
             return info;
         }
 
-        // 4. Probe AURA-CORE (port 8000)
+        // 6. Probe AURA-CORE on standard port (8000)
         if let Ok(info) = Self::probe_aura_core("127.0.0.1", 8000).await {
             return info;
         }
@@ -105,7 +222,33 @@ impl AiEngine {
         BackendType::Offline
     }
 
-    async fn probe_ollama(host: &str, port: u16) -> Result<BackendType, ()> {
+    pub fn classify_model_tier(name: &str) -> &'static str {
+        let lower = name.to_lowercase();
+        if lower.contains("1.5b")
+            || lower.contains("1b")
+            || lower.contains("2b")
+            || lower.contains("tiny")
+            || lower.contains("mini")
+        {
+            "Eco (1.5B)"
+        } else if lower.contains("3b") || lower.contains("4b") || lower.contains("medium") {
+            "Dengeli (3B)"
+        } else if lower.contains("7b")
+            || lower.contains("8b")
+            || lower.contains("14b")
+            || lower.contains("large")
+        {
+            "Pro (7B)"
+        } else {
+            "Özel Model"
+        }
+    }
+
+    async fn probe_ollama(
+        host: &str,
+        port: u16,
+        target_tier: Option<&str>,
+    ) -> Result<BackendType, ()> {
         let addr = format!("{}:{}", host, port);
         let mut stream = timeout(Duration::from_millis(400), TcpStream::connect(&addr))
             .await
@@ -146,12 +289,31 @@ impl AiEngine {
                         }
                     }
                     if !names.is_empty() {
-                        let active = names[0].clone();
-                        info!("Corten AI: Found Ollama backend with model '{}'", active);
+                        let desired = target_tier.unwrap_or("eco");
+                        let chosen_idx = names
+                            .iter()
+                            .position(|n| {
+                                let tier_str = Self::classify_model_tier(n);
+                                match desired {
+                                    "eco" => tier_str.contains("Eco"),
+                                    "balanced" => tier_str.contains("Dengeli"),
+                                    "pro" => tier_str.contains("Pro"),
+                                    _ => false,
+                                }
+                            })
+                            .unwrap_or(0);
+
+                        let active = names[chosen_idx].clone();
+                        let tier_label = Self::classify_model_tier(&active).to_string();
+                        info!(
+                            "Corten AI: Found Ollama backend with model '{}' [{}] (requested tier: {})",
+                            active, tier_label, desired
+                        );
                         return Ok(BackendType::Ollama {
                             host: host.to_string(),
                             port,
                             model: active,
+                            tier_label,
                             all_models: names,
                             has_vision,
                         });
@@ -342,12 +504,29 @@ impl AiEngine {
                 Self::stream_aura_core(&host, port, &trimmed, tx).await;
             }
             BackendType::Offline => {
-                // In offline mode, run the Pure-Rust Autonomous ReAct + Memory + RAG synthesizer!
-                let react_report = AuraReActAgent::execute_react_workflow(&trimmed);
-                let _ = tx.send(StreamChunk::Token(react_report));
+                // In offline mode, provide a clear, helpful desktop assistant response instead of synthetic raw trace dumping
+                let response = Self::offline_assistant_response(&trimmed);
+                let _ = tx.send(StreamChunk::Token(response));
                 let _ = tx.send(StreamChunk::Done);
             }
         }
+    }
+
+    /// Clean, helpful assistant response when no external LLM or GGUF model is loaded
+    pub fn offline_assistant_response(query: &str) -> String {
+        format!(
+            "⚡ **Corten AI Sistem Asistanı (Yerel Mod)**\n\n\
+            *Sorgu:* \"{}\"\n\n\
+            Yerel nöral LLM motoru şu anda bağlı değil veya çevrimdışı modda. Sistem asistanı olarak doğrudan yapabileceğim masaüstü eylemleri:\n\n\
+            • 🔊 **Ses & Parlaklık:** `\"sesi %60 yap\"`, `\"ekran ışığını kıs\"`\n\
+            • 📸 **Ekran & Pencereler:** `\"ekran görüntüsü al\"`, `\"tam ekran yap\"`, `\"pencereleri küçült\"`\n\
+            • 📂 **Dosya Arama (Vektör):** `\"dosya ara: <kelime>\"`\n\
+            • 📊 **Sistem Telemetrisi:** `\"sistem durumu\"`, `\"en çok ram kullanan\"`\n\
+            • 🧮 **Hesap Makinesi:** `\"hesapla: (144 * 12) / 4\"`\n\
+            • 🧠 **Hafıza & Not:** `\"hatırla: API anahtarı yenilenecek\"`\n\n\
+            💡 *Tam metin sohbet ve kod üretimi için Sistem Ayarları'ndan (`Super+Alt+Space -> Ayarlar`) yerel Ollama veya GGUF modelini bağlayabilirsiniz.*",
+            query
+        )
     }
 
     async fn stream_native_gguf(
@@ -375,7 +554,7 @@ impl AiEngine {
             format!("\n[YEREL BELGE BAĞLAMI (RAG)]:\n{}", docs)
         };
         let prompt_str = format!(
-            "<|im_start|>system\nSen Corten Desktop yerel yapay zeka asistanısın. Türkçe ve net yanıt ver.\n[KULLANICI HAFIZASI]:\n{}{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+            "<|im_start|>system\nSen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Türkçe, net ve doğrudan eylem odaklı yanıt ver.\n[KULLANICI HAFIZASI]:\n{}{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
             memory_ctx, rag_ctx, prompt
         );
         let tx_clone = tx.clone();
@@ -509,7 +688,7 @@ impl AiEngine {
         // System prompt establishing Corten Desktop identity and action protocol
         messages.push(serde_json::json!({
             "role": "system",
-            "content": "Sen Corten Desktop için çalışan yüksek zekalı yerel AI asistanısın. Kısa, teknik ve Türkçe yanıt ver. Kullanıcı sistem işlemi istediğinde cevabının sonuna gerekiyorsa [ACTION: intent] ekle."
+            "content": "Sen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Kısa, teknik ve Türkçe yanıt ver. Kullanıcı sistem işlemi istediğinde cevabının sonuna gerekiyorsa [ACTION: intent] ekle."
         }));
 
         for h in history.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev() {
@@ -569,6 +748,7 @@ impl AiEngine {
         let reader = BufReader::new(stream);
         let mut lines = reader.lines();
         let mut in_headers = true;
+        let mut filter = ThoughtStreamFilter::new();
 
         while let Ok(Some(line)) = lines.next_line().await {
             if in_headers {
@@ -583,6 +763,11 @@ impl AiEngine {
                 continue;
             }
 
+            // Skip hex chunk-length lines in HTTP/1.1 chunked transfer
+            if trimmed.chars().all(|c| c.is_ascii_hexdigit()) && trimmed.len() <= 8 {
+                continue;
+            }
+
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
                 if let Some(token) = val
                     .get("message")
@@ -590,7 +775,7 @@ impl AiEngine {
                     .and_then(|c| c.as_str())
                 {
                     if !token.is_empty() {
-                        let _ = tx.send(StreamChunk::Token(token.to_string()));
+                        filter.process(token, &tx);
                     }
                 }
                 if let Some(done) = val.get("done").and_then(|d| d.as_bool()) {
@@ -625,7 +810,7 @@ impl AiEngine {
         let mut messages = Vec::new();
         messages.push(serde_json::json!({
             "role": "system",
-            "content": "Sen Corten Desktop yerel asistanısın. Türkçe, teknik ve net yanıt ver."
+            "content": "Sen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Türkçe, teknik ve doğrudan eylem odaklı yanıt ver."
         }));
 
         for h in history.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev() {
@@ -679,6 +864,7 @@ impl AiEngine {
         let reader = BufReader::new(stream);
         let mut lines = reader.lines();
         let mut in_headers = true;
+        let mut filter = ThoughtStreamFilter::new();
 
         while let Ok(Some(line)) = lines.next_line().await {
             if in_headers {
@@ -696,6 +882,10 @@ impl AiEngine {
                 continue;
             }
 
+            if trimmed.chars().all(|c| c.is_ascii_hexdigit()) && trimmed.len() <= 8 {
+                continue;
+            }
+
             if let Some(json_str) = trimmed.strip_prefix("data: ") {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
                     if let Some(token) = val
@@ -707,7 +897,7 @@ impl AiEngine {
                         .and_then(|content| content.as_str())
                     {
                         if !token.is_empty() {
-                            let _ = tx.send(StreamChunk::Token(token.to_string()));
+                            filter.process(token, &tx);
                         }
                     }
                 }
@@ -750,6 +940,7 @@ impl AiEngine {
                 let mut lines = reader.lines();
                 let mut in_headers = true;
                 let mut got_stream_token = false;
+                let mut filter = ThoughtStreamFilter::new();
 
                 while let Ok(Some(line)) = lines.next_line().await {
                     if in_headers {
@@ -767,12 +958,16 @@ impl AiEngine {
                         continue;
                     }
 
+                    if trimmed.chars().all(|c| c.is_ascii_hexdigit()) && trimmed.len() <= 8 {
+                        continue;
+                    }
+
                     if let Some(json_str) = trimmed.strip_prefix("data: ") {
                         if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
                             if let Some(token) = val.get("token").and_then(|t| t.as_str()) {
                                 if !token.is_empty() {
                                     got_stream_token = true;
-                                    let _ = tx.send(StreamChunk::Token(token.to_string()));
+                                    filter.process(token, &tx);
                                 }
                             }
                         }
@@ -1024,5 +1219,47 @@ mod tests {
         assert_eq!(base64_encode(b"fo"), "Zm8=");
         assert_eq!(base64_encode(b"foo"), "Zm9v");
         assert_eq!(base64_encode(b"Corten AI"), "Q29ydGVuIEFJ");
+    }
+
+    #[test]
+    fn test_classify_model_tier() {
+        assert_eq!(AiEngine::classify_model_tier("qwen2.5:1.5b"), "Eco (1.5B)");
+        assert_eq!(AiEngine::classify_model_tier("llama3.2:1b"), "Eco (1.5B)");
+        assert_eq!(AiEngine::classify_model_tier("qwen2.5:3b"), "Dengeli (3B)");
+        assert_eq!(AiEngine::classify_model_tier("phi3:mini"), "Eco (1.5B)");
+        assert_eq!(AiEngine::classify_model_tier("qwen2.5:7b"), "Pro (7B)");
+        assert_eq!(AiEngine::classify_model_tier("deepseek-r1:8b"), "Pro (7B)");
+    }
+
+    #[test]
+    fn test_thought_stream_filter_isolates_reasoning() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut filter = ThoughtStreamFilter::new();
+
+        filter.process("Ön bilgi ", &tx);
+        filter.process("<think>Düşünce süreci burada", &tx);
+        filter.process(" ve devam ediyor</think>Nihai cevap metni.", &tx);
+
+        let mut tokens = Vec::new();
+        let mut thoughts = Vec::new();
+
+        while let Ok(chunk) = rx.try_recv() {
+            match chunk {
+                StreamChunk::Token(t) => tokens.push(t),
+                StreamChunk::Thought(t) => thoughts.push(t),
+                _ => {}
+            }
+        }
+
+        assert_eq!(tokens.join(""), "Ön bilgi Nihai cevap metni.");
+        assert_eq!(thoughts.join(""), "Düşünce süreci burada ve devam ediyor");
+    }
+
+    #[test]
+    fn test_offline_assistant_response_has_guidance() {
+        let res = AiEngine::offline_assistant_response("merhaba");
+        assert!(res.contains("Corten AI Sistem Asistanı"));
+        assert!(res.contains("Ses & Parlaklık"));
+        assert!(res.contains("Dosya Arama"));
     }
 }

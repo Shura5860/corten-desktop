@@ -40,6 +40,8 @@ sudo install -m 755 target/release/corten-polkit "${BIN_DIR}/corten-polkit"
 sudo install -m 755 target/release/corten-portal "${BIN_DIR}/corten-portal"
 sudo install -m 755 target/release/cortenctl "${BIN_DIR}/cortenctl"
 sudo install -m 755 target/release/corten-ai "${BIN_DIR}/corten-ai"
+sudo install -m 755 target/release/corten-forge "${BIN_DIR}/corten-forge"
+sudo install -m 755 target/release/corten-update "${BIN_DIR}/corten-update"
 if [[ "${CORTEN_ENABLE_CAPTURE:-0}" == "1" ]]; then
     sudo install -m 755 target/release/corten-capture-service "${BIN_DIR}/corten-capture-service"
 fi
@@ -86,14 +88,12 @@ sudo install -d /usr/share/xdg-desktop-portal/portals
 sudo tee /usr/share/xdg-desktop-portal/portals/corten.portal > /dev/null << 'EOF'
 [portal]
 DBusName=org.freedesktop.impl.portal.desktop.corten
-Interfaces=org.freedesktop.impl.portal.ScreenCast;
+Interfaces=org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.Screenshot;org.freedesktop.impl.portal.FileChooser;org.freedesktop.impl.portal.Settings;
 UseIn=Corten;corten;
 EOF
-sudo tee /usr/share/xdg-desktop-portal/corten-portals.conf > /dev/null << 'EOF'
-[preferred]
-default=gtk;wlr;
-org.freedesktop.impl.portal.ScreenCast=corten;wlr;
-EOF
+if [[ -f corten-portal/corten-portals.conf ]]; then
+    sudo install -m 644 corten-portal/corten-portals.conf /usr/share/xdg-desktop-portal/corten-portals.conf
+fi
 
 echo "==> Installing optional systemd user service..."
 sudo install -d "${SYSTEMD_USER_DIR}"

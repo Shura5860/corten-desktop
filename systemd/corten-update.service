@@ -1,0 +1,15 @@
+[Unit]
+Description=Corten Desktop Automated Background OTA Update Checker
+Documentation=https://github.com/Shura5860/corten-desktop
+After=graphical-session.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/corten-update check
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+

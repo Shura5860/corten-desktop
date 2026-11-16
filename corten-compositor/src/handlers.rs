@@ -575,7 +575,8 @@ impl WlrLayerShellHandler for CortenCompositor {
             | "corten-welcome"
             | "corten-launcher" => output_size,
             "corten-panel" => (output_size.w.min(760), 78).into(),
-            "corten-widgets" => (340, 420).into(),
+            "corten-widgets" => (350, output_size.h - 100).into(),
+            "corten-widget-drawer" => (output_size.w - 64, 360).into(),
             "corten-notification" => (360, 100).into(),
             "corten-polkit" => (460, 340).into(),
             "corten-ai" => (560, 420).into(),

@@ -75,9 +75,9 @@ fn default_autohide_mode() -> String {
 
 fn default_pinned_apps() -> Vec<String> {
     vec![
-        "settings".into(),
         "files".into(),
-        "corten-ai".into(),
+        "settings".into(),
+        "corten-forge".into(),
     ]
 }
 

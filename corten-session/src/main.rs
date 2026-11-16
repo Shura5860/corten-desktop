@@ -360,6 +360,41 @@ fn spawn_xdg_autostart(socket_name: &str) {
     }
 }
 
+fn record_crash_report(status: std::process::ExitStatus) {
+    let now = chrono::Local::now().to_rfc3339();
+    let crash_dir = directories::BaseDirs::new()
+        .map(|d| d.data_dir().join("corten/crashes"))
+        .unwrap_or_else(|| PathBuf::from("/tmp/corten_crashes"));
+    let _ = std::fs::create_dir_all(&crash_dir);
+    let log_file = crash_dir.join(format!("crash_{}.log", chrono::Local::now().format("%Y%m%d_%H%M%S")));
+    let tmp_file = PathBuf::from("/tmp/corten-crash.log");
+
+    let mut report = format!(
+        "=== CORTEN DESKTOP COMPOSITOR CRASH DUMP ===\nTimestamp: {}\nExit Status: {}\n",
+        now, status
+    );
+
+    if let Ok(out) = Command::new("cortenctl").args(["doctor", "--markdown"]).output() {
+        if out.status.success() {
+            report.push_str("\n--- SYSTEM DOCTOR DIAGNOSTIC ---\n");
+            report.push_str(&String::from_utf8_lossy(&out.stdout));
+        }
+    }
+
+    let _ = std::fs::write(&log_file, &report);
+    let _ = std::fs::write(&tmp_file, &report);
+
+    eprintln!("\n\x1b[1;31m=======================================================================\x1b[0m");
+    eprintln!("\x1b[1;31m⚠️  CORTEN COMPOSITOR KRİTİK ÇÖKME HATASI!\x1b[0m");
+    eprintln!("Compositor üst üste 3 kez çöktü ve oturum güvenli şekilde durduruldu.");
+    eprintln!("Ayrıntılı hata teşhis raporu kaydedildi:");
+    eprintln!("  ↳ \x1b[1m{}\x1b[0m", tmp_file.display());
+    eprintln!("  ↳ \x1b[1m{}\x1b[0m", log_file.display());
+    eprintln!("\nSorunu gidermek için terminalden şu komutu çalıştırabilirsiniz:");
+    eprintln!("  \x1b[38;2;225;110;45mcortenctl doctor\x1b[0m");
+    eprintln!("\x1b[1;31m=======================================================================\x1b[0m\n");
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -789,6 +824,9 @@ fn main() -> Result<()> {
                         }
                     }
                 } else {
+                    if !status.success() {
+                        record_crash_report(status);
+                    }
                     info!(
                         "Compositor exited with status: {}. Ending session...",
                         status

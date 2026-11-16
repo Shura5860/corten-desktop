@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Corten Snipper
+GenericName=Ekran Alıntısı Aracı
+Comment=Corten Wayland GPU ekran görüntüsü ve alıntı aracı
+Exec=corten-snipper
+Icon=corten-snipper
+Terminal=false
+Type=Application
+Categories=Utility;Graphics;
+Keywords=screenshot;snip;capture;screen;image;
+StartupNotify=true
+

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Corten Forge
+GenericName=Yazılım Merkezi
+Comment=Wayland Yazılım & Paket Merkezi (Flatpak, Arch & AI)
+Exec=corten-forge
+Icon=corten-forge
+Terminal=false
+Type=Application
+Categories=System;PackageManager;Settings;
+Keywords=software;package;store;flatpak;flathub;pacman;install;discover;forge;
+StartupNotify=true
+

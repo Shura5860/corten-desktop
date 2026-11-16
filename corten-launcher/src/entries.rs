@@ -189,12 +189,36 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
     let lower_icon = clean_icon.to_lowercase();
     let combined = format!("{} {} {}", lower_icon, lower_name, lower_exec);
 
+    // 1.5 Direct Corten Bespoke Icon check
+    let bespoke_candidates = [
+        format!("assets/icons/hicolor/64x64/apps/{}.png", clean_icon),
+        format!("assets/icons/hicolor/48x48/apps/{}.png", clean_icon),
+        format!("assets/icons/hicolor/scalable/apps/{}.svg", clean_icon),
+        format!("assets/icons/hicolor/64x64/apps/{}.png", lower_icon),
+        format!("assets/icons/hicolor/48x48/apps/{}.png", lower_icon),
+        format!("assets/icons/hicolor/scalable/apps/{}.svg", lower_icon),
+    ];
+    for b_path_str in &bespoke_candidates {
+        let p = PathBuf::from(b_path_str);
+        if p.exists() {
+            if b_path_str.ends_with(".svg") {
+                if let Some(png) = convert_svg_to_png(&p, 64) {
+                    return Some(png);
+                }
+            } else {
+                return Some(p);
+            }
+        }
+    }
+
     // 2. Specific known system app mappings
     let known_candidates: &[&str] = if combined.contains("corten-ai")
         || combined.contains("ai")
         || combined.contains("assistant")
     {
         &[
+            "assets/icons/hicolor/64x64/apps/corten-ai.png",
+            "assets/icons/hicolor/48x48/apps/corten-ai.png",
             "/usr/share/pixmaps/corten-ai.png",
             "assets/logos/ai_concept1_aura_core.png",
             "/usr/share/pixmaps/corten.png",
@@ -208,6 +232,8 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
         || combined.contains("konsole")
     {
         &[
+            "assets/icons/hicolor/64x64/apps/corten-terminal.png",
+            "assets/icons/hicolor/48x48/apps/corten-terminal.png",
             "/usr/share/icons/oxygen/base/48x48/apps/utilities-terminal.png",
             "/usr/share/icons/breeze/apps/48/utilities-terminal.svg",
             "/usr/share/icons/AdwaitaLegacy/48x48/legacy/utilities-terminal.png",
@@ -221,6 +247,8 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
         || combined.contains("thunar")
     {
         &[
+            "assets/icons/hicolor/64x64/apps/corten-files.png",
+            "assets/icons/hicolor/48x48/apps/corten-files.png",
             "/usr/share/icons/oxygen/base/48x48/apps/system-file-manager.png",
             "/usr/share/icons/breeze/apps/48/system-file-manager.svg",
             "/usr/share/icons/AdwaitaLegacy/48x48/legacy/system-file-manager.png",
@@ -233,10 +261,31 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
         || combined.contains("pref")
     {
         &[
+            "assets/icons/hicolor/64x64/apps/corten-settings.png",
+            "assets/icons/hicolor/48x48/apps/corten-settings.png",
             "/usr/share/icons/oxygen/base/48x48/categories/preferences-system.png",
             "/usr/share/icons/breeze/preferences/32/preferences-system.svg",
             "/usr/share/icons/AdwaitaLegacy/48x48/legacy/preferences-system.png",
             "/usr/share/icons/oxygen/base/64x64/categories/preferences-system.png",
+        ]
+    } else if combined.contains("corten-forge")
+        || combined.contains("forge")
+        || combined.contains("store")
+        || combined.contains("software")
+        || combined.contains("package")
+    {
+        &[
+            "assets/icons/hicolor/64x64/apps/corten-forge.png",
+            "assets/icons/hicolor/48x48/apps/corten-forge.png",
+            "/usr/share/icons/oxygen/base/48x48/apps/system-software-install.png",
+            "/usr/share/icons/breeze/apps/48/system-software-install.svg",
+            "/usr/share/icons/AdwaitaLegacy/48x48/legacy/system-software-install.png",
+            "assets/logo.png",
+        ]
+    } else if combined.contains("corten-welcome") || combined.contains("welcome") {
+        &[
+            "assets/icons/hicolor/64x64/apps/corten-welcome.png",
+            "assets/icons/hicolor/48x48/apps/corten-welcome.png",
         ]
     } else if combined.contains("editor")
         || combined.contains("code")
@@ -247,6 +296,8 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
         || combined.contains("gedit")
     {
         &[
+            "assets/icons/hicolor/64x64/apps/corten-editor.png",
+            "assets/icons/hicolor/48x48/apps/corten-editor.png",
             "/usr/share/icons/oxygen/base/48x48/apps/accessories-text-editor.png",
             "/usr/share/icons/breeze/apps/48/accessories-text-editor.svg",
             "/usr/share/icons/AdwaitaLegacy/48x48/legacy/accessories-text-editor.png",
@@ -261,6 +312,8 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
         || combined.contains("web")
     {
         &[
+            "assets/icons/hicolor/64x64/apps/corten-browser.png",
+            "assets/icons/hicolor/48x48/apps/corten-browser.png",
             "/usr/share/icons/hicolor/48x48/apps/firefox.png",
             "/usr/share/icons/oxygen/base/48x48/apps/internet-web-browser.png",
             "/usr/share/icons/breeze/apps/48/internet-web-browser.svg",
@@ -268,6 +321,8 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
         ]
     } else if combined.contains("system-monitor") || combined.contains("htop") || combined.contains("monitor") {
         &[
+            "assets/icons/hicolor/64x64/apps/corten-monitor.png",
+            "assets/icons/hicolor/48x48/apps/corten-monitor.png",
             "/usr/share/icons/oxygen/base/48x48/apps/utilities-system-monitor.png",
             "/usr/share/icons/breeze/apps/48/utilities-system-monitor.svg",
             "/usr/share/pixmaps/htop.png",
@@ -429,8 +484,8 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         generic_name: Some("Terminal".to_string()),
         comment: Some("Corten Wayland yerel GPU-hızlandırmalı rust terminali".to_string()),
         exec: resolve_bin("corten-terminal"),
-        icon: Some("utilities-terminal".to_string()),
-        icon_path: resolve_desktop_icon(Some("utilities-terminal"), "Corten Terminal", "corten-terminal"),
+        icon: Some("corten-terminal".to_string()),
+        icon_path: resolve_desktop_icon(Some("corten-terminal"), "Corten Terminal", "corten-terminal"),
         terminal: false,
         categories: vec!["System".to_string(), "TerminalEmulator".to_string()],
     });
@@ -442,8 +497,8 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         generic_name: Some("Dosya Yöneticisi".to_string()),
         comment: Some("Corten Wayland yerel dosya gezgini ve yöneticisi".to_string()),
         exec: resolve_bin("corten-files"),
-        icon: Some("system-file-manager".to_string()),
-        icon_path: resolve_desktop_icon(Some("system-file-manager"), "Corten Files", "corten-files"),
+        icon: Some("corten-files".to_string()),
+        icon_path: resolve_desktop_icon(Some("corten-files"), "Corten Files", "corten-files"),
         terminal: false,
         categories: vec!["System".to_string(), "Utility".to_string(), "FileManager".to_string()],
     });
@@ -455,8 +510,8 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         generic_name: Some("Sistem Ayarları".to_string()),
         comment: Some("Corten Wayland masaüstü ayarları ve yapılandırması".to_string()),
         exec: resolve_bin("corten-settings"),
-        icon: Some("preferences-system".to_string()),
-        icon_path: resolve_desktop_icon(Some("preferences-system"), "Corten Settings", "corten-settings"),
+        icon: Some("corten-settings".to_string()),
+        icon_path: resolve_desktop_icon(Some("corten-settings"), "Corten Settings", "corten-settings"),
         terminal: false,
         categories: vec!["System".to_string(), "Settings".to_string()],
     });
@@ -468,8 +523,8 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         generic_name: Some("Görev Yöneticisi".to_string()),
         comment: Some("Corten Wayland sistem kaynak izleyici ve görev yöneticisi".to_string()),
         exec: resolve_bin("corten-monitor"),
-        icon: Some("utilities-system-monitor".to_string()),
-        icon_path: resolve_desktop_icon(Some("utilities-system-monitor"), "Corten Monitor", "corten-monitor"),
+        icon: Some("corten-monitor".to_string()),
+        icon_path: resolve_desktop_icon(Some("corten-monitor"), "Corten Monitor", "corten-monitor"),
         terminal: false,
         categories: vec!["System".to_string(), "Monitor".to_string()],
     });
@@ -481,8 +536,8 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         generic_name: Some("Hoş Geldiniz Sihirbazı".to_string()),
         comment: Some("Corten Wayland ilk açılış rehberi ve tanıtım sihirbazı".to_string()),
         exec: resolve_bin("corten-welcome"),
-        icon: Some("preferences-desktop".to_string()),
-        icon_path: resolve_desktop_icon(Some("preferences-desktop"), "Corten Welcome", "corten-welcome"),
+        icon: Some("corten-welcome".to_string()),
+        icon_path: resolve_desktop_icon(Some("corten-welcome"), "Corten Welcome", "corten-welcome"),
         terminal: false,
         categories: vec!["System".to_string(), "Settings".to_string(), "Documentation".to_string()],
     });
@@ -500,6 +555,19 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         categories: vec!["System".to_string(), "Utility".to_string(), "AI".to_string()],
     });
     seen_ids.insert("corten-ai.desktop".to_string());
+
+    entries.push(AppEntry {
+        id: "corten-forge.desktop".to_string(),
+        name: "Corten Forge".to_string(),
+        generic_name: Some("Yazılım & Paket Merkezi".to_string()),
+        comment: Some("Wayland Yazılım & Paket Merkezi (Flatpak, Arch & AI)".to_string()),
+        exec: resolve_bin("corten-forge"),
+        icon: Some("corten-forge".to_string()),
+        icon_path: resolve_desktop_icon(Some("corten-forge"), "Corten Forge", "corten-forge"),
+        terminal: false,
+        categories: vec!["System".to_string(), "PackageManager".to_string(), "Settings".to_string()],
+    });
+    seen_ids.insert("corten-forge.desktop".to_string());
 
     for dir in search_paths {
         if dir.exists() && dir.is_dir() {

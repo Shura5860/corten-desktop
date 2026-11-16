@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Corten Terminal
+GenericName=Terminal
+Comment=Corten Wayland yerel GPU-hızlandırmalı rust terminali
+Exec=corten-terminal
+Icon=corten-terminal
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;
+Keywords=terminal;shell;prompt;command;cli;
+StartupNotify=true
+

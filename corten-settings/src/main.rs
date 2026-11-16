@@ -1156,6 +1156,202 @@ impl CortenSettingsApp {
         .into()
     }
 
+    /// Uppercase, letter-spaced clean section header (Libadwaita / macOS standard)
+    fn section_header<'a>(title: &'static str, palette: Palette) -> Element<'a, Message> {
+        text(title)
+            .size(11.0)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..Default::default()
+            })
+            .color(palette.text_muted.to_iced())
+            .into()
+    }
+
+    /// Single unified metal glass card grouping related preferences with inset hairline dividers
+    fn settings_group<'a>(
+        items: Vec<Element<'a, Message>>,
+        palette: Palette,
+    ) -> Element<'a, Message> {
+        let mut col = column![].spacing(0).width(Length::Fill);
+        let count = items.len();
+        for (idx, item) in items.into_iter().enumerate() {
+            col = col.push(item);
+            if idx + 1 < count {
+                let divider = container(row![])
+                    .height(Length::Fixed(1.0))
+                    .width(Length::Fill)
+                    .padding([0, 16])
+                    .style(|_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                        ..Default::default()
+                    });
+                col = col.push(divider);
+            }
+        }
+
+        container(col)
+            .width(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    palette.surface.r,
+                    palette.surface.g,
+                    palette.surface.b,
+                    0.80,
+                ))),
+                border: Border {
+                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    width: 1.0,
+                    radius: border::Radius::from(14.0),
+                },
+                shadow: Shadow {
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.22),
+                    offset: iced::Vector::new(0.0, 3.0),
+                    blur_radius: 12.0,
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Modern unified preference row: [ (Icon Badge) + Title + Subtitle ] <---> [ Interactive Control ]
+    fn settings_row<'a>(
+        icon: Option<char>,
+        title: &'static str,
+        subtitle: Option<&'static str>,
+        control: impl Into<Element<'a, Message>>,
+        palette: Palette,
+    ) -> Element<'a, Message> {
+        let icon_elem: Element<'a, Message> = if let Some(ic) = icon {
+            container(
+                text(ic)
+                    .font(LUCIDE_FONT)
+                    .size(15.0)
+                    .color(palette.primary.to_iced())
+            )
+            .width(Length::Fixed(30.0))
+            .height(Length::Fixed(30.0))
+            .center_x(Length::Fixed(30.0))
+            .center_y(Length::Fixed(30.0))
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.12,
+                ))),
+                border: Border {
+                    color: iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.28,
+                    ),
+                    width: 1.0,
+                    radius: border::Radius::from(8.0),
+                },
+                ..Default::default()
+            })
+            .into()
+        } else {
+            horizontal_space().width(Length::Shrink).into()
+        };
+
+        let mut text_col = column![
+            text(title)
+                .size(Typography::BODY)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Medium,
+                    ..Default::default()
+                })
+                .color(palette.text_primary.to_iced()),
+        ].spacing(2);
+
+        if let Some(sub) = subtitle {
+            text_col = text_col.push(
+                text(sub)
+                    .size(Typography::CAPTION)
+                    .color(palette.text_muted.to_iced())
+            );
+        }
+
+        let left_block = row![icon_elem, text_col.width(Length::Fill)]
+            .spacing(Spacing::MD)
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
+
+        let right_block = container(control.into())
+            .width(Length::Shrink)
+            .align_x(Alignment::End)
+            .align_y(Alignment::Center);
+
+        container(
+            row![left_block, right_block]
+                .spacing(Spacing::MD)
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+        )
+        .padding([14, 16])
+        .width(Length::Fill)
+        .into()
+    }
+
+    /// Sleek segmented pill control (e.g. [ Option A | Option B ])
+    fn segmented_pill<'a>(
+        items: Vec<(&'static str, bool, Message)>,
+        palette: Palette,
+    ) -> Element<'a, Message> {
+        let mut r = row![].spacing(2).align_y(Alignment::Center);
+        for (label, selected, msg) in items {
+            let btn = button(
+                text(label)
+                    .size(Typography::CAPTION)
+                    .font(iced::Font {
+                        weight: if selected { iced::font::Weight::Semibold } else { iced::font::Weight::Normal },
+                        ..Default::default()
+                    })
+                    .color(if selected {
+                        palette.on_primary().to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    })
+            )
+            .padding([5, 12])
+            .on_press(msg)
+            .style(move |_, status| {
+                let bg = if selected {
+                    palette.primary.to_iced()
+                } else if matches!(status, button::Status::Hovered) {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+                } else {
+                    iced::Color::TRANSPARENT
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: Border {
+                        radius: border::Radius::from(6.0),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            });
+            r = r.push(btn);
+        }
+
+        container(r)
+            .padding(3)
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35))),
+                border: Border {
+                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    width: 1.0,
+                    radius: border::Radius::from(8.0),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
     /// Responsive setting item inside a settings group card
     fn setting_item<'a>(
         title: &'static str,
@@ -1325,343 +1521,104 @@ impl CortenSettingsApp {
         let current_patina = PatinaVariant::from_code(&self.appearance.patina);
         let is_compact = self.appearance.density == "compact";
 
-        // ==================== 1. WIDESCREEN HERO DESKTOP STAGE ====================
-        let stage_top_bar = row![
-            text("12:00 PM  •  Corten OS Desktop")
-                .size(11.0)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Medium,
-                    ..Default::default()
-                })
-                .color(palette.text_muted.to_iced()),
-            horizontal_space(),
-            row![
-                container(text(if dark_selected { "● Koyu Antrasit" } else { "○ Sıcak Krem" }).size(10.0).color(palette.text_primary.to_iced()))
-                    .padding([2, 8])
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
-                        border: Border { radius: border::Radius::from(6.0), ..Default::default() },
-                        ..Default::default()
-                    }),
-                container(text(match current_patina {
-                    PatinaVariant::Rust => "● Pas (Rust)",
-                    PatinaVariant::Verdigris => "● Zümrüt (Verdigris)",
-                    PatinaVariant::Titanium => "● Çelik (Titanium)",
-                    PatinaVariant::Molten => "● Akkor (Molten)",
-                }).size(Typography::CAPTION).color(palette.primary.to_iced()))
-                    .padding([2, 8])
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16))),
-                        border: Border {
-                            color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.40),
-                            width: 1.0,
-                            radius: border::Radius::from(6.0),
-                        },
-                        ..Default::default()
-                    }),
-                container(text(if is_compact { "Kompakt" } else { "Ferah" }).size(Typography::CAPTION).color(palette.text_muted.to_iced()))
-                    .padding([2, 8])
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
-                        border: Border { radius: border::Radius::from(6.0), ..Default::default() },
-                        ..Default::default()
-                    }),
-            ]
-            .spacing(Spacing::XS)
-            .align_y(Alignment::Center),
-        ]
-        .width(Length::Fill)
-        .align_y(Alignment::Center);
-
-        let preview_window = container(
-            column![
-                row![
-                    row![
-                        container(row![]).width(Length::Fixed(8.0)).height(Length::Fixed(8.0))
-                            .style(|_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgb(0.95, 0.35, 0.35))),
-                                border: Border { radius: border::Radius::from(4.0), ..Default::default() },
-                                ..Default::default()
-                            }),
-                        container(row![]).width(Length::Fixed(8.0)).height(Length::Fixed(8.0))
-                            .style(|_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgb(0.95, 0.75, 0.25))),
-                                border: Border { radius: border::Radius::from(4.0), ..Default::default() },
-                                ..Default::default()
-                            }),
-                        container(row![]).width(Length::Fixed(8.0)).height(Length::Fixed(8.0))
-                            .style(|_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgb(0.35, 0.85, 0.45))),
-                                border: Border { radius: border::Radius::from(4.0), ..Default::default() },
-                                ..Default::default()
-                            }),
-                    ]
-                    .spacing(4)
-                    .align_y(Alignment::Center),
-                    horizontal_space(),
-                    text("terminal ~ corten")
-                        .size(10.0)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Medium,
-                            ..Default::default()
-                        })
-                        .color(palette.text_muted.to_iced()),
-                    horizontal_space(),
-                ]
-                .width(Length::Fill)
-                .align_y(Alignment::Center),
-                text("corten-desktop ~ $ cargo check --workspace")
-                    .size(11.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Medium,
-                        ..Default::default()
-                    })
-                    .color(palette.primary.to_iced()),
-                row![
-                    text("✓").size(11.0).color(iced::Color::from_rgb(0.25, 0.85, 0.45)),
-                    text("Workspace check: 0 errors, 31 tests passed")
-                        .size(10.0)
-                        .color(palette.text_muted.to_iced()),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center),
-            ]
-            .spacing(6),
-        )
-        .padding(10)
-        .width(Length::Fixed(290.0))
-        .height(Length::Fixed(92.0))
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(palette.surface.to_iced())),
-            border: Border {
-                color: palette.primary.to_iced(),
-                width: 1.5,
-                radius: border::Radius::from(Radius::SM),
-            },
-            shadow: Shadow {
-                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-                offset: iced::Vector::new(0.0, 4.0),
-                blur_radius: 12.0,
-            },
-            ..Default::default()
-        });
-
-        let preview_dock = container(
-            row![
-                text(Icon::APP_WINDOW).font(LUCIDE_FONT).size(13.0).color(palette.primary.to_iced()),
-                text(Icon::TERMINAL).font(LUCIDE_FONT).size(13.0).color(palette.text_primary.to_iced()),
-                text(Icon::CODE).font(LUCIDE_FONT).size(13.0).color(palette.text_primary.to_iced()),
-                text(Icon::GLOBE).font(LUCIDE_FONT).size(13.0).color(palette.text_primary.to_iced()),
-                text(Icon::SETTINGS).font(LUCIDE_FONT).size(13.0).color(palette.text_muted.to_iced()),
-            ]
-            .spacing(Spacing::SM)
-            .align_y(Alignment::Center),
-        )
-        .padding([4, 16])
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color { a: 0.96, ..palette.surface.to_iced() })),
-            border: Border {
-                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.40),
-                width: 1.0,
-                radius: border::Radius::from(20.0),
-            },
-            ..Default::default()
-        });
-
-        let hero_canvas = Self::hero_stage(
-            column![
-                stage_top_bar,
-                vertical_space().height(6),
-                container(preview_window).width(Length::Fill).center_x(Length::Fill),
-                vertical_space().height(6),
-                container(preview_dock).width(Length::Fill).center_x(Length::Fill),
-            ]
-            .spacing(6)
-            .width(Length::Fill),
+        // 1. Theme Mode Row
+        let theme_toggle = Self::segmented_pill(
+            vec![
+                ("Koyu Antrasit", dark_selected, Message::ToggleThemeMode(ThemeModeChoice::Dark)),
+                ("Sıcak Krem", !dark_selected, Message::ToggleThemeMode(ThemeModeChoice::Light)),
+            ],
             palette,
         );
-
-        // ==================== BENTO CARDS ====================
-        let mode_card = |label: &'static str, sub: &'static str, is_active: bool, msg: Message, is_dark: bool| {
-            button(
-                column![
-                    row![
-                        text(if is_dark { Icon::MOON } else { Icon::SUN }).font(LUCIDE_FONT).size(16.0).color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
-                        text(label).size(Typography::BODY).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
-                        horizontal_space(),
-                        if is_active {
-                            text("✓").size(13.0).color(palette.primary.to_iced())
-                        } else {
-                            text("").size(13.0)
-                        },
-                    ]
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill),
-                    text(sub).size(Typography::CAPTION).color(palette.text_muted.to_iced()),
-                ]
-                .spacing(4)
-                .width(Length::Fill)
-            )
-            .width(Length::Fill)
-            .padding([10, 14])
-            .style(move |_, status| {
-                let bg = if is_active {
-                    iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14)
-                } else if matches!(status, button::Status::Hovered) {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
-                } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03)
-                };
-                button::Style {
-                    background: Some(iced::Background::Color(bg)),
-                    border: Border {
-                        color: if is_active { palette.primary.to_iced() } else { palette.border.to_iced() },
-                        width: if is_active { 1.5 } else { 1.0 },
-                        radius: border::Radius::from(Radius::SM),
-                    },
-                    ..Default::default()
-                }
-            })
-            .on_press(msg)
-        };
-
-        let theme_bento = Self::bento_card(
-            Icon::SUN,
+        let theme_row = Self::settings_row(
+            Some(if dark_selected { Icon::MOON } else { Icon::SUN }),
             "Arayüz Teması",
-            Some("Stil"),
-            row![
-                mode_card("Koyu Antrasit", "Düşük ışık ve yüksek kontrast", dark_selected, Message::ToggleThemeMode(ThemeModeChoice::Dark), true),
-                mode_card("Sıcak Krem", "Aydınlık ve yumuşak ışık", !dark_selected, Message::ToggleThemeMode(ThemeModeChoice::Light), false),
-            ]
-            .spacing(Spacing::SM)
-            .width(Length::Fill),
+            Some("Düşük ışık için koyu antrasit veya aydınlık sıcak krem mod"),
+            theme_toggle,
             palette,
         );
 
-        let density_card = |label: &'static str, sub: &'static str, is_active: bool, msg: Message| {
-            button(
-                column![
-                    row![
-                        text(label).size(Typography::BODY).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
-                        horizontal_space(),
-                        if is_active {
-                            text("✓").size(13.0).color(palette.primary.to_iced())
-                        } else {
-                            text("").size(13.0)
-                        },
-                    ]
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill),
-                    text(sub).size(Typography::CAPTION).color(palette.text_muted.to_iced()),
-                ]
-                .spacing(4)
-                .width(Length::Fill)
-            )
-            .width(Length::Fill)
-            .padding([10, 14])
-            .style(move |_, status| {
-                let bg = if is_active {
-                    iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14)
-                } else if matches!(status, button::Status::Hovered) {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
-                } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03)
-                };
-                button::Style {
-                    background: Some(iced::Background::Color(bg)),
-                    border: Border {
-                        color: if is_active { palette.primary.to_iced() } else { palette.border.to_iced() },
-                        width: if is_active { 1.5 } else { 1.0 },
-                        radius: border::Radius::from(Radius::SM),
-                    },
-                    ..Default::default()
-                }
-            })
-            .on_press(msg)
-        };
-
-        let density_bento = Self::bento_card(
-            Icon::GAUGE,
-            "Bilgi Yoğunluğu",
-            Some("Yerleşim"),
-            row![
-                density_card("Ferah", "Geniş satır aralıkları ve rahat okuma", !is_compact, Message::SetDensity("comfortable".into())),
-                density_card("Kompakt", "Çoklu pencere için sıkı veri", is_compact, Message::SetDensity("compact".into())),
-            ]
-            .spacing(Spacing::SM)
-            .width(Length::Fill),
-            palette,
-        );
-
-        let patina_chip = |name: &'static str, hex_name: &'static str, color_val: iced::Color, is_active: bool, msg: Message| {
+        // 2. Patina Accent Selector Chips
+        let patina_chip = |name: &'static str, color_val: iced::Color, is_active: bool, msg: Message| {
             button(
                 row![
                     container(row![])
-                        .width(Length::Fixed(22.0))
-                        .height(Length::Fixed(22.0))
+                        .width(Length::Fixed(14.0))
+                        .height(Length::Fixed(14.0))
                         .style(move |_| container::Style {
                             background: Some(iced::Background::Color(color_val)),
-                            border: Border {
-                                color: if is_active { iced::Color::WHITE } else { iced::Color::TRANSPARENT },
-                                width: if is_active { 2.0 } else { 0.0 },
-                                radius: border::Radius::from(11.0),
-                            },
+                            border: Border { radius: border::Radius::from(7.0), ..Default::default() },
                             ..Default::default()
                         }),
-                    column![
-                        text(name).size(Typography::BODY_SM).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
-                        text(hex_name).size(10.0).color(palette.text_muted.to_iced()),
-                    ]
-                    .spacing(1),
-                    horizontal_space(),
-                    if is_active {
-                        text("✓").size(12.0).color(palette.primary.to_iced())
-                    } else {
-                        text("").size(12.0)
-                    },
+                    text(name)
+                        .size(Typography::CAPTION)
+                        .font(iced::Font {
+                            weight: if is_active { iced::font::Weight::Semibold } else { iced::font::Weight::Normal },
+                            ..Default::default()
+                        })
+                        .color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
                 ]
                 .spacing(Spacing::XS)
-                .align_y(Alignment::Center)
-                .width(Length::Fill),
+                .align_y(Alignment::Center),
             )
-            .width(Length::Fill)
-            .padding([8, 12])
+            .padding([5, 10])
+            .on_press(msg)
             .style(move |_, status| {
                 let bg = if is_active {
                     iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16)
                 } else if matches!(status, button::Status::Hovered) {
                     iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
                 } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03)
+                    iced::Color::TRANSPARENT
                 };
                 button::Style {
                     background: Some(iced::Background::Color(bg)),
                     border: Border {
-                        color: if is_active { palette.primary.to_iced() } else { palette.border.to_iced() },
-                        width: if is_active { 1.5 } else { 1.0 },
-                        radius: border::Radius::from(Radius::SM),
+                        color: if is_active { palette.primary.to_iced() } else { iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10) },
+                        width: 1.0,
+                        radius: border::Radius::from(6.0),
                     },
                     ..Default::default()
                 }
             })
-            .on_press(msg)
         };
 
-        let patina_bento = Self::bento_card(
-            Icon::ACTIVITY,
-            "Corten Metalik Patina & Vurgu Rengi",
-            Some("4 Renk Teması"),
-            row![
-                patina_chip("Rust (Pas)", "Dövme Bakır #D97736", iced::Color::from_rgb(0.85, 0.42, 0.26), current_patina == PatinaVariant::Rust, Message::SetPatina("rust".into())),
-                patina_chip("Verdigris", "Oksit Zümrüt #2DD4BF", iced::Color::from_rgb(0.18, 0.83, 0.75), current_patina == PatinaVariant::Verdigris, Message::SetPatina("verdigris".into())),
-                patina_chip("Titanium", "Sert Çelik #64748B", iced::Color::from_rgb(0.58, 0.64, 0.72), current_patina == PatinaVariant::Titanium, Message::SetPatina("titanium".into())),
-                patina_chip("Molten", "Akkor Altın #F59E0B", iced::Color::from_rgb(0.96, 0.62, 0.04), current_patina == PatinaVariant::Molten, Message::SetPatina("molten".into())),
-            ]
-            .spacing(Spacing::XS)
-            .width(Length::Fill),
+        let patina_row_ctrl = row![
+            patina_chip("Rust (Pas)", iced::Color::from_rgb(0.85, 0.42, 0.26), current_patina == PatinaVariant::Rust, Message::SetPatina("rust".into())),
+            patina_chip("Verdigris (Zümrüt)", iced::Color::from_rgb(0.18, 0.83, 0.75), current_patina == PatinaVariant::Verdigris, Message::SetPatina("verdigris".into())),
+            patina_chip("Titanium (Çelik)", iced::Color::from_rgb(0.58, 0.64, 0.72), current_patina == PatinaVariant::Titanium, Message::SetPatina("titanium".into())),
+            patina_chip("Molten (Akkor)", iced::Color::from_rgb(0.96, 0.62, 0.04), current_patina == PatinaVariant::Molten, Message::SetPatina("molten".into())),
+        ]
+        .spacing(Spacing::XS)
+        .align_y(Alignment::Center);
+
+        let patina_row = Self::settings_row(
+            Some(Icon::ACTIVITY),
+            "Corten Patina Vurgusu",
+            Some("Sistem genelindeki metalik aksan ve ışık rengi"),
+            patina_row_ctrl,
             palette,
         );
 
+        // 3. Information Density
+        let density_toggle = Self::segmented_pill(
+            vec![
+                ("Ferah", !is_compact, Message::SetDensity("comfortable".into())),
+                ("Kompakt", is_compact, Message::SetDensity("compact".into())),
+            ],
+            palette,
+        );
+        let density_row = Self::settings_row(
+            Some(Icon::GAUGE),
+            "Bilgi Yoğunluğu",
+            Some("Pencere içi boşluklar ve arayüz yerleşimi"),
+            density_toggle,
+            palette,
+        );
+
+        // Group 1: Theme & Style
+        let theme_group = Self::settings_group(vec![theme_row, patina_row, density_row], palette);
+
+        // Group 2: Wallpaper
         let current_wp = &self.appearance.wallpaper_path;
         let p1_path = if std::path::Path::new("/usr/share/backgrounds/corten/corten_dark_landscape.jpg").exists() {
             "/usr/share/backgrounds/corten/corten_dark_landscape.jpg"
@@ -1674,34 +1631,16 @@ impl CortenSettingsApp {
             "assets/wallpapers/corten_dark_portrait.jpg"
         };
 
-        let wallpaper_card = |name: &'static str, sub: &'static str, path: &'static str, is_active: bool| {
+        let wp_pill = |label: &'static str, path: &'static str, is_active: bool| {
             button(
-                column![
-                    row![
-                        text(Icon::CAMERA).font(LUCIDE_FONT).size(14.0).color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
-                        text(name).size(Typography::BODY_SM).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
-                        horizontal_space(),
-                        if is_active {
-                            container(text("Aktif ✓").size(10.0).color(palette.on_primary().to_iced()))
-                                .padding([2, 6])
-                                .style(move |_| container::Style {
-                                    background: Some(iced::Background::Color(palette.primary.to_iced())),
-                                    border: Border { radius: border::Radius::from(4.0), ..Default::default() },
-                                    ..Default::default()
-                                })
-                        } else {
-                            container(row![])
-                        },
-                    ]
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill),
-                    text(sub).size(11.0).color(palette.text_muted.to_iced()),
+                row![
+                    text(if is_active { "✓ " } else { "" }).size(12.0).color(palette.primary.to_iced()),
+                    text(label).size(Typography::CAPTION).color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
                 ]
-                .spacing(4)
-                .width(Length::Fill)
+                .align_y(Alignment::Center)
             )
-            .width(Length::Fill)
-            .padding([10, 14])
+            .padding([6, 12])
+            .on_press(Message::SelectPresetWallpaper(path.to_string()))
             .style(move |_, status| {
                 let bg = if is_active {
                     iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16)
@@ -1714,64 +1653,59 @@ impl CortenSettingsApp {
                     background: Some(iced::Background::Color(bg)),
                     border: Border {
                         color: if is_active { palette.primary.to_iced() } else { palette.border.to_iced() },
-                        width: if is_active { 1.5 } else { 1.0 },
-                        radius: border::Radius::from(Radius::SM),
+                        width: 1.0,
+                        radius: border::Radius::from(6.0),
                     },
                     ..Default::default()
                 }
             })
-            .on_press(Message::SelectPresetWallpaper(path.to_string()))
         };
 
-        let wp_input = text_input(
-            "e.g. /home/user/Pictures/wallpaper.jpg",
-            &self.appearance.wallpaper_path,
-        )
-        .on_input(Message::UpdateWallpaperPath)
-        .padding([Spacing::XS + 2.0, Spacing::SM])
-        .width(Length::Fill);
-
-        let custom_wp_row = row![
-            wp_input,
-            button(
-                row![
-                    text(Icon::FOLDER).font(LUCIDE_FONT).size(13.0),
-                    text("Gözat...").size(Typography::BODY_SM),
-                ]
-                .spacing(Spacing::XS)
-                .align_y(Alignment::Center),
-            )
-            .padding([Spacing::XS + 2.0, Spacing::MD])
-            .on_press(Message::ChooseWallpaper),
-        ]
-        .spacing(Spacing::SM)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-
-        let wallpaper_bento = Self::bento_card(
-            Icon::CAMERA,
-            "Masaüstü Duvar Kâğıdı Vitrini",
-            Some("4K UHD"),
-            column![
-                row![
-                    wallpaper_card("Corten Dark Patina", "Yatay 16:9 Geniş Ekran Duvar Kâğıdı", p1_path, current_wp.contains("landscape")),
-                    wallpaper_card("Corten Forged Rust", "Dikey 9:16 Portre Endüstriyel Çelik", p2_path, current_wp.contains("portrait")),
-                ]
-                .spacing(Spacing::SM)
-                .width(Length::Fill),
-                custom_wp_row,
+        let wp_preset_row = Self::settings_row(
+            Some(Icon::CAMERA),
+            "Sistem Duvar Kâğıtları",
+            Some("Corten için özel tasarlanmış metalik 4K arka planlar"),
+            row![
+                wp_pill("Dark Landscape (16:9)", p1_path, current_wp.contains("landscape")),
+                wp_pill("Forged Rust (Portre)", p2_path, current_wp.contains("portrait")),
             ]
-            .spacing(Spacing::SM)
-            .width(Length::Fill),
+            .spacing(Spacing::XS)
+            .align_y(Alignment::Center),
             palette,
         );
 
+        let wp_input = text_input("Örn: /home/kullanici/Pictures/duvar_kagidi.jpg", &self.appearance.wallpaper_path)
+            .on_input(Message::UpdateWallpaperPath)
+            .padding([6, 10])
+            .width(Length::Fixed(240.0));
+
+        let browse_btn = button(
+            row![
+                text(Icon::FOLDER).font(LUCIDE_FONT).size(13.0),
+                text("Gözat...").size(Typography::CAPTION),
+            ]
+            .spacing(Spacing::XS)
+            .align_y(Alignment::Center)
+        )
+        .padding([6, 12])
+        .on_press(Message::ChooseWallpaper);
+
+        let wp_custom_row = Self::settings_row(
+            Some(Icon::FOLDER),
+            "Özel Görsel Seç",
+            Some("Yerel depolamadan kendi duvar kâğıdınızı belirleyin"),
+            row![wp_input, browse_btn].spacing(Spacing::XS).align_y(Alignment::Center),
+            palette,
+        );
+
+        let wp_group = Self::settings_group(vec![wp_preset_row, wp_custom_row], palette);
+
         column![
             heading,
-            hero_canvas,
-            row![theme_bento, density_bento].spacing(Spacing::MD).width(Length::Fill),
-            patina_bento,
-            wallpaper_bento,
+            Self::section_header("SİSTEM TEMASI & RENK PALETİ", palette),
+            theme_group,
+            Self::section_header("MASAÜSTÜ DUVAR KÂĞIDI", palette),
+            wp_group,
         ]
         .spacing(Spacing::MD)
         .into()
@@ -3255,63 +3189,15 @@ impl CortenSettingsApp {
         ]
         .spacing(Spacing::XXS);
 
-        // ==================== 1. HERO AUDIO STUDIO CONSOLE ====================
-        let vol_val = self.sound.output_volume;
-        let is_muted = self.sound.mute_output;
-
-        let vol_level = (vol_val as f32 / 100.0).clamp(0.0, 1.0);
-
-        let vu_bar = |val: f32, label: &'static str| {
-            let bars = if val < 0.20 {
-                " "
-            } else if val < 0.40 {
-                "▂"
-            } else if val < 0.60 {
-                "▂▄"
-            } else if val < 0.80 {
-                "▂▄▆"
-            } else {
-                "▂▄▆█"
-            };
-            row![
-                text(label).size(11.0).font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() }).color(palette.text_muted.to_iced()),
-                text(bars).size(13.0).color(if val > 0.85 { palette.danger.to_iced() } else { palette.primary.to_iced() }),
-                text(format!("%{:.0}", val * 100.0)).size(10.0).color(palette.text_muted.to_iced()),
-            ]
-            .spacing(Spacing::XS)
-            .align_y(Alignment::Center)
-        };
-
-        let console_top = row![
-            text("PipeWire Profesyonel Ses Konsolu")
-                .size(11.0)
-                .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
-                .color(palette.text_muted.to_iced()),
-            horizontal_space(),
-            container(text(if is_muted { "● Susturuldu" } else { "● Çıkış Etkin" }).size(10.0).color(if is_muted { palette.danger.to_iced() } else { palette.primary.to_iced() }))
-                .padding([2, 8])
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14))),
-                    border: Border {
-                        color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
-                        width: 1.0,
-                        radius: border::Radius::from(6.0),
-                    },
-                    ..Default::default()
-                }),
-        ]
-        .width(Length::Fill)
-        .align_y(Alignment::Center);
-
         let test_btn = button(
             row![
-                text(Icon::VOLUME).font(LUCIDE_FONT).size(14.0),
-                text("Sesi Test Et").size(Typography::BODY_SM).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }),
+                text(Icon::VOLUME).font(LUCIDE_FONT).size(13.0),
+                text("Sesi Test Et").size(Typography::CAPTION).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }),
             ]
             .spacing(Spacing::XS)
             .align_y(Alignment::Center),
         )
-        .padding([8, 16])
+        .padding([6, 12])
         .style(move |_, status| {
             let bg = if matches!(status, button::Status::Hovered) {
                 iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.28)
@@ -3324,58 +3210,13 @@ impl CortenSettingsApp {
                 border: Border {
                     color: palette.primary.to_iced(),
                     width: 1.0,
-                    radius: border::Radius::from(Radius::SM),
+                    radius: border::Radius::from(6.0),
                 },
                 ..Default::default()
             }
         })
         .on_press(Message::TestSoundOutput);
 
-        let console_center = row![
-            row![
-                container(text(Icon::VOLUME).font(LUCIDE_FONT).size(26.0).color(palette.primary.to_iced()))
-                    .padding(8)
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16))),
-                        border: Border { radius: border::Radius::from(10.0), ..Default::default() },
-                        ..Default::default()
-                    }),
-                column![
-                    text(format!("%{}", vol_val))
-                        .size(24.0)
-                        .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
-                        .color(if is_muted { palette.text_muted.to_iced() } else { palette.text_primary.to_iced() }),
-                    text(if is_muted { "Sistem Susturuldu" } else { "Ana Oynatma Seviyesi" })
-                        .size(11.0)
-                        .color(palette.text_muted.to_iced()),
-                ]
-                .spacing(2),
-            ]
-            .spacing(Spacing::SM)
-            .align_y(Alignment::Center),
-            horizontal_space(),
-            column![
-                vu_bar(if is_muted { 0.0 } else { vol_level }, "SEVİYE"),
-            ]
-            .spacing(3),
-            horizontal_space(),
-            test_btn,
-        ]
-        .width(Length::Fill)
-        .align_y(Alignment::Center);
-
-        let hero_canvas = Self::hero_stage(
-            column![
-                console_top,
-                vertical_space().height(6),
-                console_center,
-            ]
-            .spacing(6)
-            .width(Length::Fill),
-            palette,
-        );
-
-        // ==================== BENTO CARDS ====================
         let out_vol_slider = row![
             slider(0..=100, self.sound.output_volume, Message::SetOutputVolume)
                 .width(Length::Fixed(220.0))
@@ -3417,58 +3258,56 @@ impl CortenSettingsApp {
             &self.sound.output_device,
         )
         .on_input(Message::SetOutputDevice)
-        .width(Length::Fixed(260.0))
-        .padding([Spacing::SM, Spacing::MD]);
+        .width(Length::Fixed(240.0))
+        .padding([6, 10]);
 
-        let output_bento = Self::bento_card(
-            Icon::VOLUME,
-            "Hoparlör ve Kulaklık Çıkışı",
-            Some("Output"),
-            column![
-                Self::setting_item(
-                    "Çıkış Ses Düzeyi",
-                    "Varsayılan ses çıkışındaki ana sistem oynatma düzeyi",
-                    out_vol_slider,
-                    palette,
-                ),
-                Self::setting_item(
-                    "Tüm Sesleri Sustur (Mute)",
-                    "Tüm sistem ses çıkışını anında sessize al",
-                    mute_cb,
-                    palette,
-                ),
-                Self::setting_item(
-                    "Ses Çıkış Aygıtı",
-                    "wpctl ile kullanılacak varsayılan PipeWire çıkış aygıtı veya node kimliği",
-                    output_device,
-                    palette,
-                ),
-            ]
-            .spacing(Spacing::XS),
+        // Output Group
+        let out_vol_row = Self::settings_row(
+            Some(Icon::VOLUME),
+            "Çıkış Ses Düzeyi",
+            Some("Varsayılan ses çıkışındaki ana sistem oynatma düzeyi"),
+            out_vol_slider,
             palette,
         );
-
-        let input_bento = Self::bento_card(
-            Icon::MIC,
-            "Mikrofon ve Kayıt Girişi",
-            Some("Input"),
-            column![
-                Self::setting_item(
-                    "Mikrofon Giriş Düzeyi",
-                    "Varsayılan ses kayıt seviyesi ve mikrofon giriş hassasiyeti",
-                    in_vol_slider,
-                    palette,
-                ),
-            ]
-            .spacing(Spacing::XS),
+        let mute_row = Self::settings_row(
+            Some(Icon::VOLUME),
+            "Tüm Sesleri Sustur (Mute)",
+            Some("Tüm sistem ses çıkışını anında sessize al"),
+            mute_cb,
             palette,
         );
+        let dev_row = Self::settings_row(
+            Some(Icon::MUSIC),
+            "Ses Çıkış Aygıtı",
+            Some("wpctl ile kullanılan varsayılan PipeWire ses aygıtı"),
+            output_device,
+            palette,
+        );
+        let test_row = Self::settings_row(
+            Some(Icon::VOLUME),
+            "Hoparlör Testi",
+            Some("PipeWire ses çıkış kanalına stereo test sinyali gönder"),
+            test_btn,
+            palette,
+        );
+        let output_group = Self::settings_group(vec![out_vol_row, mute_row, dev_row, test_row], palette);
+
+        // Input Group
+        let in_vol_row = Self::settings_row(
+            Some(Icon::MIC),
+            "Mikrofon Giriş Düzeyi",
+            Some("Varsayılan ses kayıt seviyesi ve mikrofon giriş hassasiyeti"),
+            in_vol_slider,
+            palette,
+        );
+        let input_group = Self::settings_group(vec![in_vol_row], palette);
 
         column![
             heading,
-            hero_canvas,
-            output_bento,
-            input_bento,
+            Self::section_header("SES ÇIKIŞI (HOPARLÖR & KULAKLIK)", palette),
+            output_group,
+            Self::section_header("SES GİRİŞİ (MİKROFON & KAYIT)", palette),
+            input_group,
         ]
         .spacing(Spacing::MD)
         .into()
@@ -3513,9 +3352,9 @@ impl CortenSettingsApp {
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
                     container(
-                        text(if self.bluetooth_powered { "● Adaptör Açık" } else { "○ Adaptör Kapalı" })
+                        text(if self.bluetooth_powered { "Adaptör Açık" } else { "Adaptör Kapalı" })
                             .size(Typography::CAPTION)
-                            .color(if self.bluetooth_powered { palette.success.to_iced() } else { palette.text_muted.to_iced() })
+                            .color(if self.bluetooth_powered { palette.primary.to_iced() } else { palette.text_muted.to_iced() })
                     )
                     .padding([2, 8])
                     .style(move |_| container::Style {
@@ -3672,7 +3511,7 @@ impl CortenSettingsApp {
                         .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
                         .color(palette.text_muted.to_iced()),
                     horizontal_space(),
-                    container(text("● Sistem Hazır").size(10.0).color(palette.primary.to_iced()))
+                    container(text("Sistem Hazır").size(10.0).color(palette.primary.to_iced()))
                         .padding([2, 8])
                         .style(move |_| container::Style {
                             background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14))),
@@ -4036,7 +3875,7 @@ impl CortenSettingsApp {
                 column![
                     titlebar,
                     vertical_space(),
-                    text(if is_active { "● Odaklı" } else { "○ Arka Plan" })
+                    text(if is_active { "Odaklı" } else { "Arka Plan" })
                         .size(Typography::CAPTION)
                         .color(if is_active { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
                 ]
@@ -4869,9 +4708,9 @@ impl CortenSettingsApp {
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
                     container(
-                        text(if self.ai.enabled { "● Sistem Ajanı Devrede" } else { "○ Devre Dışı" })
+                        text(if self.ai.enabled { "Sistem Ajanı Devrede" } else { "Devre Dışı" })
                             .size(Typography::CAPTION)
-                            .color(if self.ai.enabled { palette.success.to_iced() } else { palette.text_muted.to_iced() })
+                            .color(if self.ai.enabled { palette.primary.to_iced() } else { palette.text_muted.to_iced() })
                     )
                     .padding([2, 8])
                     .style(move |_| container::Style {

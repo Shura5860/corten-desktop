@@ -58,6 +58,8 @@ package() {
     install -m 755 target/release/corten-portal "$pkgdir/usr/bin/corten-portal"
     install -m 755 target/release/cortenctl "$pkgdir/usr/bin/cortenctl"
     install -m 755 target/release/corten-ai "$pkgdir/usr/bin/corten-ai"
+    install -m 755 target/release/corten-forge "$pkgdir/usr/bin/corten-forge"
+    install -m 755 target/release/corten-update "$pkgdir/usr/bin/corten-update"
 
     cat << 'EOF' > "$pkgdir/usr/bin/corten-terminal"
 #!/usr/bin/env sh

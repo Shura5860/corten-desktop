@@ -902,6 +902,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "corten-forge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "corten-config",
+ "corten-ipc",
+ "corten-theme",
+ "corten-update",
+ "directories",
+ "futures",
+ "iced",
+ "serde",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "corten-greeter"
 version = "0.1.0"
 dependencies = [
@@ -932,6 +951,7 @@ dependencies = [
 name = "corten-ipc"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1111,6 +1131,7 @@ name = "corten-session"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "corten-config",
  "corten-theme",
  "directories",
@@ -1160,6 +1181,20 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "serde",
+]
+
+[[package]]
+name = "corten-update"
+version = "0.1.0"
+dependencies = [
+ "corten-config",
+ "corten-ipc",
+ "directories",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1227,6 +1262,7 @@ dependencies = [
  "iced",
  "iced_layershell",
  "iced_runtime",
+ "libc",
  "notify",
  "serde",
  "serde_json",

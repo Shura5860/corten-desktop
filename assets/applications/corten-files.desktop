@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Corten Files
+GenericName=Dosya Yöneticisi
+Comment=Corten Wayland yerel dosya gezgini ve yöneticisi
+Exec=corten-files
+Icon=corten-files
+Terminal=false
+Type=Application
+Categories=System;Utility;FileManager;
+Keywords=files;folders;explorer;manager;browser;
+StartupNotify=true
+
