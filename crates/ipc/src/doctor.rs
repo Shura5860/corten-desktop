@@ -18,6 +18,7 @@ pub struct CheckItem {
     pub remedy: Option<&'static str>,
 }
 
+#[derive(Default)]
 pub struct SystemDoctor {
     checks: Vec<CheckItem>,
     score: u32,
@@ -409,11 +410,9 @@ impl SystemDoctor {
     }
 
     pub fn print_report(&self, markdown: bool) {
-        let pct = if self.max_score > 0 {
-            (self.score * 100) / self.max_score
-        } else {
-            0
-        };
+        let pct = (self.score * 100)
+            .checked_div(self.max_score)
+            .unwrap_or(0);
 
         if markdown {
             self.print_markdown_report(pct);

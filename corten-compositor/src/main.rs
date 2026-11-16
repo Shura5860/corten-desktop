@@ -3775,6 +3775,7 @@ pub(crate) fn render_circular_button_to_buffer(
     }
 }
 
+#[allow(clippy::chunks_exact_to_as_chunks)]
 fn decode_png_rgba(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
     let file = std::fs::File::open(path).ok()?;
     let reader = std::io::BufReader::new(file);
@@ -3974,7 +3975,7 @@ fn render_fallback_squircle_icon(
                 continue;
             }
 
-            let t = ((py as f32 / total_sz as f32)).clamp(0.0, 1.0);
+            let t = (py as f32 / total_sz as f32).clamp(0.0, 1.0);
             let mut col_r = top_rgb[0] + (bot_rgb[0] - top_rgb[0]) * t;
             let mut col_g = top_rgb[1] + (bot_rgb[1] - top_rgb[1]) * t;
             let mut col_b = top_rgb[2] + (bot_rgb[2] - top_rgb[2]) * t;
