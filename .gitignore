@@ -3,24 +3,45 @@
 **/*.rs.bk
 *.pdb
 
-# Temporary / runtime logs & sockets
+# Local release archives & checksums
+corten-desktop-*.tar.gz
+corten-desktop-*.tar.gz.sha256
+*.tar.gz
+*.tar.xz
+*.tar.zst
+
+# Packaging build outputs (Arch PKGBUILD / makepkg)
+packaging/pkg/
+packaging/src/
+packaging/*.pkg.tar.*
+packaging/*.tar.gz
+
+# Large AI / LLM model weights (never commit weights to git)
+*.gguf
+*.bin
+*.onnx
+models/
+
+# Temporary / runtime logs, crashes & sockets
 *.log
 *.sock
 *.pid
 *.swp
 *.swo
 *~
+core
+core.*
+corten-crash.log
+
+# Environment & local credentials
+.env
+.env.*
+*.local
 
 # OS / Editor directories
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
 !.vscode/settings.json
 !.vscode/extensions.json
-
-# Packaging build outputs
-packaging/pkg/
-packaging/src/
-packaging/*.pkg.tar.*
-packaging/*.tar.gz
-

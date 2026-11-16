@@ -17,7 +17,7 @@ USAGE:
     cortenctl action toggle-overview        Toggle Exposé / Window Overview mode
     cortenctl action toggle-desktop         Toggle Show Desktop mode
     cortenctl action focus <window_id>      Focus window by protocol ID
-    cortenctl action screenshot [--region]  Capture full screen or region
+    cortenctl action screenshot [--region] [--delay <sec>]  Capture full screen or region (with optional countdown)
     cortenctl action reload                 Reload compositor configuration
     cortenctl action windows                List managed windows (JSON format)
     cortenctl action state                  Output full compositor state snapshot (JSON format)
@@ -104,8 +104,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 "screenshot" => {
                     let region = args.iter().any(|a| a == "--region" || a == "-r");
+                    let delay = args
+                        .iter()
+                        .position(|a| a == "--delay" || a == "-d")
+                        .and_then(|idx| args.get(idx + 1))
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .unwrap_or(0);
+                    if delay > 0 {
+                        println!("📸 Screenshot in {} second(s)...", delay);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
+                    }
                     comp.take_screenshot(region).await?;
-                    println!("Screenshot triggered (region={})", region);
+                    println!("Screenshot triggered (region={}) -> saved to ~/Pictures/", region);
                 }
                 "reload" => {
                     comp.reload_config().await?;

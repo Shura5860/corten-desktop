@@ -1923,7 +1923,7 @@ fn main() -> anyhow::Result<()> {
                                         .spawn();
                                     return FilterResult::Intercept(());
                                 }
-                                if sym == keysyms::KEY_Print {
+                                if sym == keysyms::KEY_Print || sym == keysyms::KEY_Sys_Req {
                                     info!("Compositor Hotkey: PrintScreen (Full Screenshot)");
                                     trigger_screenshot(state, &hotkey_ipc_tx, false);
                                     return FilterResult::Intercept(());

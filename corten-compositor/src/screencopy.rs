@@ -248,8 +248,20 @@ pub fn encode_rgba_to_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8
         let mut png_writer = encoder
             .write_header()
             .map_err(|e| format!("failed to write PNG header: {e}"))?;
+
+        // OpenGL `glReadPixels` returns rows starting from the bottom of the screen (y=0).
+        // PNG and Wayland format expects row 0 to be the top of the screen.
+        // We invert the rows vertically so screenshots are upright.
+        let row_stride = (width as usize) * 4;
+        let mut flipped_rgba = Vec::with_capacity(expected);
+        for row in (0..height as usize).rev() {
+            let start = row * row_stride;
+            let end = start + row_stride;
+            flipped_rgba.extend_from_slice(&rgba[start..end]);
+        }
+
         png_writer
-            .write_image_data(&rgba[..expected])
+            .write_image_data(&flipped_rgba)
             .map_err(|e| format!("failed to write PNG data: {e}"))?;
     }
     Ok(out)
@@ -385,7 +397,8 @@ pub fn fulfill_pending_captures<E>(
             // SAFETY: `with_buffer_contents_mut` provides a valid mutable SHM slice of `dst_len` bytes.
             let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
             for row in 0..height {
-                let s_off = row * src_stride;
+                let src_row = height - 1 - row;
+                let s_off = src_row * src_stride;
                 let d_off = row * dst_stride;
                 if s_off + src_stride <= src_bytes.len() && d_off + src_stride <= dst_slice.len() {
                     dst_slice[d_off..d_off + src_stride]
@@ -438,6 +451,16 @@ pub fn fulfill_pending_captures<E>(
                                     error!("failed to save screenshot to {}: {err}", path.display());
                                 } else {
                                     info!("Saved native compositor screenshot to {}", path.display());
+                                    let _ = Command::new("notify-send")
+                                        .args([
+                                            "Ekran Görüntüsü Kaydedildi",
+                                            &format!("Görüntü kaydedildi:\n{}", path.display()),
+                                            "-i",
+                                            &path.to_string_lossy(),
+                                            "-a",
+                                            "Corten",
+                                        ])
+                                        .spawn();
                                 }
                                 // Also pipe PNG into `wl-copy --type image/png` if available.
                                 if let Ok(mut child) = Command::new("wl-copy")

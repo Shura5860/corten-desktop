@@ -1902,8 +1902,8 @@ pub fn run_drm(
                                     return FilterResult::Intercept(());
                                 }
 
-                                // PrintScreen Key: Instant Fullscreen Capture
-                                if sym == keysyms::KEY_Print {
+                                // PrintScreen / SysRq Key: Instant Fullscreen Capture
+                                if sym == keysyms::KEY_Print || sym == keysyms::KEY_Sys_Req {
                                     info!("Compositor Hotkey: PrintScreen (Full Capture)");
                                     crate::trigger_screenshot(state, &hotkey_ipc_tx, false);
                                     return FilterResult::Intercept(());

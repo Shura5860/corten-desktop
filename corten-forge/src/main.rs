@@ -7,8 +7,8 @@ use tokio::sync::Mutex;
 use corten_config::{AppearanceConfig, ConfigManager};
 use corten_theme::iced_styles::card_style;
 use corten_theme::{
-    Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT_BYTES, NOTO_SANS,
-    NOTO_SANS_BYTES,
+    Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT, LUCIDE_FONT_BYTES,
+    NOTO_SANS, NOTO_SANS_BYTES,
 };
 use iced::widget::{
     button, column, container, horizontal_space, row, scrollable, text, text_input, vertical_space,
@@ -654,7 +654,7 @@ impl CortenForgeApp {
                             source: PackageSource::Flatpak,
                             state: PackageState::Available,
                             category: ProductCategory::Graphics,
-                            icon_char: "🎨",
+                            icon_char: crate::package::ICON_APP,
                             download_size: Some("320 MB".into()),
                             installed_size: Some("890 MB".into()),
                             developer: Some("Blender Foundation".into()),
@@ -1043,7 +1043,8 @@ impl CortenForgeApp {
 
         let app_header = row![
             text(pkg.icon_char)
-                .size(54.0)
+                .font(LUCIDE_FONT)
+                .size(48.0)
                 .color(palette.primary.to_iced()),
             column![
                 row![
@@ -1313,7 +1314,10 @@ impl CortenForgeApp {
             container(
                 column![
                     row![
-                        text(item.icon_char).size(28.0).color(palette.primary.to_iced()),
+                        text(item.icon_char)
+                            .font(LUCIDE_FONT)
+                            .size(26.0)
+                            .color(palette.primary.to_iced()),
                         column![
                             row![
                                 text(item.name.clone())

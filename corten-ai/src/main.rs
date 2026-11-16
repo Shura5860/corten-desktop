@@ -554,16 +554,13 @@ impl Application for CortenAiApp {
     fn view(&self) -> Element<'_, Self::Message> {
         let palette = Palette::for_mode(self.theme_mode).with_patina(self.active_patina);
 
-        // 1. Header: Brand, Mode Switcher, Clear & Close Buttons
-        let mode_label = if self.layout_mode == DeckLayoutMode::SideDeck {
-            "⧉ Yüzen Mod"
-        } else {
-            "⇲ Kenar Deck"
-        };
-
         let header_row = row![
             row![
-                text("⬡ CORTEN AURA")
+                text(Icon::CPU)
+                    .font(LUCIDE_FONT)
+                    .size(15.0)
+                    .color(palette.primary.to_iced()),
+                text(" CORTEN AURA")
                     .size(Typography::TITLE_SM)
                     .color(palette.primary.to_iced()),
                 container(
@@ -585,9 +582,16 @@ impl Application for CortenAiApp {
             .align_y(Alignment::Center),
             horizontal_space(),
             button(
-                text(mode_label)
-                    .size(11.0)
-                    .color(palette.text_primary.to_iced()),
+                row![
+                    text(Icon::APP_WINDOW)
+                        .font(LUCIDE_FONT)
+                        .size(11.0)
+                        .color(palette.text_primary.to_iced()),
+                    text(if self.layout_mode == DeckLayoutMode::SideDeck { " Yüzen Mod" } else { " Kenar Deck" })
+                        .size(11.0)
+                        .color(palette.text_primary.to_iced()),
+                ]
+                .align_y(Alignment::Center),
             )
             .padding([4, 8])
             .style(move |_, status| {
@@ -607,9 +611,16 @@ impl Application for CortenAiApp {
             })
             .on_press(Message::ToggleDeckMode),
             button(
-                text("🧹 Temizle")
-                    .size(11.0)
-                    .color(palette.text_muted.to_iced()),
+                row![
+                    text(Icon::TRASH)
+                        .font(LUCIDE_FONT)
+                        .size(11.0)
+                        .color(palette.text_muted.to_iced()),
+                    text(" Temizle")
+                        .size(11.0)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .align_y(Alignment::Center),
             )
             .padding([4, 8])
             .style(move |_, status| {
@@ -629,9 +640,16 @@ impl Application for CortenAiApp {
             })
             .on_press(Message::ClearChat),
             button(
-                text("✕ ESC")
-                    .size(11.0)
-                    .color(palette.text_muted.to_iced()),
+                row![
+                    text(Icon::X)
+                        .font(LUCIDE_FONT)
+                        .size(11.0)
+                        .color(palette.text_muted.to_iced()),
+                    text(" ESC")
+                        .size(11.0)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .align_y(Alignment::Center),
             )
             .padding([4, 8])
             .style(move |_, status| {
@@ -744,23 +762,26 @@ impl Application for CortenAiApp {
 
         // 3. Bento Quick Action Strip
         let chips_row = row![
-            Self::chip_button("📸 Ekran Analizi", palette, Message::AnalyzeScreenRequested),
+            Self::chip_button(Icon::CAMERA, "Ekran Analizi", palette, Message::AnalyzeScreenRequested),
             Self::chip_button(
-                "⚡ Sistem Durumu",
+                Icon::ZAP,
+                "Sistem Durumu",
                 palette,
                 Message::QuickAction("sistem durumu ve donanım kullanımını özetle".into())
             ),
             Self::chip_button(
-                "🤖 ReAct Ajan",
+                Icon::CPU,
+                "ReAct Ajan",
                 palette,
                 Message::QuickAction("react: açık pencereleri ve masaüstü durumunu listele".into())
             ),
             Self::chip_button(
-                "🔍 Vektör Ara",
+                Icon::SEARCH,
+                "Vektör Ara",
                 palette,
                 Message::QuickAction("vektör ara: wayland".into())
             ),
-            Self::chip_button("🧠 Hafıza", palette, Message::QuickAction("hafıza".into())),
+            Self::chip_button(Icon::ACTIVITY, "Hafıza", palette, Message::QuickAction("hafıza".into())),
         ]
         .spacing(Spacing::XS);
 
@@ -774,7 +795,8 @@ impl Application for CortenAiApp {
             let welcome_bento = container(
                 column![
                     row![
-                        text("⚡")
+                        text(Icon::ZAP)
+                            .font(LUCIDE_FONT)
                             .size(Typography::TITLE)
                             .color(palette.primary.to_iced()),
                         column![
@@ -792,12 +814,14 @@ impl Application for CortenAiApp {
                     vertical_space().height(Spacing::XXS),
                     row![
                         Self::feature_mini_card(
-                            "🖥️ Masaüstü Yönetimi",
+                            Icon::MONITOR,
+                            "Masaüstü Yönetimi",
                             "Ses, parlaklık, pencere ve çalışma alanlarını doğrudan yönetin.",
                             palette
                         ),
                         Self::feature_mini_card(
-                            "📸 Multimodal Görsel",
+                            Icon::CAMERA,
+                            "Multimodal Görsel",
                             "Ekranda ne olduğunu tek tıkla inceletip teşhis alın.",
                             palette
                         ),
@@ -805,12 +829,14 @@ impl Application for CortenAiApp {
                     .spacing(Spacing::XS),
                     row![
                         Self::feature_mini_card(
-                            "🛠️ Sistem Teşhisi",
+                            Icon::SETTINGS,
+                            "Sistem Teşhisi",
                             "Donanım, bellek ve disk durumunu anında raporlayın.",
                             palette
                         ),
                         Self::feature_mini_card(
-                            "🔒 %100 Yerel Mimari",
+                            Icon::LOCK,
+                            "%100 Yerel Mimari",
                             "Verileriniz cihazınızda kalır, telemetri sızdırılmaz.",
                             palette
                         ),
@@ -1406,11 +1432,24 @@ impl CortenAiApp {
         .into()
     }
 
-    fn chip_button<'a>(label: &'static str, palette: Palette, msg: Message) -> Element<'a, Message> {
+    fn chip_button<'a>(
+        icon: char,
+        label: &'static str,
+        palette: Palette,
+        msg: Message,
+    ) -> Element<'a, Message> {
         button(
-            text(label)
-                .size(11.0)
-                .color(palette.text_muted.to_iced()),
+            row![
+                text(icon)
+                    .font(LUCIDE_FONT)
+                    .size(11.0)
+                    .color(palette.primary.to_iced()),
+                text(label)
+                    .size(11.0)
+                    .color(palette.text_muted.to_iced()),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
         )
         .padding([4, 8])
         .style(move |_, status| {
@@ -1433,13 +1472,24 @@ impl CortenAiApp {
     }
 
     fn feature_mini_card<'a>(
+        icon: char,
         title: &'static str,
         desc: &'static str,
         palette: Palette,
     ) -> Element<'a, Message> {
         container(
             column![
-                text(title).size(11.5).color(palette.primary.to_iced()),
+                row![
+                    text(icon)
+                        .font(LUCIDE_FONT)
+                        .size(13.0)
+                        .color(palette.primary.to_iced()),
+                    text(title)
+                        .size(11.5)
+                        .color(palette.primary.to_iced()),
+                ]
+                .spacing(5)
+                .align_y(Alignment::Center),
                 text(desc).size(10.0).color(palette.text_muted.to_iced()),
             ]
             .spacing(2),

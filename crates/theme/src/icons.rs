@@ -13,6 +13,30 @@ pub const NOTO_SANS_BYTES: &[u8] = include_bytes!("../fonts/noto_sans.ttf");
 #[cfg(feature = "iced")]
 pub const NOTO_SANS: iced::Font = iced::Font::with_name("Noto Sans");
 
+#[cfg(feature = "iced")]
+pub const NOTO_SANS_BOLD: iced::Font = iced::Font {
+    family: iced::font::Family::Name("Noto Sans"),
+    weight: iced::font::Weight::Bold,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
+#[cfg(feature = "iced")]
+pub const NOTO_SANS_SEMIBOLD: iced::Font = iced::Font {
+    family: iced::font::Family::Name("Noto Sans"),
+    weight: iced::font::Weight::Semibold,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
+#[cfg(feature = "iced")]
+pub const NOTO_SANS_MEDIUM: iced::Font = iced::Font {
+    family: iced::font::Family::Name("Noto Sans"),
+    weight: iced::font::Weight::Medium,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
 /// Standard Lucide icon character mappings
 pub struct Icon;
 

@@ -13,7 +13,8 @@ use corten_config::ConfigManager;
 use corten_theme::iced_styles::{card_style, primary_button_style, secondary_button_style};
 use corten_theme::{
     Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Transition, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
+    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BOLD, NOTO_SANS_BYTES, NOTO_SANS_MEDIUM,
+    NOTO_SANS_SEMIBOLD,
 };
 use iced::widget::{
     button, column, container, horizontal_space, row, scrollable, slider, text,
@@ -977,10 +978,7 @@ impl CortenSettingsApp {
                     container(
                         text(*group_title)
                             .size(Typography::OVERLINE)
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Bold,
-                                ..Default::default()
-                            })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.text_muted.to_iced()),
                     )
                     .padding([Spacing::XXS, Spacing::MD])
@@ -1104,10 +1102,7 @@ impl CortenSettingsApp {
                 .color(palette.primary.to_iced()),
             text(title)
                 .size(Typography::BODY)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Semibold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_SEMIBOLD)
                 .color(palette.text_primary.to_iced()),
             horizontal_space(),
             badge_widget,
@@ -1160,10 +1155,7 @@ impl CortenSettingsApp {
     fn section_header<'a>(title: &'static str, palette: Palette) -> Element<'a, Message> {
         text(title)
             .size(11.0)
-            .font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..Default::default()
-            })
+            .font(NOTO_SANS_BOLD)
             .color(palette.text_muted.to_iced())
             .into()
     }
@@ -1260,10 +1252,7 @@ impl CortenSettingsApp {
         let mut text_col = column![
             text(title)
                 .size(Typography::BODY)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Medium,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_MEDIUM)
                 .color(palette.text_primary.to_iced()),
         ].spacing(2);
 
@@ -1306,10 +1295,7 @@ impl CortenSettingsApp {
             let btn = button(
                 text(label)
                     .size(Typography::CAPTION)
-                    .font(iced::Font {
-                        weight: if selected { iced::font::Weight::Semibold } else { iced::font::Weight::Normal },
-                        ..Default::default()
-                    })
+                    .font(if selected { NOTO_SANS_SEMIBOLD } else { NOTO_SANS })
                     .color(if selected {
                         palette.on_primary().to_iced()
                     } else {
@@ -1362,10 +1348,7 @@ impl CortenSettingsApp {
         let info = column![
             text(title)
                 .size(Typography::BODY)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Medium,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_MEDIUM)
                 .color(palette.text_primary.to_iced()),
             text(subtitle)
                 .size(Typography::CAPTION)
@@ -1506,10 +1489,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Görünüm ve Tema")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Masaüstü stilini, açık/koyu temayı, patina vurgusunu ve duvar kâğıdını özelleştirin")
                 .size(Typography::CAPTION)
@@ -1551,10 +1531,7 @@ impl CortenSettingsApp {
                         }),
                     text(name)
                         .size(Typography::CAPTION)
-                        .font(iced::Font {
-                            weight: if is_active { iced::font::Weight::Semibold } else { iced::font::Weight::Normal },
-                            ..Default::default()
-                        })
+                        .font(if is_active { NOTO_SANS_SEMIBOLD } else { NOTO_SANS })
                         .color(if is_active { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
                 ]
                 .spacing(Spacing::XS)
@@ -1715,10 +1692,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Panel ve Dock")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Masaüstü dock konumunu, kapsül geometrisini ve sistem çekmecesi modüllerini yapılandırın")
                 .size(Typography::CAPTION)
@@ -1800,7 +1774,7 @@ impl CortenSettingsApp {
         if self.panel.show_battery {
             right_modules = right_modules.push(text(Icon::BATTERY).font(LUCIDE_FONT).size(11.0).color(palette.text_primary.to_iced()));
         }
-        right_modules = right_modules.push(text("12:00").size(10.0).font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() }).color(palette.text_muted.to_iced()));
+        right_modules = right_modules.push(text("12:00").size(10.0).font(NOTO_SANS_MEDIUM).color(palette.text_muted.to_iced()));
 
         dock_items = dock_items.push(right_modules);
 
@@ -1829,7 +1803,7 @@ impl CortenSettingsApp {
             row![
                 text("Canlı Dock & Panel Yerleşim Simülatörü")
                     .size(11.0)
-                    .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                    .font(NOTO_SANS_MEDIUM)
                     .color(palette.text_muted.to_iced()),
                 horizontal_space(),
                 container(text(if is_top { "Konum: Üst Kenar" } else { "Konum: Alt Kenar" }).size(10.0).color(palette.primary.to_iced()))
@@ -1996,10 +1970,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Uygulama Başlatıcı ve Spotlight")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Spotlight boyutlarını, başlatıcı stilini ve sistem pano yöneticisini yapılandırın")
                 .size(Typography::CAPTION)
@@ -2046,7 +2017,7 @@ impl CortenSettingsApp {
                 row![
                     text("Canlı Başlatıcı & Arama Simülatörü")
                         .size(11.0)
-                        .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                        .font(NOTO_SANS_MEDIUM)
                         .color(palette.text_muted.to_iced()),
                     horizontal_space(),
                     container(text(match self.launcher.style.as_str() {
@@ -2200,10 +2171,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Masaüstü Bileşenleri")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Masaüstü katmanındaki canlı araçları, ses görselleştiricisini ve sistem monitörünü yapılandırın")
                 .size(Typography::CAPTION)
@@ -2249,7 +2217,7 @@ impl CortenSettingsApp {
                         text(Icon::ACTIVITY).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
                         text("MASAÜSTÜ BİLEŞEN YERLEŞİMİ · ÖNİZLEME")
                             .size(Typography::CAPTION)
-                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced()),
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
@@ -2430,10 +2398,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Klavye ve Fare")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Klavye düzenini, touchpad hareketlerini, tuş dönüşümlerini ve dokunmatik girişleri yapılandırın")
                 .size(Typography::CAPTION)
@@ -2486,7 +2451,7 @@ impl CortenSettingsApp {
                         text(Icon::KEYBOARD).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
                         text("GİRİŞ AYGITLARI & DONANIM SÜRÜCÜSÜ")
                             .size(Typography::CAPTION)
-                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced()),
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
@@ -3178,10 +3143,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Ses ve Girişler")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Ana ses düzeyini, stereo PipeWire yönlendirmesini ve mikrofon kayıt seviyesini yapılandırın")
                 .size(Typography::CAPTION)
@@ -3192,7 +3154,7 @@ impl CortenSettingsApp {
         let test_btn = button(
             row![
                 text(Icon::VOLUME).font(LUCIDE_FONT).size(13.0),
-                text("Sesi Test Et").size(Typography::CAPTION).font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() }),
+                text("Sesi Test Et").size(Typography::CAPTION).font(NOTO_SANS_SEMIBOLD),
             ]
             .spacing(Spacing::XS)
             .align_y(Alignment::Center),
@@ -3317,10 +3279,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Bluetooth Aygıtları")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Kablosuz çevre birimlerini, ses aygıtlarını, klavye ve fareleri yönetin")
                 .size(Typography::CAPTION)
@@ -3347,7 +3306,7 @@ impl CortenSettingsApp {
                         text(Icon::WIFI).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
                         text("KABLOSUZ BLUEZ BAĞLANTI MERKEZİ")
                             .size(Typography::CAPTION)
-                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced()),
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
@@ -3485,10 +3444,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Güç ve Pil")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Enerji profillerini, UPower işlemci hızını ve ekran uyku zaman aşımını yapılandırın")
                 .size(Typography::CAPTION)
@@ -3508,7 +3464,7 @@ impl CortenSettingsApp {
                 row![
                     text("UPower & Linux Güç Yönetimi Konsolu")
                         .size(11.0)
-                        .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                        .font(NOTO_SANS_MEDIUM)
                         .color(palette.text_muted.to_iced()),
                     horizontal_space(),
                     container(text("Sistem Hazır").size(10.0).color(palette.primary.to_iced()))
@@ -3537,7 +3493,7 @@ impl CortenSettingsApp {
                     column![
                         text(profile_label)
                             .size(Typography::TITLE_SM)
-                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.text_primary.to_iced()),
                         text("Linux çekirdeği enerji profili D-Bus servisi ile gerçek zamanlı eşitlenir")
                             .size(11.0)
@@ -3661,10 +3617,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Bildirim Servisi")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Bildirim sürelerini, kapatma kurallarını ve masaüstü bildirim sunucusu davranışını yapılandırın")
                 .size(Typography::CAPTION)
@@ -3682,7 +3635,7 @@ impl CortenSettingsApp {
                         text(Icon::BELL).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
                         text("BİLDİRİM KARTI · ÖNİZLEME")
                             .size(Typography::CAPTION)
-                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced()),
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
@@ -3717,7 +3670,7 @@ impl CortenSettingsApp {
                         .width(Length::Fill),
                         text("Ayarlar Güncellendi")
                             .size(Typography::BODY)
-                            .font(iced::Font { weight: iced::font::Weight::Semibold, ..Default::default() })
+                            .font(NOTO_SANS_SEMIBOLD)
                             .color(palette.text_primary.to_iced()),
                         text("Bildirim görüntüleme ve döşeme kuralları başarıyla senkronize edildi.")
                             .size(Typography::BODY_SM)
@@ -3817,10 +3770,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Pencere Yöneticisi ve Döşeme")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Wayland Master-Stack dinamik döşeme algoritmasını, pencere boşluklarını ve çalışma alanı davranışını yapılandırın")
                 .size(Typography::CAPTION)
@@ -3963,7 +3913,7 @@ impl CortenSettingsApp {
                         text(Icon::APP_WINDOW).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
                         text("DÖŞEME DÜZENİ · ÖNİZLEME")
                             .size(Typography::CAPTION)
-                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced()),
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
@@ -4364,7 +4314,7 @@ impl CortenSettingsApp {
                         text(Icon::EYE).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
                         text("KAPSAYICI TASARIM & WCAG 2.1 AAA")
                             .size(Typography::CAPTION)
-                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced()),
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
@@ -4483,10 +4433,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Corten Hakkında")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Modern, bütünleşik ve bellek güvenli Wayland masaüstü ortamı")
                 .size(Typography::CAPTION)
@@ -4504,7 +4451,7 @@ impl CortenSettingsApp {
                     row![
                         text("Corten OS Suite")
                             .size(Typography::TITLE)
-                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.text_primary.to_iced()),
                         container(
                             text(format!("v{} · Geliştirme Sürümü", env!("CARGO_PKG_VERSION")))
@@ -4651,10 +4598,7 @@ impl CortenSettingsApp {
         let heading = column![
             text("Yapay Zeka (Corten AI)")
                 .size(Typography::TITLE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Yerel yapay zeka ajanını, model profillerini ve GPU/RAM kaynak kullanımını yapılandırın")
                 .size(Typography::CAPTION)
@@ -4703,7 +4647,7 @@ impl CortenSettingsApp {
                         text(Icon::CPU).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
                         text("AURA-CORE YEREL NÖRAL MOTOR")
                             .size(Typography::CAPTION)
-                            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                            .font(NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced()),
                     ].spacing(Spacing::XS).align_y(Alignment::Center),
                     horizontal_space(),
