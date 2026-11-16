@@ -11,9 +11,10 @@ use corten_theme::{
 use fs_ops::{
     breadcrumbs, copy_entry_recursive, create_archive, create_file, create_folder,
     delete_permanently, empty_trash, extract_archive, format_relative_time, format_size,
-    inspect_entry, move_entry, move_to_trash, open_with_system, read_directory, rename_entry,
-    restore_from_trash, spawn_terminal_in, standard_places, trash_files_dir, EntryInspection,
-    EntryKind, FileEntry, SidebarPlace, SortColumn, SortDirection, ViewMode,
+    inspect_entry, move_entry, move_to_trash, open_with_system, query_disk_usage, read_directory,
+    rename_entry, restore_from_trash, sibling_directories, spawn_terminal_in, standard_places,
+    trash_files_dir, EntryInspection, EntryKind, FileEntry, SidebarPlace, SortColumn,
+    SortDirection, ViewMode,
 };
 use iced::widget::{
     button, column, container, horizontal_space, mouse_area, row, scrollable, stack, text,
@@ -160,6 +161,10 @@ pub enum Message {
     AnalyzeWithAi(PathBuf),
     OpenContextMenu(usize),
     CloseContextMenu,
+    ToggleBreadcrumbDropdown(PathBuf),
+    CloseBreadcrumbDropdown,
+    ToggleQuickLook,
+    CloseQuickLook,
     NoOp,
     KeyEvent(keyboard::Key, keyboard::Modifiers),
 }
@@ -217,6 +222,9 @@ pub struct CortenFilesApp {
     theme_mode: ThemeMode,
     active_patina: PatinaVariant,
     context_menu: Option<usize>,
+    breadcrumb_dropdown: Option<PathBuf>,
+    disk_usage: Option<(u64, u64, f32)>,
+    show_quick_look: bool,
 }
 
 impl Default for CortenFilesApp {
@@ -271,6 +279,9 @@ impl Default for CortenFilesApp {
             modal: None,
             status_message: "Hazır".to_string(),
             context_menu: None,
+            breadcrumb_dropdown: None,
+            disk_usage: None,
+            show_quick_look: false,
             devices: Vec::new(),
             show_terminal_drawer: false,
             terminal_input: String::new(),
@@ -349,6 +360,8 @@ impl CortenFilesApp {
 
     fn reload_entries(&mut self) {
         self.places = standard_places();
+        self.disk_usage = query_disk_usage(&self.current_dir);
+        self.breadcrumb_dropdown = None;
         let prev_selected_path = self.selected_entry().map(|e| e.path.clone());
 
         match read_directory(
@@ -730,6 +743,16 @@ impl CortenFilesApp {
             Message::CloseContextMenu => {
                 self.context_menu = None;
             }
+            Message::ToggleBreadcrumbDropdown(path) => {
+                if self.breadcrumb_dropdown.as_ref() == Some(&path) {
+                    self.breadcrumb_dropdown = None;
+                } else {
+                    self.breadcrumb_dropdown = Some(path);
+                }
+            }
+            Message::CloseBreadcrumbDropdown => {
+                self.breadcrumb_dropdown = None;
+            }
             Message::NoOp => {}
             Message::ActivateIndex(idx) => {
                 if let Some(entry) = self.entries.get(idx).cloned() {
@@ -772,6 +795,15 @@ impl CortenFilesApp {
             Message::ToggleInspector => {
                 self.config.show_inspector = !self.config.show_inspector;
                 self.save_config();
+            }
+            Message::ToggleQuickLook => {
+                if self.selected_entry().is_some() {
+                    self.show_quick_look = !self.show_quick_look;
+                    self.context_menu = None;
+                }
+            }
+            Message::CloseQuickLook => {
+                self.show_quick_look = false;
             }
             Message::SortBy(col) => {
                 if self.config.sort_column == col {
@@ -1060,9 +1092,21 @@ impl CortenFilesApp {
                 // Handled in async task above
             }
             Message::KeyEvent(key, modifiers) => {
+                if self.show_quick_look
+                    && key == keyboard::Key::Named(keyboard::key::Named::Escape)
+                {
+                    self.show_quick_look = false;
+                    return;
+                }
                 if self.context_menu.is_some() {
                     if key == keyboard::Key::Named(keyboard::key::Named::Escape) {
                         self.context_menu = None;
+                    }
+                    return;
+                }
+                if self.breadcrumb_dropdown.is_some() {
+                    if key == keyboard::Key::Named(keyboard::key::Named::Escape) {
+                        self.breadcrumb_dropdown = None;
                     }
                     return;
                 }
@@ -1115,6 +1159,9 @@ impl CortenFilesApp {
                     keyboard::Key::Named(keyboard::key::Named::Space)
                         if self.search_query.is_empty() =>
                     {
+                        self.handle_sync_message(Message::ToggleQuickLook);
+                    }
+                    keyboard::Key::Character("i" | "I") if modifiers.control() => {
                         self.handle_sync_message(Message::ToggleInspector);
                     }
                     keyboard::Key::Named(keyboard::key::Named::Backspace)
@@ -1127,6 +1174,31 @@ impl CortenFilesApp {
                     }
                     keyboard::Key::Named(keyboard::key::Named::ArrowRight) if modifiers.alt() => {
                         self.handle_sync_message(Message::NavigateForward);
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::ArrowLeft)
+                        if self.config.view_mode == ViewMode::Columns
+                            && self.search_query.is_empty() =>
+                    {
+                        self.handle_sync_message(Message::NavigateUp);
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::ArrowRight)
+                        if self.config.view_mode == ViewMode::Columns
+                            && self.search_query.is_empty() =>
+                    {
+                        if let Some(entry) = self.selected_entry() {
+                            if entry.is_dir {
+                                self.handle_sync_message(Message::ActivateSelected);
+                            }
+                        }
+                    }
+                    keyboard::Key::Character("1") if modifiers.control() => {
+                        self.handle_sync_message(Message::SetViewMode(ViewMode::List));
+                    }
+                    keyboard::Key::Character("2") if modifiers.control() => {
+                        self.handle_sync_message(Message::SetViewMode(ViewMode::Grid));
+                    }
+                    keyboard::Key::Character("3") if modifiers.control() => {
+                        self.handle_sync_message(Message::SetViewMode(ViewMode::Columns));
                     }
                     keyboard::Key::Named(keyboard::key::Named::F2) => {
                         self.handle_sync_message(Message::PromptRename);
@@ -1211,7 +1283,6 @@ impl CortenFilesApp {
 
         let tab_bar = self.view_tab_bar(palette);
         let top_bar = self.view_top_bar(palette);
-        let action_bar = self.view_action_bar(palette);
 
         let explorer_col: Element<'_, Message> = if self.split_view {
             row![
@@ -1267,13 +1338,16 @@ impl CortenFilesApp {
         .spacing(0)
         .height(Length::Fill);
 
-        let full_row = if self.config.show_inspector {
+        let full_row = if self.config.show_inspector && self.config.view_mode != ViewMode::Columns {
             main_body.push(self.view_inspector_pane(palette))
         } else {
             main_body
         };
 
-        let mut center_col = column![tab_bar, top_bar, action_bar].spacing(0);
+        let mut center_col = column![tab_bar, top_bar].spacing(2);
+        if let Some(ref dropdown_dir) = self.breadcrumb_dropdown {
+            center_col = center_col.push(self.view_breadcrumb_dropdown(dropdown_dir, palette));
+        }
         if let Some(ref modal) = self.modal {
             center_col = center_col.push(self.view_inline_modal(modal, palette));
         }
@@ -1295,7 +1369,27 @@ impl CortenFilesApp {
                 ..Default::default()
             });
 
-        if let Some(idx) = self.context_menu {
+        if self.show_quick_look {
+            let ql_card = self.view_quick_look(palette);
+            let inner_overlay = mouse_area(ql_card).on_press(Message::NoOp);
+            let dismiss_overlay = mouse_area(
+                container(inner_overlay)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+                    .style(|_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba(
+                            0.02, 0.03, 0.05, 0.72,
+                        ))),
+                        ..Default::default()
+                    }),
+            )
+            .on_press(Message::CloseQuickLook)
+            .on_right_press(Message::CloseQuickLook);
+
+            stack![base_view, dismiss_overlay].into()
+        } else if let Some(idx) = self.context_menu {
             let menu_card = self.view_context_menu(idx, palette);
             let inner_overlay = mouse_area(menu_card).on_press(Message::NoOp);
             let dismiss_overlay = mouse_area(
@@ -1314,39 +1408,360 @@ impl CortenFilesApp {
         }
     }
 
+    fn view_quick_look(&self, palette: Palette) -> Element<'_, Message> {
+        let Some(entry) = self.selected_entry() else {
+            return column![].into();
+        };
+        let icon_char = Self::entry_icon(entry.kind);
+        let icon_color = Self::entry_color(entry.kind, palette);
+        let size_str = if entry.is_dir {
+            "Klasör".to_string()
+        } else {
+            format_size(entry.size)
+        };
+        let modified_str = format_relative_time(entry.modified_secs);
+
+        let header = row![
+            container(
+                text(icon_char)
+                    .font(LUCIDE_FONT)
+                    .size(18)
+                    .color(icon_color),
+            )
+            .padding([6, 8])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(
+                    icon_color.r,
+                    icon_color.g,
+                    icon_color.b,
+                    0.14,
+                ))),
+                border: Border {
+                    color: Color::from_rgba(icon_color.r, icon_color.g, icon_color.b, 0.30),
+                    width: 1.0,
+                    radius: border::Radius::from(Radius::SM),
+                },
+                ..Default::default()
+            }),
+            column![
+                row![
+                    text(entry.name.clone())
+                        .size(Typography::TITLE_SM)
+                        .color(palette.text_primary.to_iced()),
+                    container(
+                        text(entry.kind.badge())
+                            .size(10)
+                            .color(palette.primary.to_iced()),
+                    )
+                    .padding([2, 6])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.14,
+                        ))),
+                        border: Border {
+                            radius: border::Radius::from(Radius::FULL),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+                ]
+                .spacing(Spacing::XS)
+                .align_y(Alignment::Center),
+                text(format!("{} • {}", size_str, modified_str))
+                    .size(Typography::CAPTION)
+                    .color(palette.text_muted.to_iced()),
+            ]
+            .spacing(2),
+            horizontal_space(),
+            Self::accent_button("Uygulama İle Aç (Enter)", Message::ActivateSelected, palette),
+            Self::small_button("✕ Kapat (Space)", "", Message::CloseQuickLook, palette),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(Alignment::Center);
+
+        let stage_body: Element<'_, Message> = if let Some(img_path) =
+            fs_ops::get_image_preview_path(&entry.path)
+        {
+            container(
+                iced::widget::image(iced::widget::image::Handle::from_path(img_path))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .content_fit(iced::ContentFit::Contain),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(Spacing::MD)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(
+                    0.04, 0.05, 0.07, 0.90,
+                ))),
+                border: Border {
+                    color: Color::from_rgba(1.0, 1.0, 1.0, 0.07),
+                    width: 1.0,
+                    radius: border::Radius::from(Radius::MD),
+                },
+                ..Default::default()
+            })
+            .into()
+        } else if entry.is_dir {
+            let children = read_directory(
+                &entry.path,
+                self.config.show_hidden,
+                "",
+                SortColumn::Name,
+                SortDirection::Ascending,
+            )
+            .unwrap_or_default();
+            let mut list_col = column![
+                text(format!("KLASÖR İÇERİĞİ ({} öğe)", children.len()))
+                    .size(Typography::CAPTION)
+                    .color(palette.text_muted.to_iced()),
+            ]
+            .spacing(6);
+            for child in children.iter().take(24) {
+                let c_icon = Self::entry_icon(child.kind);
+                let c_color = Self::entry_color(child.kind, palette);
+                list_col = list_col.push(
+                    row![
+                        text(c_icon).font(LUCIDE_FONT).size(14).color(c_color),
+                        text(child.name.clone())
+                            .size(Typography::BODY_SM)
+                            .color(palette.text_primary.to_iced())
+                            .width(Length::Fill),
+                        text(if child.is_dir {
+                            "Klasör".to_string()
+                        } else {
+                            format_size(child.size)
+                        })
+                        .size(Typography::CAPTION)
+                        .color(palette.text_muted.to_iced()),
+                    ]
+                    .spacing(Spacing::SM)
+                    .align_y(Alignment::Center),
+                );
+            }
+            container(scrollable(list_col).height(Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(Spacing::MD)
+                .style(move |_| input_style(palette))
+                .into()
+        } else if let Some(preview) =
+            self.inspection.as_ref().and_then(|i| i.text_preview.as_ref())
+        {
+            let mut numbered_lines = column![].spacing(2);
+            for (line_idx, line_str) in preview.lines().take(80).enumerate() {
+                numbered_lines = numbered_lines.push(
+                    row![
+                        text(format!("{:>3} │", line_idx + 1))
+                            .font(iced::Font::MONOSPACE)
+                            .size(11.5)
+                            .color(Color::from_rgba(1.0, 1.0, 1.0, 0.30))
+                            .width(Length::Fixed(44.0)),
+                        text(line_str.to_string())
+                            .font(iced::Font::MONOSPACE)
+                            .size(12.0)
+                            .color(palette.text_primary.to_iced()),
+                    ]
+                    .spacing(8),
+                );
+            }
+            container(scrollable(numbered_lines).height(Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(Spacing::MD)
+                .style(|_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        0.05, 0.06, 0.08, 0.94,
+                    ))),
+                    border: Border {
+                        color: Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                        width: 1.0,
+                        radius: border::Radius::from(Radius::MD),
+                    },
+                    ..Default::default()
+                })
+                .into()
+        } else {
+            let perms = self
+                .inspection
+                .as_ref()
+                .map(|i| i.permissions.as_str())
+                .unwrap_or("---");
+            container(
+                column![
+                    text(icon_char).font(LUCIDE_FONT).size(48).color(icon_color),
+                    text(entry.name.clone())
+                        .size(Typography::TITLE)
+                        .color(palette.text_primary.to_iced()),
+                    Self::meta_row("Tür", entry.kind.label(), palette),
+                    Self::meta_row("Boyut", &size_str, palette),
+                    Self::meta_row("İzinler", perms, palette),
+                    Self::meta_row("Değiştirilme", &modified_str, palette),
+                ]
+                .spacing(Spacing::SM)
+                .align_x(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(move |_| input_style(palette))
+            .into()
+        };
+
+        let footer = row![
+            text(entry.path.to_string_lossy().to_string())
+                .size(Typography::CAPTION)
+                .color(palette.text_muted.to_iced()),
+            horizontal_space(),
+            text("↑/↓ Dosya Değiştir • Space / Esc Kapat • Enter Aç")
+                .size(Typography::CAPTION)
+                .color(palette.primary.to_iced()),
+        ]
+        .align_y(Alignment::Center);
+
+        container(
+            column![header, stage_body, footer]
+                .spacing(Spacing::SM)
+                .height(Length::Fill),
+        )
+        .width(Length::Fixed(760.0))
+        .height(Length::Fixed(520.0))
+        .padding(Spacing::MD)
+        .style(move |_| corten_theme::iced_styles::acrylic_glass_style(palette, Radius::LG))
+        .into()
+    }
+
     fn context_menu_item(
         icon: char,
         label: &'static str,
+        shortcut: &'static str,
+        is_destructive: bool,
         msg: Message,
         palette: Palette,
     ) -> Element<'static, Message> {
+        let icon_color = if is_destructive {
+            palette.danger.to_iced()
+        } else {
+            palette.primary.to_iced()
+        };
+        let label_color = if is_destructive {
+            palette.danger.to_iced()
+        } else {
+            palette.text_primary.to_iced()
+        };
+
+        let mut r = row![
+            text(icon).font(LUCIDE_FONT).size(14).color(icon_color),
+            text(label)
+                .size(Typography::BODY_SM)
+                .color(label_color)
+                .width(Length::Fill),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        if !shortcut.is_empty() {
+            r = r.push(
+                container(
+                    text(shortcut)
+                        .font(iced::Font::MONOSPACE)
+                        .size(10.0)
+                        .color(palette.text_muted.to_iced()),
+                )
+                .padding([2, 5])
+                .style(|_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.05,
+                    ))),
+                    border: Border {
+                        color: Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                        width: 1.0,
+                        radius: border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }),
+            );
+        }
+
+        button(r)
+            .width(Length::Fill)
+            .padding([6, 10])
+            .on_press(msg)
+            .style(move |_, status| {
+                let bg = match status {
+                    button::Status::Hovered => {
+                        if is_destructive {
+                            Color::from_rgba(
+                                palette.danger.r,
+                                palette.danger.g,
+                                palette.danger.b,
+                                0.16,
+                            )
+                        } else {
+                            Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+                        }
+                    }
+                    button::Status::Pressed => Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+                    _ => Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: Border {
+                        radius: border::Radius::from(Radius::SM),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            })
+            .into()
+    }
+
+    fn ribbon_action_btn(
+        icon: char,
+        label: &'static str,
+        is_destructive: bool,
+        msg: Message,
+        palette: Palette,
+    ) -> Element<'static, Message> {
+        let accent = if is_destructive {
+            palette.danger.to_iced()
+        } else {
+            palette.primary.to_iced()
+        };
         button(
-            row![
-                text(icon)
-                    .font(LUCIDE_FONT)
-                    .size(14)
-                    .color(palette.primary.to_iced()),
-                text(label)
-                    .size(Typography::BODY_SM)
-                    .color(palette.text_primary.to_iced()),
+            column![
+                text(icon).font(LUCIDE_FONT).size(14).color(accent),
+                text(label).size(9.5).color(if is_destructive {
+                    accent
+                } else {
+                    palette.text_primary.to_iced()
+                }),
             ]
-            .spacing(8)
-            .align_y(Alignment::Center),
+            .spacing(2)
+            .align_x(Alignment::Center),
         )
-        .width(Length::Fill)
-        .padding([6, 10])
+        .width(Length::FillPortion(1))
+        .padding([5, 4])
         .on_press(msg)
         .style(move |_, status| {
             let bg = match status {
-                button::Status::Hovered => Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-                button::Status::Pressed => Color::from_rgba(1.0, 1.0, 1.0, 0.12),
-                _ => Color::TRANSPARENT,
+                button::Status::Hovered => Color::from_rgba(accent.r, accent.g, accent.b, 0.18),
+                button::Status::Pressed => Color::from_rgba(accent.r, accent.g, accent.b, 0.26),
+                _ => Color::from_rgba(1.0, 1.0, 1.0, 0.04),
             };
             button::Style {
                 background: Some(iced::Background::Color(bg)),
                 border: Border {
+                    color: Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    width: 1.0,
                     radius: border::Radius::from(Radius::SM),
-                    ..Default::default()
                 },
                 ..Default::default()
             }
@@ -1361,11 +1776,11 @@ impl CortenFilesApp {
 
         let is_archive = matches!(
             entry.path.extension().and_then(|s| s.to_str()).unwrap_or(""),
-            "zip" | "tar" | "gz" | "xz" | "7z"
+            "zip" | "tar" | "gz" | "xz" | "7z" | "zst"
         );
 
         let icon_char = Self::entry_icon(entry.kind);
-        let icon_color = Self::entry_color(entry.kind, palette);
+        let icon_color = Self::entry_accent_color(entry, palette);
 
         let header = row![
             text(icon_char)
@@ -1384,13 +1799,57 @@ impl CortenFilesApp {
         .spacing(Spacing::XS)
         .align_y(Alignment::Center);
 
-        let mut items = column![header].spacing(4);
+        // Quick Action Ribbon (Cut / Copy / Rename / Trash)
+        let quick_ribbon = row![
+            Self::ribbon_action_btn(Icon::CLIPBOARD, "Kes", false, Message::CutSelected, palette),
+            Self::ribbon_action_btn(
+                Icon::CLIPBOARD,
+                "Kopyala",
+                false,
+                Message::CopySelected,
+                palette,
+            ),
+            Self::ribbon_action_btn(
+                Icon::CODE,
+                "Adlandır",
+                false,
+                Message::PromptRename,
+                palette,
+            ),
+            Self::ribbon_action_btn(Icon::TRASH, "Sil", true, Message::TrashSelected, palette),
+        ]
+        .spacing(4)
+        .width(Length::Fill);
 
-        // 1. Open
+        let divider = || {
+            container(row![])
+                .width(Length::Fill)
+                .height(Length::Fixed(1.0))
+                .style(|_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.08,
+                    ))),
+                    ..Default::default()
+                })
+        };
+
+        let mut items = column![header, quick_ribbon, divider()].spacing(4);
+
+        // 1. Open & Quick Look
         items = items.push(Self::context_menu_item(
             Icon::CHEVRON_RIGHT,
             "Aç",
+            "Enter",
+            false,
             Message::ActivateIndex(idx),
+            palette,
+        ));
+        items = items.push(Self::context_menu_item(
+            Icon::SEARCH,
+            "Hızlı Bakış",
+            "Space",
+            false,
+            Message::ToggleQuickLook,
             palette,
         ));
 
@@ -1399,84 +1858,74 @@ impl CortenFilesApp {
             items = items.push(Self::context_menu_item(
                 Icon::FOLDER,
                 "Yeni Sekmede Aç",
+                "Ctrl+T",
+                false,
                 Message::OpenInNewTab(entry.path.clone()),
                 palette,
             ));
         }
 
-        // 3. Copy / Cut
-        items = items.push(Self::context_menu_item(
-            Icon::CLIPBOARD,
-            "Kopyala (Ctrl+C)",
-            Message::CopySelected,
-            palette,
-        ));
-        items = items.push(Self::context_menu_item(
-            Icon::CLIPBOARD,
-            "Kes (Ctrl+X)",
-            Message::CutSelected,
-            palette,
-        ));
-
-        // 4. Rename
-        items = items.push(Self::context_menu_item(
-            Icon::CODE,
-            "Yeniden Adlandır (F2)",
-            Message::PromptRename,
-            palette,
-        ));
-
-        // 5. Extract (if archive)
+        // 3. Extract / Compress
         if is_archive {
             items = items.push(Self::context_menu_item(
                 Icon::DOWNLOAD,
                 "Arşivi Buraya Çıkar",
+                "",
+                false,
                 Message::ExtractSelectedArchive,
+                palette,
+            ));
+        } else {
+            items = items.push(Self::context_menu_item(
+                Icon::CLIPBOARD,
+                "ZIP Olarak Arşivle",
+                "",
+                false,
+                Message::CompressSelectedArchive("zip".into()),
                 palette,
             ));
         }
 
-        // 6. Terminal here
+        items = items.push(divider());
+
+        // 4. Terminal & AI Analysis
         items = items.push(Self::context_menu_item(
             Icon::TERMINAL,
             "Terminalde Aç",
+            "F4",
+            false,
             Message::OpenTerminalHere,
             palette,
         ));
-
-        // 7. AI Analysis
         items = items.push(Self::context_menu_item(
             Icon::SHIELD,
-            "Yapay Zeka ile İncele",
+            "Corten AI ile İncele",
+            "",
+            false,
             Message::AnalyzeWithAi(entry.path.clone()),
             palette,
         ));
 
-        // 8. Delete / Trash
+        items = items.push(divider());
+
+        // 5. Destructive Delete at bottom
         items = items.push(Self::context_menu_item(
             Icon::TRASH,
-            "Çöpe Gönder (Del)",
+            if self.is_in_trash() {
+                "Kalıcı Olarak Sil"
+            } else {
+                "Çöp Kutusuna Gönder"
+            },
+            "Del",
+            true,
             Message::TrashSelected,
             palette,
         ));
 
         let menu_card = container(items)
-            .width(Length::Fixed(240.0))
+            .width(Length::Fixed(268.0))
             .padding(Spacing::SM)
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(0.10, 0.11, 0.15, 0.96))),
-                border: Border {
-                    color: palette.primary.to_iced(),
-                    width: 1.0,
-                    radius: border::Radius::from(Radius::MD),
-                },
-                shadow: Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
-                    offset: iced::Vector::new(0.0, 8.0),
-                    blur_radius: 20.0,
-                },
-                ..Default::default()
-            });
+            .style(move |_| corten_theme::iced_styles::acrylic_glass_style(palette, Radius::MD));
 
         menu_card.into()
     }
@@ -1567,7 +2016,7 @@ impl CortenFilesApp {
     }
 
     fn view_tab_bar(&self, palette: Palette) -> Element<'_, Message> {
-        let mut tab_row = row![].spacing(Spacing::XS).align_y(Alignment::Center);
+        let mut tab_row = row![].spacing(4).align_y(Alignment::Center);
 
         for (idx, tab) in self.tabs.iter().enumerate() {
             let is_active = idx == self.active_tab;
@@ -1581,27 +2030,27 @@ impl CortenFilesApp {
             let mut item_row = row![
                 text(Icon::FOLDER)
                     .font(LUCIDE_FONT)
-                    .size(13)
+                    .size(12.5)
                     .color(if is_active {
                         palette.primary.to_iced()
                     } else {
                         palette.text_muted.to_iced()
                     }),
                 text(folder_label)
-                    .size(Typography::BODY_SM)
+                    .size(12.0)
                     .color(if is_active {
                         palette.text_primary.to_iced()
                     } else {
                         palette.text_muted.to_iced()
                     }),
             ]
-            .spacing(6)
+            .spacing(5)
             .align_y(Alignment::Center);
 
             if is_active {
                 let dup_btn = button(
                     text("⧉")
-                        .size(11)
+                        .size(10.5)
                         .color(palette.text_muted.to_iced()),
                 )
                 .padding([0, 3])
@@ -1617,10 +2066,10 @@ impl CortenFilesApp {
             if self.tabs.len() > 1 {
                 let close_btn = button(
                     text("×")
-                        .size(Typography::BODY_SM)
+                        .size(12.0)
                         .color(palette.text_muted.to_iced()),
                 )
-                .padding([0, 4])
+                .padding([0, 3])
                 .on_press(Message::CloseTab(idx))
                 .style(move |_, _| button::Style {
                     background: None,
@@ -1631,7 +2080,7 @@ impl CortenFilesApp {
             }
 
             let tab_btn = button(item_row)
-                .padding([5, 12])
+                .padding([4, 10])
                 .on_press(Message::SwitchTab(idx))
                 .style(move |_, status| {
                     if is_active {
@@ -1654,21 +2103,102 @@ impl CortenFilesApp {
 
         tab_row = tab_row.push(
             button(
-                text("+ Sekme (Ctrl+T)")
-                    .size(Typography::CAPTION)
-                    .color(palette.text_muted.to_iced()),
+                text("+")
+                    .size(13.0)
+                    .color(palette.primary.to_iced()),
             )
-            .padding([5, 10])
+            .padding([3, 8])
             .on_press(Message::NewTab)
             .style(move |_, status| secondary_button_style(palette, status)),
         );
 
-        scrollable(tab_row)
-            .direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::new().width(0).scroller_width(0),
-            ))
-            .width(Length::Fill)
-            .into()
+        let has_selection = self.selected_entry().is_some();
+        let has_clipboard = self.clipboard.is_some();
+        let is_archive = self.selected_entry().map(|e| e.is_archive()).unwrap_or(false);
+        let in_trash = self.is_in_trash();
+        let current_bookmarked = self
+            .config
+            .bookmarks
+            .contains(&self.current_dir.to_string_lossy().to_string());
+
+        let mut quick_actions = row![
+            Self::small_button("+ Klasör", "", Message::PromptNewFolder, palette),
+            Self::small_button("+ Dosya", "", Message::PromptNewFile, palette),
+            Self::small_button(
+                if current_bookmarked { "★ Yer İmi" } else { "☆ Yer İmi" },
+                "",
+                Message::ToggleBookmarkCurrent,
+                palette,
+            ),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+        if has_clipboard {
+            quick_actions = quick_actions.push(Self::accent_button(
+                "Yapıştır",
+                Message::PasteClipboard,
+                palette,
+            ));
+        }
+
+        if has_selection {
+            quick_actions = quick_actions
+                .push(Self::small_button("Adlandır", "", Message::PromptRename, palette))
+                .push(Self::small_button(
+                    if in_trash { "Kalıcı Sil" } else { "Çöp" },
+                    "",
+                    Message::TrashSelected,
+                    palette,
+                ));
+        }
+
+        if is_archive {
+            quick_actions = quick_actions.push(Self::accent_button(
+                "Arşivi Çıkar",
+                Message::ExtractSelectedArchive,
+                palette,
+            ));
+        }
+
+        if in_trash {
+            if has_selection {
+                quick_actions = quick_actions.push(Self::accent_button(
+                    "Geri Yükle",
+                    Message::RestoreSelectedFromTrash,
+                    palette,
+                ));
+            }
+            quick_actions = quick_actions.push(Self::small_button(
+                "Boşalt",
+                "",
+                Message::EmptyTrash,
+                palette,
+            ));
+        }
+
+        quick_actions = quick_actions.push(Self::small_button(
+            ">_ Terminal",
+            "",
+            Message::OpenTerminalHere,
+            palette,
+        ));
+
+        container(
+            row![
+                scrollable(tab_row)
+                    .direction(scrollable::Direction::Horizontal(
+                        scrollable::Scrollbar::new().width(0).scroller_width(0),
+                    ))
+                    .width(Length::Fill),
+                quick_actions,
+            ]
+            .spacing(Spacing::SM)
+            .align_y(Alignment::Center),
+        )
+        .padding([3, 6])
+        .width(Length::Fill)
+        .into()
     }
 
     fn view_top_bar(&self, palette: Palette) -> Element<'_, Message> {
@@ -1685,7 +2215,7 @@ impl CortenFilesApp {
                 text_input("Dizin yolunu girin...", &self.address_input)
                     .on_input(Message::AddressInputChanged)
                     .on_submit(Message::AddressSubmitted)
-                    .padding([6, 10])
+                    .padding([5, 10])
                     .size(Typography::BODY_SM)
                     .width(Length::Fill),
                 Self::small_button("Git", "", Message::AddressSubmitted, palette),
@@ -1696,76 +2226,120 @@ impl CortenFilesApp {
             .align_y(Alignment::Center)
             .into()
         } else {
-            let mut crumb_row = row![].spacing(4).align_y(Alignment::Center);
+            let mut crumb_row = row![].spacing(3).align_y(Alignment::Center);
             let crumbs = breadcrumbs(&self.current_dir);
             for (idx, (label, path)) in crumbs.into_iter().enumerate() {
                 if idx > 0 {
                     crumb_row = crumb_row.push(
                         text(Icon::CHEVRON_RIGHT)
                             .font(LUCIDE_FONT)
-                            .size(11)
+                            .size(10)
                             .color(palette.text_muted.to_iced()),
                     );
                 }
                 let is_last = path == self.current_dir;
+                let is_dropdown_open = self.breadcrumb_dropdown.as_ref() == Some(&path);
                 let icon_ch = if idx == 0 {
                     Icon::USER
                 } else {
                     Icon::FOLDER
                 };
-                let btn = button(
+                let path_for_nav = path.clone();
+                let path_for_drop = path.clone();
+
+                let seg_btn = button(
                     row![
                         text(icon_ch)
                             .font(LUCIDE_FONT)
-                            .size(12)
+                            .size(11.5)
                             .color(if is_last {
                                 palette.primary.to_iced()
                             } else {
                                 palette.text_muted.to_iced()
                             }),
                         text(label)
-                            .size(Typography::BODY_SM)
+                            .size(12.0)
                             .color(if is_last {
                                 palette.primary.to_iced()
                             } else {
                                 palette.text_primary.to_iced()
                             }),
                     ]
-                    .spacing(5)
+                    .spacing(4)
                     .align_y(Alignment::Center),
                 )
-                .padding([4, 10])
-                .on_press(Message::NavigateTo(path))
+                .padding([3, 8])
+                .on_press(Message::NavigateTo(path_for_nav))
                 .style(move |_, status| {
                     let bg = match status {
                         button::Status::Hovered => palette.surface_hover.to_iced(),
-                        _ if is_last => Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16),
-                        _ => Color::from_rgba(1.0, 1.0, 1.0, 0.05),
+                        _ if is_last => Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.16,
+                        ),
+                        _ => Color::from_rgba(1.0, 1.0, 1.0, 0.04),
                     };
                     button::Style {
                         background: Some(bg.into()),
                         text_color: palette.text_primary.to_iced(),
                         border: Border {
                             color: if is_last {
-                                Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.50)
+                                Color::from_rgba(
+                                    palette.primary.r,
+                                    palette.primary.g,
+                                    palette.primary.b,
+                                    0.45,
+                                )
                             } else {
-                                Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+                                Color::from_rgba(1.0, 1.0, 1.0, 0.07)
                             },
                             width: 1.0,
                             radius: border::Radius::from(Radius::FULL),
                         },
-                        shadow: if is_last {
-                            Shadow {
-                                color: Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.25),
-                                offset: iced::Vector::new(0.0, 1.0),
-                                blur_radius: 4.0,
-                            }
-                        } else {
-                            Shadow::default()
-                        },
+                        shadow: Shadow::default(),
                     }
                 });
-                crumb_row = crumb_row.push(btn);
+
+                crumb_row = crumb_row.push(seg_btn);
+
+                // Interactive sibling dropdown trigger chevron
+                if idx > 0 {
+                    let drop_btn = button(
+                        text(if is_dropdown_open { "▴" } else { "▾" })
+                            .size(10.0)
+                            .color(if is_dropdown_open {
+                                palette.primary.to_iced()
+                            } else {
+                                palette.text_muted.to_iced()
+                            }),
+                    )
+                    .padding([2, 4])
+                    .on_press(Message::ToggleBreadcrumbDropdown(path_for_drop))
+                    .style(move |_, status| {
+                        let bg = match status {
+                            button::Status::Hovered => palette.surface_hover.to_iced(),
+                            _ if is_dropdown_open => Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.22,
+                            ),
+                            _ => Color::TRANSPARENT,
+                        };
+                        button::Style {
+                            background: Some(bg.into()),
+                            text_color: palette.text_muted.to_iced(),
+                            border: Border {
+                                radius: border::Radius::from(Radius::SM),
+                                ..Default::default()
+                            },
+                            shadow: Shadow::default(),
+                        }
+                    });
+                    crumb_row = crumb_row.push(drop_btn);
+                }
             }
 
             container(
@@ -1776,18 +2350,18 @@ impl CortenFilesApp {
                         ))
                         .width(Length::Fill),
                     button(
-                        text("Yol (Ctrl+L)")
-                            .size(Typography::CAPTION)
+                        text("✎ Yol")
+                            .size(11.0)
                             .color(palette.text_muted.to_iced()),
                     )
-                    .padding([3, 8])
+                    .padding([2, 7])
                     .on_press(Message::ToggleAddressEdit)
                     .style(move |_, _| secondary_button_style(palette, button::Status::Active)),
                 ]
                 .align_y(Alignment::Center)
                 .spacing(Spacing::XS),
             )
-            .padding([4, 8])
+            .padding([3, 8])
             .width(Length::Fill)
             .style(move |_| input_style(palette))
             .into()
@@ -1801,7 +2375,15 @@ impl CortenFilesApp {
             )
             .padding([2, 5])
             .style(move |_| container::Style {
-                background: Some(Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15).into()),
+                background: Some(
+                    Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.15,
+                    )
+                    .into(),
+                ),
                 border: Border {
                     radius: border::Radius::from(Radius::SM),
                     ..Default::default()
@@ -1816,13 +2398,13 @@ impl CortenFilesApp {
             row![
                 text(Icon::SEARCH)
                     .font(LUCIDE_FONT)
-                    .size(14)
+                    .size(13)
                     .color(palette.text_muted.to_iced()),
                 text_input("Filtrele (Ctrl+F)...", &self.search_query)
                     .on_input(Message::SearchChanged)
-                    .padding([4, 6])
-                    .size(Typography::BODY_SM)
-                    .width(Length::Fixed(160.0)),
+                    .padding([3, 6])
+                    .size(12.0)
+                    .width(Length::Fixed(145.0)),
                 match_count,
             ]
             .spacing(Spacing::XS)
@@ -1845,13 +2427,19 @@ impl CortenFilesApp {
                 palette,
             ),
             Self::toggle_pill(
+                "Sütun",
+                self.config.view_mode == ViewMode::Columns,
+                Message::SetViewMode(ViewMode::Columns),
+                palette,
+            ),
+            Self::toggle_pill(
                 ".gizli",
                 self.config.show_hidden,
                 Message::ToggleHidden,
                 palette,
             ),
             Self::toggle_pill(
-                "İkili (F3)",
+                "İkili",
                 self.split_view,
                 Message::ToggleSplitView,
                 palette,
@@ -1863,19 +2451,19 @@ impl CortenFilesApp {
                 palette,
             ),
         ]
-        .spacing(Spacing::XXS);
+        .spacing(3);
 
         container(
             row![nav_buttons, path_widget, search_box, view_toggles]
                 .spacing(Spacing::SM)
                 .align_y(Alignment::Center),
         )
-        .padding([Spacing::SM, Spacing::MD])
+        .padding([6, 10])
         .width(Length::Fill)
         .style(move |_| container::Style {
             background: Some(iced::Background::Color(Color::from_rgba(0.08, 0.09, 0.12, 0.95))),
             border: Border {
-                color: Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                color: Color::from_rgba(1.0, 1.0, 1.0, 0.07),
                 width: 1.0,
                 radius: border::Radius::from(Radius::MD),
             },
@@ -1884,114 +2472,91 @@ impl CortenFilesApp {
         .into()
     }
 
-    fn view_action_bar(&self, palette: Palette) -> Element<'_, Message> {
-        let has_selection = self.selected_entry().is_some();
-        let has_clipboard = self.clipboard.is_some();
-        let is_archive = self.selected_entry().map(|e| e.is_archive()).unwrap_or(false);
-        let in_trash = self.is_in_trash();
-        let current_bookmarked = self
-            .config
-            .bookmarks
-            .contains(&self.current_dir.to_string_lossy().to_string());
+    fn view_breadcrumb_dropdown(
+        &self,
+        target_dir: &std::path::Path,
+        palette: Palette,
+    ) -> Element<'_, Message> {
+        let siblings = sibling_directories(target_dir, self.config.show_hidden);
+        let parent_name = target_dir
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "/".to_string());
 
-        let mut actions = row![
-            Self::small_button("+ Klasör", "", Message::PromptNewFolder, palette),
-            Self::small_button("+ Dosya", "", Message::PromptNewFile, palette),
-            Self::small_button(
-                if current_bookmarked { "★ Yer İmi" } else { "☆ Yer İmi" },
-                "",
-                Message::ToggleBookmarkCurrent,
-                palette,
-            ),
+        let mut pills = row![
+            text(format!("{} içindeki klasörler:", parent_name))
+                .size(11.0)
+                .color(palette.text_muted.to_iced()),
         ]
-        .spacing(Spacing::XS)
+        .spacing(6)
         .align_y(Alignment::Center);
 
-        if has_selection {
-            if let Some(entry) = self.selected_entry() {
-                if entry.is_dir {
-                    actions = actions.push(Self::small_button(
-                        "⧉ Yeni Sekmede Aç",
-                        "",
-                        Message::OpenInNewTab(entry.path.clone()),
-                        palette,
-                    ));
+        for (name, path) in siblings {
+            let is_current = path == self.current_dir || self.current_dir.starts_with(&path);
+            let pill = button(
+                row![
+                    text(Icon::FOLDER)
+                        .font(LUCIDE_FONT)
+                        .size(11.5)
+                        .color(if is_current {
+                            palette.primary.to_iced()
+                        } else {
+                            palette.text_muted.to_iced()
+                        }),
+                    text(name).size(11.5).color(if is_current {
+                        palette.primary.to_iced()
+                    } else {
+                        palette.text_primary.to_iced()
+                    }),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center),
+            )
+            .padding([3, 9])
+            .on_press(Message::NavigateTo(path))
+            .style(move |_, status| {
+                if is_current {
+                    primary_button_style(palette, status)
+                } else {
+                    secondary_button_style(palette, status)
                 }
-            }
-            actions = actions
-                .push(Self::small_button("Aç", "", Message::ActivateSelected, palette))
-                .push(Self::small_button("Kopyala", "", Message::CopySelected, palette))
-                .push(Self::small_button("Kes", "", Message::CutSelected, palette))
-                .push(Self::small_button("Adlandır (F2)", "", Message::PromptRename, palette))
-                .push(Self::small_button(
-                    if in_trash { "Kalıcı Sil" } else { "Çöpe Taşı" },
-                    "",
-                    Message::TrashSelected,
-                    palette,
-                ));
+            });
+            pills = pills.push(pill);
         }
 
-        if has_clipboard {
-            actions = actions.push(Self::accent_button(
-                "Yapıştır (Ctrl+V)",
-                Message::PasteClipboard,
-                palette,
-            ));
-        }
-
-        if is_archive {
-            actions = actions.push(Self::accent_button(
-                "Arşivi Çıkart",
-                Message::ExtractSelectedArchive,
-                palette,
-            ));
-        } else if has_selection && !in_trash {
-            actions = actions.push(Self::small_button(
-                "Arşivle (.zip)",
-                "Seçili öğeyi ZIP olarak paketle",
-                Message::CompressSelectedArchive("zip".into()),
-                palette,
-            ));
-        }
-
-        if in_trash {
-            if has_selection {
-                actions = actions.push(Self::accent_button(
-                    "Geri Yükle",
-                    Message::RestoreSelectedFromTrash,
-                    palette,
-                ));
-            }
-            actions = actions.push(Self::small_button(
-                "Çöpü Boşalt",
-                "",
-                Message::EmptyTrash,
-                palette,
-            ));
-        }
-
-        actions = actions
-            .push(horizontal_space())
-            .push(Self::small_button(
-                "Terminal (F4)",
-                "",
-                Message::OpenTerminalHere,
-                palette,
-            ));
-
-        container(actions)
-            .padding([Spacing::XS + 2.0, Spacing::MD])
-            .width(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(0.07, 0.08, 0.10, 0.85))),
-                border: Border {
-                    color: Color::from_rgba(1.0, 1.0, 1.0, 0.04),
-                    width: 1.0,
-                    radius: border::Radius::from(0.0),
-                },
-                ..Default::default()
-            })
-            .into()
+        container(
+            row![
+                scrollable(pills)
+                    .direction(scrollable::Direction::Horizontal(
+                        scrollable::Scrollbar::new().width(0).scroller_width(0),
+                    ))
+                    .width(Length::Fill),
+                button(text("✕").size(11.0).color(palette.text_muted.to_iced()))
+                    .padding([2, 6])
+                    .on_press(Message::CloseBreadcrumbDropdown)
+                    .style(|_, _| button::Style::default()),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        )
+        .padding([5, 12])
+        .width(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgba(0.09, 0.10, 0.14, 0.96))),
+            border: Border {
+                color: Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.45,
+                ),
+                width: 1.0,
+                radius: border::Radius::from(Radius::MD),
+            },
+            ..Default::default()
+        })
+        .into()
     }
 
     fn view_inline_modal<'a>(
@@ -2112,44 +2677,84 @@ impl CortenFilesApp {
     fn view_sidebar(&self, palette: Palette) -> Element<'_, Message> {
         let mut col = column![
             text("KONUMLAR")
-                .size(Typography::CAPTION)
+                .size(10.5)
                 .color(palette.text_muted.to_iced()),
         ]
-        .spacing(Spacing::XXS);
+        .spacing(3);
 
         for place in &self.places {
             let is_active = self.current_dir == place.path;
             let icon_ch = if place.is_trash {
-                Icon::X
+                Icon::TRASH
             } else if place.is_mount {
                 Icon::CPU
+            } else if place.label.starts_with("Ev") {
+                Icon::USER
+            } else if place.label.starts_with("İndir") {
+                Icon::DOWNLOAD
+            } else if place.label.starts_with("Resim") {
+                Icon::MONITOR
+            } else if place.label.starts_with("Proje") {
+                Icon::CODE
             } else {
                 Icon::FOLDER
+            };
+
+            let badge_el: Element<'_, Message> = if let Some(count) = place.item_count {
+                container(
+                    text(format!("{count}"))
+                        .size(9.5)
+                        .color(if is_active {
+                            Color::WHITE
+                        } else {
+                            palette.text_muted.to_iced()
+                        }),
+                )
+                .padding([1, 6])
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(if is_active {
+                        Color::from_rgba(1.0, 1.0, 1.0, 0.22)
+                    } else {
+                        Color::from_rgba(1.0, 1.0, 1.0, 0.06)
+                    })),
+                    border: Border {
+                        radius: border::Radius::from(Radius::FULL),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .into()
+            } else {
+                horizontal_space().width(Length::Shrink).into()
             };
 
             let item = button(
                 row![
                     text(icon_ch)
                         .font(LUCIDE_FONT)
-                        .size(15)
+                        .size(14.5)
                         .color(if is_active {
                             Color::WHITE
+                        } else if place.is_trash {
+                            palette.danger.to_iced()
                         } else {
                             palette.primary.to_iced()
                         }),
                     text(place.label.clone())
-                        .size(Typography::BODY_SM)
+                        .size(12.0)
                         .color(if is_active {
                             Color::WHITE
                         } else {
                             palette.text_primary.to_iced()
-                        }),
+                        })
+                        .width(Length::Fill),
+                    badge_el,
                 ]
-                .spacing(Spacing::SM)
+                .spacing(8)
                 .align_y(Alignment::Center),
             )
             .width(Length::Fill)
-            .padding([7, 10])
+            .padding([6, 10])
             .on_press(Message::NavigateTo(place.path.clone()))
             .style(move |_, status| {
                 if is_active {
@@ -2164,10 +2769,10 @@ impl CortenFilesApp {
 
         if !self.config.bookmarks.is_empty() {
             col = col
-                .push(vertical_space().height(Spacing::SM))
+                .push(vertical_space().height(Spacing::XS))
                 .push(
                     text("YER İMLERİ")
-                        .size(Typography::CAPTION)
+                        .size(10.5)
                         .color(palette.text_muted.to_iced()),
                 );
 
@@ -2180,13 +2785,16 @@ impl CortenFilesApp {
                 let is_active = self.current_dir == path;
                 let btn = button(
                     row![
-                        text(Icon::FOLDER)
-                            .font(LUCIDE_FONT)
-                            .size(14)
-                            .color(palette.primary.to_iced()),
-                        text(label).size(Typography::BODY_SM),
+                        text("★")
+                            .size(12.0)
+                            .color(if is_active {
+                                Color::WHITE
+                            } else {
+                                palette.warning.to_iced()
+                            }),
+                        text(label).size(12.0),
                     ]
-                    .spacing(Spacing::SM)
+                    .spacing(8)
                     .align_y(Alignment::Center),
                 )
                 .width(Length::Fill)
@@ -2205,10 +2813,10 @@ impl CortenFilesApp {
 
         if !self.devices.is_empty() {
             col = col
-                .push(vertical_space().height(Spacing::SM))
+                .push(vertical_space().height(Spacing::XS))
                 .push(
-                    text("CİHAZLAR")
-                        .size(Typography::CAPTION)
+                    text("DEPOLAMA & AYGITLAR")
+                        .size(10.5)
                         .color(palette.text_muted.to_iced()),
                 );
 
@@ -2240,7 +2848,7 @@ impl CortenFilesApp {
                                         palette.success.to_iced()
                                     }),
                                 text(dev_label)
-                                    .size(Typography::BODY_SM)
+                                    .size(11.5)
                                     .color(if is_active {
                                         Color::WHITE
                                     } else {
@@ -2279,7 +2887,7 @@ impl CortenFilesApp {
                             .size(14)
                             .color(palette.text_muted.to_iced()),
                         text(dev_label)
-                            .size(Typography::BODY_SM)
+                            .size(11.5)
                             .color(palette.text_muted.to_iced())
                             .width(Length::Fill),
                         button(
@@ -2299,23 +2907,114 @@ impl CortenFilesApp {
             }
         }
 
-        container(scrollable(col).height(Length::Fill))
-            .width(Length::Fixed(210.0))
-            .height(Length::Fill)
-            .padding(Spacing::SM)
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(0.06, 0.07, 0.09, 0.70))),
+        // Disk capacity indicator card at the bottom of the sidebar
+        let disk_card: Element<'_, Message> = if let Some((used, total, ratio)) = self.disk_usage {
+            let free = total.saturating_sub(used);
+            let pct = (ratio * 100.0).round() as u32;
+            let fill_w = (168.0 * ratio).clamp(6.0, 168.0);
+            let bar_color = if ratio > 0.88 {
+                palette.danger.to_iced()
+            } else if ratio > 0.72 {
+                palette.warning.to_iced()
+            } else {
+                palette.primary.to_iced()
+            };
+
+            container(
+                column![
+                    row![
+                        text(Icon::CPU)
+                            .font(LUCIDE_FONT)
+                            .size(12.0)
+                            .color(bar_color),
+                        text("Sistem Diski")
+                            .size(11.0)
+                            .color(palette.text_primary.to_iced())
+                            .width(Length::Fill),
+                        text(format!("%{pct}"))
+                            .size(10.5)
+                            .font(iced::Font::MONOSPACE)
+                            .color(bar_color),
+                    ]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
+                    container(
+                        container(row![])
+                            .width(Length::Fixed(fill_w))
+                            .height(Length::Fixed(4.0))
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(bar_color)),
+                                border: Border {
+                                    radius: border::Radius::from(Radius::FULL),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            }),
+                    )
+                    .width(Length::Fixed(168.0))
+                    .height(Length::Fixed(4.0))
+                    .style(|_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba(
+                            1.0, 1.0, 1.0, 0.08,
+                        ))),
+                        border: Border {
+                            radius: border::Radius::from(Radius::FULL),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+                    text(format!("{} boş / {}", format_size(free), format_size(total)))
+                        .size(10.0)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(5),
+            )
+            .padding([8, 10])
+            .width(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.03,
+                ))),
                 border: Border {
-                    color: Color::from_rgba(1.0, 1.0, 1.0, 0.05),
+                    color: Color::from_rgba(1.0, 1.0, 1.0, 0.07),
                     width: 1.0,
-                    radius: border::Radius::from(0.0),
+                    radius: border::Radius::from(Radius::SM),
                 },
                 ..Default::default()
             })
             .into()
+        } else {
+            vertical_space().height(Length::Shrink).into()
+        };
+
+        container(
+            column![
+                scrollable(col).height(Length::Fill),
+                disk_card,
+            ]
+            .spacing(Spacing::XS)
+            .height(Length::Fill),
+        )
+        .width(Length::Fixed(214.0))
+        .height(Length::Fill)
+        .padding(Spacing::SM)
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgba(0.06, 0.07, 0.09, 0.75))),
+            border: Border {
+                color: Color::from_rgba(1.0, 1.0, 1.0, 0.05),
+                width: 1.0,
+                radius: border::Radius::from(0.0),
+            },
+            ..Default::default()
+        })
+        .into()
     }
 
     fn view_explorer_pane(&self, palette: Palette) -> Element<'_, Message> {
+        if self.config.view_mode == ViewMode::Columns {
+            return self.view_miller_columns_pane(palette);
+        }
+
         let header = row![
             Self::sort_header_btn(
                 "İsim",
@@ -2373,11 +3072,12 @@ impl CortenFilesApp {
             .center_y(Length::Fill)
             .into()
         } else if self.config.view_mode == ViewMode::List {
-            let mut list_col = column![].spacing(4);
+            let mut list_col = column![].spacing(3);
             for (idx, entry) in self.entries.iter().enumerate() {
                 let is_selected = self.selected_index == Some(idx);
                 let icon_ch = Self::entry_icon(entry.kind);
-                let icon_color = Self::entry_color(entry.kind, palette);
+                let accent = Self::entry_accent_color(entry, palette);
+                let ext_badge = Self::entry_badge_text(entry);
                 let size_text = if entry.is_dir {
                     "--".to_string()
                 } else {
@@ -2390,21 +3090,45 @@ impl CortenFilesApp {
                         row![
                             text(icon_ch)
                                 .font(LUCIDE_FONT)
-                                .size(16)
-                                .color(if is_selected { Color::WHITE } else { icon_color }),
-                            text(entry.name.clone()).size(Typography::BODY_SM).color(
-                                if is_selected {
+                                .size(15.5)
+                                .color(if is_selected { Color::WHITE } else { accent }),
+                            text(entry.name.clone())
+                                .size(12.5)
+                                .color(if is_selected {
                                     Color::WHITE
                                 } else {
                                     palette.text_primary.to_iced()
-                                }
-                            ),
+                                })
+                                .width(Length::Fill),
+                            container(
+                                text(ext_badge)
+                                    .size(9.5)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(if is_selected {
+                                        Color::WHITE
+                                    } else {
+                                        accent
+                                    }),
+                            )
+                            .padding([1, 6])
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(if is_selected {
+                                    Color::from_rgba(1.0, 1.0, 1.0, 0.20)
+                                } else {
+                                    Color::from_rgba(accent.r, accent.g, accent.b, 0.14)
+                                })),
+                                border: Border {
+                                    radius: border::Radius::from(Radius::FULL),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            }),
                         ]
-                        .spacing(Spacing::SM)
+                        .spacing(8)
                         .align_y(Alignment::Center)
                         .width(Length::FillPortion(5)),
                         text(entry.kind.label())
-                            .size(Typography::CAPTION)
+                            .size(11.5)
                             .color(if is_selected {
                                 Color::WHITE
                             } else {
@@ -2412,7 +3136,8 @@ impl CortenFilesApp {
                             })
                             .width(Length::FillPortion(2)),
                         text(size_text)
-                            .size(Typography::CAPTION)
+                            .size(11.5)
+                            .font(iced::Font::MONOSPACE)
                             .color(if is_selected {
                                 Color::WHITE
                             } else {
@@ -2420,7 +3145,7 @@ impl CortenFilesApp {
                             })
                             .width(Length::FillPortion(2)),
                         text(time_text)
-                            .size(Typography::CAPTION)
+                            .size(11.5)
                             .color(if is_selected {
                                 Color::WHITE
                             } else {
@@ -2431,7 +3156,7 @@ impl CortenFilesApp {
                     .align_y(Alignment::Center),
                 )
                 .width(Length::Fill)
-                .padding([7, 10])
+                .padding([6, 10])
                 .on_press(Message::SelectIndex(idx))
                 .style(move |_, status| {
                     if is_selected {
@@ -2446,7 +3171,7 @@ impl CortenFilesApp {
             }
             scrollable(list_col).height(Length::Fill).into()
         } else {
-            // Grid view (3 cards per row)
+            // Upgraded Grid view (3 cards per row with frosted preview stage & extension badge)
             let mut grid_col = column![].spacing(Spacing::SM);
             for chunk in self.entries.chunks(3) {
                 let mut r = row![].spacing(Spacing::SM);
@@ -2458,57 +3183,96 @@ impl CortenFilesApp {
                         .unwrap_or(0);
                     let is_selected = self.selected_index == Some(idx);
                     let icon_ch = Self::entry_icon(entry.kind);
-                    let icon_color = Self::entry_color(entry.kind, palette);
+                    let accent = Self::entry_accent_color(entry, palette);
+                    let badge_txt = Self::entry_badge_text(entry);
                     let subtitle = if entry.is_dir {
-                        "Klasör".to_string()
+                        format!("Klasör • {}", format_relative_time(entry.modified_secs))
                     } else {
-                        format_size(entry.size)
+                        format!(
+                            "{} • {}",
+                            format_size(entry.size),
+                            format_relative_time(entry.modified_secs)
+                        )
                     };
 
-                    let preview_widget: Element<'_, Message> = if let Some(path) = fs_ops::get_image_preview_path(&entry.path) {
-                        iced::widget::image(iced::widget::image::Handle::from_path(path))
-                            .width(Length::Fixed(72.0))
-                            .height(Length::Fixed(48.0))
-                            .content_fit(iced::ContentFit::Cover)
-                            .into()
-                    } else {
-                        text(icon_ch).font(LUCIDE_FONT).size(22).color(if is_selected {
-                            Color::WHITE
+                    let preview_widget: Element<'_, Message> =
+                        if let Some(path) = fs_ops::get_image_preview_path(&entry.path) {
+                            iced::widget::image(iced::widget::image::Handle::from_path(path))
+                                .width(Length::Fixed(80.0))
+                                .height(Length::Fixed(52.0))
+                                .content_fit(iced::ContentFit::Cover)
+                                .into()
                         } else {
-                            icon_color
-                        }).into()
-                    };
+                            container(
+                                text(icon_ch).font(LUCIDE_FONT).size(26).color(if is_selected {
+                                    Color::WHITE
+                                } else {
+                                    accent
+                                }),
+                            )
+                            .padding([10, 14])
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(if is_selected {
+                                    Color::from_rgba(1.0, 1.0, 1.0, 0.16)
+                                } else {
+                                    Color::from_rgba(accent.r, accent.g, accent.b, 0.14)
+                                })),
+                                border: Border {
+                                    color: Color::from_rgba(accent.r, accent.g, accent.b, 0.28),
+                                    width: 1.0,
+                                    radius: border::Radius::from(Radius::MD),
+                                },
+                                ..Default::default()
+                            })
+                            .into()
+                        };
 
                     let card = button(
                         column![
                             row![
                                 preview_widget,
                                 horizontal_space(),
-                                text(entry.kind.badge())
-                                    .size(10)
-                                    .color(if is_selected {
-                                        Color::WHITE
+                                container(
+                                    text(badge_txt)
+                                        .size(9.5)
+                                        .font(iced::Font::MONOSPACE)
+                                        .color(if is_selected {
+                                            Color::WHITE
+                                        } else {
+                                            accent
+                                        }),
+                                )
+                                .padding([2, 6])
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(if is_selected {
+                                        Color::from_rgba(1.0, 1.0, 1.0, 0.20)
                                     } else {
-                                        palette.text_muted.to_iced()
-                                    }),
+                                        Color::from_rgba(accent.r, accent.g, accent.b, 0.14)
+                                    })),
+                                    border: Border {
+                                        radius: border::Radius::from(Radius::FULL),
+                                        ..Default::default()
+                                    },
+                                    ..Default::default()
+                                }),
                             ]
-                            .align_y(Alignment::Center),
+                            .align_y(Alignment::Start),
                             text(entry.name.clone())
-                                .size(Typography::BODY_SM)
+                                .size(12.5)
                                 .color(if is_selected {
                                     Color::WHITE
                                 } else {
                                     palette.text_primary.to_iced()
                                 }),
                             text(subtitle)
-                                .size(Typography::CAPTION)
+                                .size(10.5)
                                 .color(if is_selected {
                                     Color::WHITE
                                 } else {
                                     palette.text_muted.to_iced()
                                 }),
                         ]
-                        .spacing(4),
+                        .spacing(6),
                     )
                     .width(Length::FillPortion(1))
                     .padding(Spacing::SM)
@@ -2544,6 +3308,253 @@ impl CortenFilesApp {
             .into()
     }
 
+    fn view_miller_columns_pane<'a>(&'a self, palette: Palette) -> Element<'a, Message> {
+        // Column 1: Parent directory sibling folders
+        let siblings = sibling_directories(&self.current_dir, self.config.show_hidden);
+        let parent_title = self
+            .current_dir
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "/".to_string());
+
+        let mut col1_list = column![
+            text(format!("ÜST DİZİN ({})", parent_title))
+                .size(10.5)
+                .color(palette.text_muted.to_iced()),
+        ]
+        .spacing(3);
+
+        for (name, path) in siblings {
+            let is_current = path == self.current_dir;
+            let btn = button(
+                row![
+                    text(Icon::FOLDER)
+                        .font(LUCIDE_FONT)
+                        .size(13.5)
+                        .color(if is_current {
+                            Color::WHITE
+                        } else {
+                            palette.primary.to_iced()
+                        }),
+                    text(name)
+                        .size(12.0)
+                        .color(if is_current {
+                            Color::WHITE
+                        } else {
+                            palette.text_primary.to_iced()
+                        })
+                        .width(Length::Fill),
+                    text(Icon::CHEVRON_RIGHT)
+                        .font(LUCIDE_FONT)
+                        .size(11.0)
+                        .color(if is_current {
+                            Color::WHITE
+                        } else {
+                            palette.text_muted.to_iced()
+                        }),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding([5, 8])
+            .on_press(Message::NavigateTo(path))
+            .style(move |_, status| {
+                if is_current {
+                    primary_button_style(palette, status)
+                } else {
+                    secondary_button_style(palette, status)
+                }
+            });
+            col1_list = col1_list.push(btn);
+        }
+
+        // Column 2: Current directory entries
+        let current_title = self
+            .current_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "/".to_string());
+
+        let mut col2_list = column![
+            text(format!(
+                "AKTİF KLASÖR: {} ({})",
+                current_title,
+                self.entries.len()
+            ))
+            .size(10.5)
+            .color(palette.primary.to_iced()),
+        ]
+        .spacing(3);
+
+        for (idx, entry) in self.entries.iter().enumerate() {
+            let is_selected = self.selected_index == Some(idx);
+            let icon_ch = Self::entry_icon(entry.kind);
+            let accent = Self::entry_accent_color(entry, palette);
+            let btn = button(
+                row![
+                    text(icon_ch)
+                        .font(LUCIDE_FONT)
+                        .size(14.0)
+                        .color(if is_selected { Color::WHITE } else { accent }),
+                    text(entry.name.clone())
+                        .size(12.0)
+                        .color(if is_selected {
+                            Color::WHITE
+                        } else {
+                            palette.text_primary.to_iced()
+                        })
+                        .width(Length::Fill),
+                    if entry.is_dir {
+                        text(Icon::CHEVRON_RIGHT)
+                            .font(LUCIDE_FONT)
+                            .size(11.0)
+                            .color(if is_selected {
+                                Color::WHITE
+                            } else {
+                                palette.text_muted.to_iced()
+                            })
+                    } else {
+                        text(format_size(entry.size))
+                            .size(10.5)
+                            .font(iced::Font::MONOSPACE)
+                            .color(if is_selected {
+                                Color::WHITE
+                            } else {
+                                palette.text_muted.to_iced()
+                            })
+                    },
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding([5, 8])
+            .on_press(Message::SelectIndex(idx))
+            .style(move |_, status| {
+                if is_selected {
+                    primary_button_style(palette, status)
+                } else {
+                    secondary_button_style(palette, status)
+                }
+            });
+            col2_list = col2_list.push(mouse_area(btn).on_right_press(Message::OpenContextMenu(idx)));
+        }
+
+        // Column 3: Child directory preview OR file inspector preview
+        let col3_widget: Element<'_, Message> = if let Some(selected) = self.selected_entry() {
+            if selected.is_dir {
+                let children = read_directory(
+                    &selected.path,
+                    self.config.show_hidden,
+                    "",
+                    self.config.sort_column,
+                    self.config.sort_direction,
+                )
+                .unwrap_or_default();
+
+                let mut child_col = column![
+                    text(format!("ALT KLASÖR: {} ({})", selected.name, children.len()))
+                        .size(10.5)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(3);
+
+                if children.is_empty() {
+                    child_col = child_col.push(
+                        text("(Boş klasör)")
+                            .size(11.5)
+                            .color(palette.text_muted.to_iced()),
+                    );
+                } else {
+                    for child in children.into_iter().take(40) {
+                        let c_icon = Self::entry_icon(child.kind);
+                        let c_accent = Self::entry_accent_color(&child, palette);
+                        let target_path = if child.is_dir {
+                            child.path.clone()
+                        } else {
+                            selected.path.clone()
+                        };
+                        let c_btn = button(
+                            row![
+                                text(c_icon)
+                                    .font(LUCIDE_FONT)
+                                    .size(13.5)
+                                    .color(c_accent),
+                                text(child.name)
+                                    .size(11.5)
+                                    .color(palette.text_primary.to_iced())
+                                    .width(Length::Fill),
+                                text(if child.is_dir {
+                                    "›".to_string()
+                                } else {
+                                    format_size(child.size)
+                                })
+                                .size(10.5)
+                                .color(palette.text_muted.to_iced()),
+                            ]
+                            .spacing(6)
+                            .align_y(Alignment::Center),
+                        )
+                        .width(Length::Fill)
+                        .padding([4, 8])
+                        .on_press(Message::NavigateTo(target_path))
+                        .style(move |_, status| secondary_button_style(palette, status));
+                        child_col = child_col.push(c_btn);
+                    }
+                }
+                scrollable(child_col).height(Length::Fill).into()
+            } else {
+                self.view_inspector_pane(palette)
+            }
+        } else {
+            container(
+                text("Önizleme için bir öğe seçin")
+                    .size(12.0)
+                    .color(palette.text_muted.to_iced()),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
+        };
+
+        let col_box = |inner: Element<'a, Message>, portion: u16| -> Element<'a, Message> {
+            container(inner)
+                .width(Length::FillPortion(portion))
+                .height(Length::Fill)
+                .padding(Spacing::SM)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        0.07, 0.08, 0.11, 0.65,
+                    ))),
+                    border: Border {
+                        color: Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                        width: 1.0,
+                        radius: border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                })
+                .into()
+        };
+
+        container(
+            row![
+                col_box(scrollable(col1_list).height(Length::Fill).into(), 2),
+                col_box(scrollable(col2_list).height(Length::Fill).into(), 3),
+                col_box(col3_widget, 3),
+            ]
+            .spacing(Spacing::XS)
+            .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Spacing::XS)
+        .into()
+    }
+
     fn view_right_explorer_pane(&self, palette: Palette) -> Element<'_, Message> {
         let entries_count = self.right_pane.entries.len();
         let header = row![
@@ -2565,7 +3576,7 @@ impl CortenFilesApp {
         for (idx, entry) in self.right_pane.entries.iter().enumerate() {
             let is_selected = self.right_pane.selected_index == Some(idx);
             let icon_char = Self::entry_icon(entry.kind);
-            let icon_color = Self::entry_color(entry.kind, palette);
+            let icon_color = Self::entry_accent_color(entry, palette);
             let r = row![
                 text(icon_char)
                     .font(LUCIDE_FONT)
@@ -2619,43 +3630,187 @@ impl CortenFilesApp {
 
     fn view_inspector_pane(&self, palette: Palette) -> Element<'_, Message> {
         let content: Element<'_, Message> = if let Some(ref info) = self.inspection {
+            let selected = self.selected_entry();
+            let icon_ch = selected
+                .map(|e| Self::entry_icon(e.kind))
+                .unwrap_or(Icon::APP_WINDOW);
+            let accent = selected
+                .map(|e| Self::entry_accent_color(e, palette))
+                .unwrap_or_else(|| palette.primary.to_iced());
+
+            let hero_header = container(
+                row![
+                    container(
+                        text(icon_ch)
+                            .font(LUCIDE_FONT)
+                            .size(22)
+                            .color(accent),
+                    )
+                    .padding([8, 10])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba(
+                            accent.r, accent.g, accent.b, 0.16,
+                        ))),
+                        border: Border {
+                            color: Color::from_rgba(accent.r, accent.g, accent.b, 0.35),
+                            width: 1.0,
+                            radius: border::Radius::from(Radius::MD),
+                        },
+                        ..Default::default()
+                    }),
+                    column![
+                        text(info.name.clone())
+                            .size(13.5)
+                            .color(palette.text_primary.to_iced()),
+                        row![
+                            container(
+                                text(info.extension_upper.clone())
+                                    .size(9.5)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(accent),
+                            )
+                            .padding([1, 6])
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(Color::from_rgba(
+                                    accent.r, accent.g, accent.b, 0.14,
+                                ))),
+                                border: Border {
+                                    radius: border::Radius::from(Radius::FULL),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            }),
+                            text(info.kind_label)
+                                .size(11.0)
+                                .color(palette.text_muted.to_iced()),
+                        ]
+                        .spacing(6)
+                        .align_y(Alignment::Center),
+                    ]
+                    .spacing(3),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+            )
+            .padding([8, 10])
+            .width(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.03,
+                ))),
+                border: Border {
+                    color: Color::from_rgba(1.0, 1.0, 1.0, 0.07),
+                    width: 1.0,
+                    radius: border::Radius::from(Radius::MD),
+                },
+                ..Default::default()
+            });
+
             let mut col = column![
                 text("DENETÇİ (INSPECTOR)")
-                    .size(Typography::CAPTION)
+                    .size(10.5)
                     .color(palette.text_muted.to_iced()),
-                text(info.name.clone())
-                    .size(Typography::TITLE_SM)
-                    .color(palette.primary.to_iced()),
-                Self::meta_row("Tür", info.kind_label, palette),
+                hero_header,
                 Self::meta_row("Boyut", &info.size_display, palette),
-                Self::meta_row("İzinler", &info.permissions, palette),
+                Self::meta_row("Erişim", info.human_permissions, palette),
+                Self::meta_row("Mod", &info.permissions, palette),
                 Self::meta_row("Değiştirilme", &info.modified_display, palette),
-                Self::meta_row("Tam Yol", &info.full_path, palette),
             ]
-            .spacing(Spacing::XS)
+            .spacing(5)
             .height(Length::Fill);
 
-            if let Some(ref preview) = info.text_preview {
+            if let Some((w, h)) = info.image_dimensions {
+                col = col.push(Self::meta_row(
+                    "Çözünürlük",
+                    &format!("{w} × {h} px"),
+                    palette,
+                ));
+            }
+            if let Some(lines) = info.line_count {
+                col = col.push(Self::meta_row("Satır Sayısı", &format!("{lines} satır"), palette));
+            }
+
+            // Image thumbnail OR Audio Waveform OR Line-numbered Code Preview
+            if let Some(img_path) = selected.and_then(|e| fs_ops::get_image_preview_path(&e.path))
+            {
+                col = col.push(
+                    container(
+                        iced::widget::image(iced::widget::image::Handle::from_path(img_path))
+                            .width(Length::Fill)
+                            .height(Length::Fixed(130.0))
+                            .content_fit(iced::ContentFit::Contain),
+                    )
+                    .padding(6)
+                    .width(Length::Fill)
+                    .style(move |_| input_style(palette)),
+                );
+                col = col.push(vertical_space());
+            } else if selected.map(|e| e.kind == EntryKind::AudioVideo).unwrap_or(false) {
+                // Audio / Media Waveform Visual Card
+                let mut wave_row = row![].spacing(3).align_y(Alignment::Center);
+                for h in [10.0, 18.0, 26.0, 14.0, 30.0, 22.0, 12.0, 28.0, 20.0, 15.0, 24.0, 12.0, 19.0, 25.0, 14.0, 10.0] {
+                    wave_row = wave_row.push(
+                        container(row![])
+                            .width(Length::Fixed(4.0))
+                            .height(Length::Fixed(h))
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(accent)),
+                                border: Border {
+                                    radius: border::Radius::from(Radius::FULL),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            }),
+                    );
+                }
                 col = col
-                    .push(vertical_space().height(Spacing::XS))
                     .push(
-                        text("CANLI ÖNİZLEME")
-                            .size(Typography::CAPTION)
+                        container(
+                            column![
+                                text("MEDYA AKUSTİK ÖNİZLEME")
+                                    .size(9.5)
+                                    .color(palette.text_muted.to_iced()),
+                                wave_row,
+                            ]
+                            .spacing(8)
+                            .align_x(Alignment::Center),
+                        )
+                        .padding(10)
+                        .width(Length::Fill)
+                        .center_x(Length::Fill)
+                        .style(move |_| input_style(palette)),
+                    )
+                    .push(vertical_space());
+            } else if let Some(ref preview) = info.text_preview {
+                let mut code_lines = column![].spacing(2);
+                for (ln, line_txt) in preview.lines().take(24).enumerate() {
+                    code_lines = code_lines.push(
+                        row![
+                            text(format!("{:>2}", ln + 1))
+                                .font(iced::Font::MONOSPACE)
+                                .size(10.0)
+                                .color(Color::from_rgba(1.0, 1.0, 1.0, 0.28))
+                                .width(Length::Fixed(20.0)),
+                            text(line_txt.to_string())
+                                .font(iced::Font::MONOSPACE)
+                                .size(11.0)
+                                .color(palette.text_primary.to_iced()),
+                        ]
+                        .spacing(6),
+                    );
+                }
+                col = col
+                    .push(
+                        text("KOD & METİN ÖNİZLEME")
+                            .size(10.0)
                             .color(palette.text_muted.to_iced()),
                     )
                     .push(
-                        container(
-                            scrollable(
-                                text(preview.clone())
-                                    .size(12)
-                                    .color(palette.text_primary.to_iced()),
-                            )
-                            .height(Length::Fill),
-                        )
-                        .padding(Spacing::SM)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .style(move |_| input_style(palette)),
+                        container(scrollable(code_lines).height(Length::Fill))
+                            .padding(8)
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .style(move |_| input_style(palette)),
                     );
             } else {
                 col = col.push(vertical_space());
@@ -2669,21 +3824,26 @@ impl CortenFilesApp {
                 || info.permissions.contains('x');
 
             if is_script_or_binary {
-                col = col.push(
-                    Self::small_button(
-                        "⚡ Corten AI Güvenlik Analizi",
-                        "",
-                        Message::AnalyzeWithAi(PathBuf::from(&info.full_path)),
-                        palette,
-                    )
-                );
+                col = col.push(Self::small_button(
+                    "⚡ Corten AI Güvenlik Analizi",
+                    "",
+                    Message::AnalyzeWithAi(PathBuf::from(&info.full_path)),
+                    palette,
+                ));
             }
 
-            col.push(Self::accent_button(
-                "Seçili Öğeyi Aç (Enter)",
-                Message::ActivateSelected,
-                palette,
-            ))
+            col.push(
+                row![
+                    Self::small_button(
+                        "👁 Hızlı Bakış (Space)",
+                        "",
+                        Message::ToggleQuickLook,
+                        palette,
+                    ),
+                    Self::accent_button("Aç (Enter)", Message::ActivateSelected, palette),
+                ]
+                .spacing(6),
+            )
             .into()
         } else {
             column![
@@ -2699,7 +3859,7 @@ impl CortenFilesApp {
         };
 
         container(content)
-            .width(Length::Fixed(290.0))
+            .width(Length::Fixed(288.0))
             .height(Length::Fill)
             .padding(Spacing::SM)
             .style(move |_| card_style(palette))
@@ -2716,7 +3876,7 @@ impl CortenFilesApp {
                 "Pano (Kes): {}",
                 p.file_name().unwrap_or_default().to_string_lossy()
             ),
-            None => "Kısayollar: Enter Aç | Backspace Üst | F2 Adlandır | F4 Terminal | Del Çöp | Ctrl+H Gizli".into(),
+            None => "Kısayollar: Enter Aç | Space Önizle | F2 Adlandır | F3 İkili | F4 Terminal | Ctrl+1/2/3 Görünüm".into(),
         };
 
         container(
@@ -2745,7 +3905,7 @@ impl CortenFilesApp {
         .into()
     }
 
-    fn meta_row<'a>(label: &'a str, val: &'a str, palette: Palette) -> Element<'a, Message> {
+    fn meta_row<'a>(label: &'a str, val: &str, palette: Palette) -> Element<'a, Message> {
         row![
             text(format!("{label}:"))
                 .size(Typography::CAPTION)
@@ -2854,5 +4014,39 @@ impl CortenFilesApp {
             EntryKind::Executable => palette.warning.to_iced(),
             _ => palette.text_muted.to_iced(),
         }
+    }
+
+    fn entry_accent_color(entry: &FileEntry, palette: Palette) -> Color {
+        if entry.is_dir {
+            return palette.primary.to_iced();
+        }
+        let ext = entry
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        match ext.as_str() {
+            "rs" | "toml" => Color::from_rgb(0.95, 0.50, 0.24), // Rust Orange
+            "py" | "ts" | "js" | "go" | "c" | "cpp" | "h" => Color::from_rgb(0.32, 0.68, 0.96), // Code Cyan/Blue
+            "zip" | "tar" | "gz" | "xz" | "7z" | "zst" => palette.warning.to_iced(), // Archive Amber
+            "png" | "jpg" | "jpeg" | "webp" | "svg" | "gif" => Color::from_rgb(0.74, 0.48, 0.96), // Image Amethyst
+            "mp3" | "flac" | "wav" | "ogg" | "mp4" | "mkv" => palette.success.to_iced(), // Media Teal
+            "pdf" | "md" | "doc" | "docx" => Color::from_rgb(0.94, 0.40, 0.44), // Document Coral
+            _ => Self::entry_color(entry.kind, palette),
+        }
+    }
+
+    fn entry_badge_text(entry: &FileEntry) -> String {
+        if entry.is_dir {
+            return "DIR".to_string();
+        }
+        entry
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .filter(|s| !s.is_empty() && s.len() <= 5)
+            .map(|s| s.to_ascii_uppercase())
+            .unwrap_or_else(|| entry.kind.badge().to_string())
     }
 }

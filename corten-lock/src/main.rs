@@ -8,7 +8,11 @@ use auth::PamAuth;
 use chrono::Local;
 use corten_auth::AuthController;
 use corten_config::{AppearanceConfig, ConfigManager};
-use corten_theme::{Icon, Palette, PatinaVariant, Radius, ThemeMode, LUCIDE_FONT, LUCIDE_FONT_BYTES};
+use corten_theme::iced_styles::acrylic_glass_style;
+use corten_theme::{
+    Icon, Palette, PatinaVariant, Radius, ThemeMode, Transition, LUCIDE_FONT, LUCIDE_FONT_BYTES,
+    NOTO_SANS, NOTO_SANS_BYTES,
+};
 use iced::widget::{button, container, image, row, stack, text};
 use iced::{event, Alignment, Element, Event, Length, Padding, Subscription, Task};
 use iced_sessionlock::actions::UnLockAction;
@@ -42,8 +46,11 @@ pub fn main() -> Result<(), iced_sessionlock::Error> {
     CortenLockApp::run(Settings {
         id: Some("corten-lock".into()),
         flags: current_user,
-        fonts: vec![Cow::Borrowed(LUCIDE_FONT_BYTES)],
-        default_font: iced::Font::default(),
+        fonts: vec![
+            Cow::Borrowed(LUCIDE_FONT_BYTES),
+            Cow::Borrowed(NOTO_SANS_BYTES),
+        ],
+        default_font: NOTO_SANS,
         default_text_size: iced::Pixels(14.0),
         antialiasing: true,
     })?;
@@ -64,6 +71,8 @@ pub struct CortenLockApp {
     battery_info: Option<(u8, bool)>,
     network_online: bool,
     shake_count: u8,
+    shake_transition: Transition,
+    entrance_transition: Transition,
     tick_count: u32,
     active_patina: PatinaVariant,
 }
@@ -326,7 +335,7 @@ impl CortenLockApp {
         let enter_btn = button(
             text("↵")
                 .size(15.0)
-                .color(pal.background.to_iced()),
+                .color(pal.on_primary().to_iced()),
         )
         .width(Length::Fixed(50.0))
         .height(Length::Fixed(34.0))
@@ -482,6 +491,8 @@ impl MultiApplication for CortenLockApp {
                 battery_info,
                 network_online,
                 shake_count: 0,
+                shake_transition: Transition::completed(360),
+                entrance_transition: Transition::new(280),
                 tick_count: 0,
                 active_patina,
             },
@@ -502,7 +513,14 @@ impl MultiApplication for CortenLockApp {
 
     fn subscription(&self) -> Subscription<Self::Message> {
         let events = event::listen().map(Message::IcedEvent);
-        let timer = iced::time::every(Duration::from_millis(100)).map(|_| Message::Tick);
+        let interval = if !self.shake_transition.is_complete()
+            || !self.entrance_transition.is_complete()
+        {
+            Duration::from_millis(16)
+        } else {
+            Duration::from_millis(100)
+        };
+        let timer = iced::time::every(interval).map(|_| Message::Tick);
         Subscription::batch(vec![events, timer])
     }
 
@@ -510,6 +528,8 @@ impl MultiApplication for CortenLockApp {
         match message {
             Message::Tick => {
                 self.tick_count = self.tick_count.wrapping_add(1);
+                self.shake_transition.tick(16);
+                self.entrance_transition.tick(16);
                 if self.shake_count > 0 {
                     self.shake_count -= 1;
                 }
@@ -576,10 +596,13 @@ impl MultiApplication for CortenLockApp {
             Message::AuthResult(success) => {
                 self.auth.complete(success);
                 if success {
+                    corten_services::acoustic::play(corten_services::acoustic::AcousticCue::Unlock);
                     info!("Authentication successful, unlocking Corten session!");
                     return Task::done(Message::Unlock);
                 } else {
+                    corten_services::acoustic::play(corten_services::acoustic::AcousticCue::AuthFail);
                     self.shake_count = 6;
+                    self.shake_transition.restart();
                 }
             }
             Message::LockMediaPlayPause(bus) => {
@@ -727,19 +750,29 @@ impl MultiApplication for CortenLockApp {
                 .color(palette.text_primary.to_iced())
         };
 
-        let eye_icon = if self.show_password { "●" } else { "○" };
+        let eye_icon = if self.show_password {
+            Icon::EYE_OFF
+        } else {
+            Icon::EYE
+        };
         let reveal_btn = button(
             text(eye_icon)
-                .size(15.0)
-                .color(palette.text_muted.to_iced()),
+                .font(LUCIDE_FONT)
+                .size(14.0)
+                .color(if self.show_password {
+                    palette.primary.to_iced()
+                } else {
+                    palette.text_muted.to_iced()
+                }),
         )
         .padding([4, 8])
         .style(|_, _| button::Style::default())
         .on_press(Message::TogglePasswordReveal);
 
         let kbd_btn = button(
-            text("⌨")
-                .size(16.0)
+            text(Icon::KEYBOARD)
+                .font(LUCIDE_FONT)
+                .size(15.0)
                 .color(if self.show_virtual_keyboard {
                     palette.primary.to_iced()
                 } else {
@@ -753,7 +786,7 @@ impl MultiApplication for CortenLockApp {
         let submit_btn = button(
             text(if self.auth.is_pending() { "…" } else { "↵" })
                 .size(18.0)
-                .color(palette.background.to_iced()),
+                .color(palette.on_primary().to_iced()),
         )
         .padding([8, 14])
         .style(move |_, _| button::Style {
@@ -808,34 +841,85 @@ impl MultiApplication for CortenLockApp {
             ..Default::default()
         });
 
-        let shake_offset: f32 = match self.shake_count {
-            5 | 1 => 10.0,
-            4 | 2 => -10.0,
-            3 => 6.0,
-            _ => 0.0,
+        let shake_offset: f32 = if !self.shake_transition.is_complete() {
+            self.shake_transition.damped_shake(14.0)
+        } else {
+            match self.shake_count {
+                5 | 1 => 10.0,
+                4 | 2 => -10.0,
+                3 => 6.0,
+                _ => 0.0,
+            }
         };
 
         let shaken_input_box = container(input_box).padding(Padding {
             top: 0.0,
-            right: (10.0 - shake_offset).max(0.0),
+            right: (14.0 - shake_offset).max(0.0),
             bottom: 0.0,
-            left: (10.0 + shake_offset).max(0.0),
+            left: (14.0 + shake_offset).max(0.0),
         });
 
-        let status_feedback = if self.auth.is_pending() {
+        let status_feedback: Element<'_, Self::Message> = if self.auth.is_pending() {
             text("Doğrulanıyor...")
                 .size(13.0)
                 .color(palette.text_muted.to_iced())
+                .into()
         } else if self.auth.has_failed() {
-            text("Hatalı parola, lütfen tekrar deneyin")
-                .size(13.0)
-                .color(palette.danger.to_iced())
+            row![
+                text(Icon::SHIELD)
+                    .font(LUCIDE_FONT)
+                    .size(13.0)
+                    .color(palette.danger.to_iced()),
+                text("Hatalı parola, lütfen tekrar deneyin")
+                    .size(13.0)
+                    .color(palette.danger.to_iced()),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into()
         } else if self.caps_lock_on {
-            text("⇪ Caps Lock Açık")
-                .size(12.0)
-                .color(palette.warning.to_iced())
+            container(
+                row![
+                    text(Icon::SHIELD)
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
+                        .color(palette.warning.to_iced()),
+                    text("Caps Lock Açık — Büyük Harf Etkin")
+                        .size(12.0)
+                        .color(palette.warning.to_iced()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([3, 10])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    palette.warning.r,
+                    palette.warning.g,
+                    palette.warning.b,
+                    0.15,
+                ))),
+                border: iced::Border {
+                    color: palette.warning.to_iced(),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(8.0),
+                },
+                ..Default::default()
+            })
+            .into()
         } else {
-            text("").size(13.0).color(iced::Color::TRANSPARENT)
+            row![
+                text(Icon::LOCK)
+                    .font(LUCIDE_FONT)
+                    .size(11.0)
+                    .color(palette.text_muted.to_iced()),
+                text("PAM Oturum Kilidi Aktif")
+                    .size(11.0)
+                    .color(palette.text_muted.to_iced()),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center)
+            .into()
         };
 
         let center_card = container(
@@ -844,28 +928,8 @@ impl MultiApplication for CortenLockApp {
                 .align_x(Alignment::Center),
         )
         .padding([28, 36])
-        .width(Length::Fixed(380.0))
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                0.09, 0.10, 0.12, 0.88,
-            ))),
-            border: iced::Border {
-                color: iced::Color::from_rgba(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.35,
-                ),
-                width: 1.5,
-                radius: iced::border::Radius::from(24.0),
-            },
-            shadow: iced::Shadow {
-                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.55),
-                offset: iced::Vector::new(0.0, 10.0),
-                blur_radius: 32.0,
-            },
-            ..Default::default()
-        });
+        .width(Length::Fixed(390.0))
+        .style(move |_| acrylic_glass_style(palette, 24.0));
 
         // ==================== BOTTOM ROW ====================
         let left_media: Element<'_, Self::Message> = if let Some(ref player) = self.media_track {

@@ -1479,38 +1479,17 @@ pub mod a11y {
         ScreenLock,
     }
 
-    /// Plays a lightweight accessibility sound feedback cue asynchronously.
-    /// Tries `canberra-gtk-play`, `paplay` stereo system sounds, or fallback.
+    /// Plays a lightweight accessibility & tactile sound feedback cue asynchronously.
+    /// Uses the Corten Acoustic Signature WAV synthesizer (`crate::acoustic`).
     pub fn play_sound_cue(cue: SoundCue) {
-        let sound_name = match cue {
-            SoundCue::WorkspaceSwitch => "desktop-switch",
-            SoundCue::WindowClose => "window-close",
-            SoundCue::WindowFocus => "window-attention",
-            SoundCue::Screenshot => "screen-capture",
-            SoundCue::ScreenLock => "system-lock-screen",
+        let acoustic_cue = match cue {
+            SoundCue::WorkspaceSwitch => crate::acoustic::AcousticCue::WindowSnap,
+            SoundCue::WindowClose => crate::acoustic::AcousticCue::ToggleClick,
+            SoundCue::WindowFocus => crate::acoustic::AcousticCue::ToggleClick,
+            SoundCue::Screenshot => crate::acoustic::AcousticCue::Shutter,
+            SoundCue::ScreenLock => crate::acoustic::AcousticCue::Unlock,
         };
-
-        std::thread::spawn(move || {
-            // 1. Try canberra-gtk-play
-            if let Ok(mut child) = Command::new("canberra-gtk-play")
-                .arg("-i")
-                .arg(sound_name)
-                .spawn()
-            {
-                let _ = child.wait();
-                return;
-            }
-            // 2. Try paplay with standard system sound effects
-            let path = format!("/usr/share/sounds/freedesktop/stereo/{sound_name}.oga");
-            if std::path::Path::new(&path).exists() {
-                if let Ok(mut child) = Command::new("paplay").arg(&path).spawn() {
-                    let _ = child.wait();
-                    return;
-                }
-            }
-            // 3. Terminal bell fallback
-            eprint!("\x07");
-        });
+        crate::acoustic::play(acoustic_cue);
     }
 
     /// Speaks an accessibility announcement to the user using Speech Dispatcher (`spd-say`)
@@ -1985,6 +1964,7 @@ pub mod a11y {
     }
 }
 
+pub mod acoustic;
 pub mod color_management;
 
 #[cfg(test)]
@@ -2165,5 +2145,29 @@ mod tests {
         assert_eq!(parsed.device_class, "Monitör (Ekran)");
         assert_eq!(parsed.color_space, "RGB");
         assert_eq!(parsed.version_major, 2);
+    }
+
+    #[test]
+    fn test_acoustic_wav_synthesis_and_headers() {
+        use acoustic::{ensure_cached_wav, AcousticCue};
+
+        for cue in [
+            AcousticCue::ToggleClick,
+            AcousticCue::WindowSnap,
+            AcousticCue::Shutter,
+            AcousticCue::Unlock,
+            AcousticCue::AuthFail,
+            AcousticCue::Notification,
+        ] {
+            let wav = cue.synthesize_wav();
+            assert!(wav.len() > 44, "WAV must contain RIFF header + PCM samples");
+            assert_eq!(&wav[0..4], b"RIFF");
+            assert_eq!(&wav[8..12], b"WAVE");
+            assert_eq!(&wav[12..16], b"fmt ");
+            assert_eq!(&wav[36..40], b"data");
+
+            let cached = ensure_cached_wav(cue).expect("should write cached wav to temp_dir");
+            assert!(cached.exists());
+        }
     }
 }

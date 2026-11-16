@@ -13,6 +13,7 @@ pub enum ViewMode {
     #[default]
     List,
     Grid,
+    Columns,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -161,9 +162,13 @@ pub struct EntryInspection {
     pub name: String,
     pub full_path: String,
     pub kind_label: &'static str,
+    pub extension_upper: String,
     pub size_display: String,
     pub permissions: String,
+    pub human_permissions: &'static str,
     pub modified_display: String,
+    pub image_dimensions: Option<(u32, u32)>,
+    pub line_count: Option<usize>,
     pub text_preview: Option<String>,
 }
 
@@ -173,6 +178,7 @@ pub struct SidebarPlace {
     pub path: PathBuf,
     pub is_trash: bool,
     pub is_mount: bool,
+    pub item_count: Option<usize>,
 }
 
 pub fn classify_entry(path: &Path, is_dir: bool, mode: u32) -> EntryKind {
@@ -341,21 +347,136 @@ pub fn inspect_entry(entry: &FileEntry) -> EntryInspection {
         format_size(entry.size)
     };
 
+    let extension_upper = if entry.is_dir {
+        "KLASÖR".to_string()
+    } else {
+        entry
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_uppercase())
+            .unwrap_or_else(|| entry.kind.badge().to_string())
+    };
+
+    let human_permissions = describe_human_permissions(&entry.permissions, entry.is_dir);
+
+    let image_dimensions = if entry.is_image() {
+        parse_image_dimensions(&entry.path)
+    } else {
+        None
+    };
+
     let text_preview = if !entry.is_dir && entry.size <= 256 * 1024 {
         read_text_preview(&entry.path, 55)
     } else {
         None
     };
 
+    let line_count = text_preview.as_ref().map(|t| t.lines().count());
+
     EntryInspection {
         name: entry.name.clone(),
         full_path: entry.path.to_string_lossy().to_string(),
         kind_label: entry.kind.label(),
+        extension_upper,
         size_display,
         permissions: entry.permissions.clone(),
+        human_permissions,
         modified_display: format_relative_time(entry.modified_secs),
+        image_dimensions,
+        line_count,
         text_preview,
     }
+}
+
+pub fn describe_human_permissions(perms: &str, is_dir: bool) -> &'static str {
+    let chars: Vec<char> = perms.chars().collect();
+    let owner_r = chars.get(1) == Some(&'r');
+    let owner_w = chars.get(2) == Some(&'w');
+    let owner_x = chars.get(3) == Some(&'x');
+    if !is_dir && owner_x {
+        "Çalıştırılabilir (Executable)"
+    } else if owner_r && owner_w {
+        "Okuma & Yazma"
+    } else if owner_r {
+        "Salt Okunur (Read-Only)"
+    } else {
+        "Kısıtlı Erişim"
+    }
+}
+
+pub fn parse_image_dimensions(path: &Path) -> Option<(u32, u32)> {
+    let mut file = fs::File::open(path).ok()?;
+    let mut header = [0u8; 32];
+    let n = file.read(&mut header).ok()?;
+    if n >= 24 && &header[0..8] == b"\x89PNG\r\n\x1a\n" {
+        let w = u32::from_be_bytes([header[16], header[17], header[18], header[19]]);
+        let h = u32::from_be_bytes([header[20], header[21], header[22], header[23]]);
+        if w > 0 && h > 0 {
+            return Some((w, h));
+        }
+    }
+    if n >= 10 && (&header[0..6] == b"GIF87a" || &header[0..6] == b"GIF89a") {
+        let w = u16::from_le_bytes([header[6], header[7]]) as u32;
+        let h = u16::from_le_bytes([header[8], header[9]]) as u32;
+        if w > 0 && h > 0 {
+            return Some((w, h));
+        }
+    }
+    if n >= 26 && &header[0..2] == b"BM" {
+        let w = i32::from_le_bytes([header[18], header[19], header[20], header[21]]).unsigned_abs();
+        let h = i32::from_le_bytes([header[22], header[23], header[24], header[25]]).unsigned_abs();
+        if w > 0 && h > 0 {
+            return Some((w, h));
+        }
+    }
+    None
+}
+
+pub fn sibling_directories(dir: &Path, show_hidden: bool) -> Vec<(String, PathBuf)> {
+    let parent = dir.parent().unwrap_or(dir);
+    let mut dirs = Vec::new();
+    if let Ok(rd) = fs::read_dir(parent) {
+        for item in rd.flatten() {
+            let p = item.path();
+            if p.is_dir() {
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if !show_hidden && name.starts_with('.') {
+                    continue;
+                }
+                if !name.is_empty() {
+                    dirs.push((name, p));
+                }
+            }
+        }
+    }
+    dirs.sort_by_key(|a| a.0.to_lowercase());
+    dirs.truncate(18);
+    dirs
+}
+
+pub fn query_disk_usage(path: &Path) -> Option<(u64, u64, f32)> {
+    let out = Command::new("df")
+        .args(["-B1", "--output=used,size"])
+        .arg(path)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let data_line = text.lines().nth(1)?;
+    let mut parts = data_line.split_whitespace();
+    let used: u64 = parts.next()?.parse().ok()?;
+    let total: u64 = parts.next()?.parse().ok()?;
+    if total == 0 {
+        return None;
+    }
+    let ratio = (used as f64 / total as f64).clamp(0.0, 1.0) as f32;
+    Some((used, total, ratio))
 }
 
 fn read_text_preview(path: &Path, max_lines: usize) -> Option<String> {
@@ -390,6 +511,12 @@ pub fn trash_info_dir() -> PathBuf {
     }
 }
 
+fn quick_dir_count(path: &Path) -> Option<usize> {
+    fs::read_dir(path)
+        .ok()
+        .map(|rd| rd.take(500).flatten().filter(|e| !e.file_name().to_string_lossy().starts_with('.')).count())
+}
+
 pub fn standard_places() -> Vec<SidebarPlace> {
     let mut places = Vec::new();
     let home = directories::BaseDirs::new()
@@ -401,6 +528,7 @@ pub fn standard_places() -> Vec<SidebarPlace> {
         path: home.clone(),
         is_trash: false,
         is_mount: false,
+        item_count: quick_dir_count(&home),
     });
 
     for (label, rel) in [
@@ -412,22 +540,26 @@ pub fn standard_places() -> Vec<SidebarPlace> {
     ] {
         let candidate = home.join(rel);
         if candidate.exists() {
+            let count = quick_dir_count(&candidate);
             places.push(SidebarPlace {
                 label: label.into(),
                 path: candidate,
                 is_trash: false,
                 is_mount: false,
+                item_count: count,
             });
         }
     }
 
     let trash = trash_files_dir();
     let _ = fs::create_dir_all(&trash);
+    let trash_count = quick_dir_count(&trash);
     places.push(SidebarPlace {
         label: "Çöp Kutusu".into(),
         path: trash,
         is_trash: true,
         is_mount: false,
+        item_count: trash_count,
     });
 
     for mount in discover_mounts() {
@@ -455,11 +587,13 @@ pub fn discover_mounts() -> Vec<SidebarPlace> {
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| "Disk".into());
+                    let count = quick_dir_count(&p);
                     mounts.push(SidebarPlace {
                         label: name,
                         path: p,
                         is_trash: false,
                         is_mount: true,
+                        item_count: count,
                     });
                 }
             }
@@ -915,6 +1049,35 @@ mod tests {
         let restored = restore_from_trash_in(&trashed, &trash_info).unwrap();
         assert!(restored.exists());
         assert_eq!(fs::read_to_string(&restored).unwrap(), "# Corten Files");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sibling_directories_and_enriched_inspection_work() {
+        let tmp = std::env::temp_dir().join("corten_files_test_miller_inspect");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("alpha")).unwrap();
+        fs::create_dir_all(tmp.join("beta")).unwrap();
+        fs::create_dir_all(tmp.join(".hidden_dir")).unwrap();
+
+        let siblings = sibling_directories(&tmp.join("alpha"), false);
+        let names: Vec<String> = siblings.into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+
+        let png_path = tmp.join("alpha/sample.png");
+        let mut png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        png_bytes.extend_from_slice(&[0, 0, 0, 13, b'I', b'H', b'D', b'R']);
+        png_bytes.extend_from_slice(&1920u32.to_be_bytes());
+        png_bytes.extend_from_slice(&1080u32.to_be_bytes());
+        png_bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
+        fs::write(&png_path, &png_bytes).unwrap();
+
+        let entry = FileEntry::from_path(png_path).unwrap();
+        let info = inspect_entry(&entry);
+        assert_eq!(info.extension_upper, "PNG");
+        assert_eq!(info.image_dimensions, Some((1920, 1080)));
+        assert_eq!(info.human_permissions, "Okuma & Yazma");
 
         let _ = fs::remove_dir_all(&tmp);
     }

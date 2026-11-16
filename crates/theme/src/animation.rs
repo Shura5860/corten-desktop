@@ -16,6 +16,14 @@ impl Transition {
         }
     }
 
+    pub const fn completed(duration_ms: u32) -> Self {
+        Self {
+            progress: 1.0,
+            target: 1.0,
+            duration_ms: duration_ms as f32,
+        }
+    }
+
     pub fn restart(&mut self) {
         self.progress = 0.0;
         self.target = 1.0;
@@ -52,6 +60,35 @@ impl Transition {
     pub fn is_complete(self) -> bool {
         (self.progress - self.target).abs() < f32::EPSILON
     }
+
+    /// Computes staggered cascade progress (`0.0..=1.0`) for `item_index` in a list.
+    pub fn staggered(self, item_index: usize, stagger_step: f32) -> f32 {
+        let delay = (item_index.min(10) as f32 * stagger_step).clamp(0.0, 0.65);
+        let span = (1.0 - delay).max(0.15);
+        let local_p = ((self.progress - delay) / span).clamp(0.0, 1.0);
+        1.0 - (1.0 - local_p).powi(3)
+    }
+
+    /// Computes a 4-cycle exponentially damped sinusoidal shake offset (`-amplitude..=amplitude`),
+    /// settling cleanly to `0.0` when `is_complete()`.
+    pub fn damped_shake(self, amplitude: f32) -> f32 {
+        if self.is_complete() || self.progress <= 0.0 {
+            return 0.0;
+        }
+        let decay = (1.0 - self.progress).powi(2);
+        let wave = (self.progress * std::f32::consts::TAU * 3.5).sin();
+        wave * decay * amplitude
+    }
+
+    /// Smoothly interpolates `current` toward `target` by `factor` (`0.0..=1.0`), snapping when close.
+    pub fn smooth_lerp(current: f32, target: f32, factor: f32) -> f32 {
+        let diff = target - current;
+        if diff.abs() < 0.05 {
+            target
+        } else {
+            current + diff * factor.clamp(0.05, 1.0)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -84,5 +121,19 @@ mod tests {
             transition.tick(16);
         }
         assert!((transition.spring() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn staggered_and_damped_shake_settle_cleanly() {
+        let mut t = Transition::new(200);
+        assert_eq!(t.staggered(3, 0.08), 0.0);
+        t.tick(60);
+        assert!(t.damped_shake(12.0).abs() > 0.0);
+        for _ in 0..20 {
+            t.tick(16);
+        }
+        assert!(t.is_complete());
+        assert!((t.staggered(5, 0.08) - 1.0).abs() < f32::EPSILON);
+        assert_eq!(t.damped_shake(12.0), 0.0);
     }
 }

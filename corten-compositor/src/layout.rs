@@ -533,6 +533,10 @@ pub struct LayoutManager {
     workspace_windows: HashMap<usize, Vec<Window>>,
     workspace_floating: HashMap<usize, Vec<Window>>,
     active_floating: Option<Window>,
+    /// Horizontal parallax slide offset (in logical px) during workspace transitions
+    workspace_slide_offset: f32,
+    /// Tabbed window groups (each group contains >= 2 stable window IDs sharing one frame)
+    tab_groups: Vec<Vec<u64>>,
 }
 
 impl Default for LayoutManager {
@@ -562,6 +566,8 @@ impl LayoutManager {
             workspace_windows: HashMap::new(),
             workspace_floating: HashMap::new(),
             active_floating: None,
+            workspace_slide_offset: 0.0,
+            tab_groups: Vec::new(),
             bsp_tree: None,
             split_direction: SplitDirection::Horizontal,
         }
@@ -910,6 +916,8 @@ impl LayoutManager {
         self.active_index = self.active_index.min(self.windows.len().saturating_sub(1));
         self.active_floating = None;
         self.animated_rects.clear();
+        let slide_dir = if workspace > old { 1.0_f32 } else { -1.0_f32 };
+        self.workspace_slide_offset = slide_dir * 160.0;
     }
 
     /// Return count of managed windows
@@ -1319,7 +1327,7 @@ impl LayoutManager {
             .cloned()
     }
 
-    /// Set or update the position/size of a floating window
+    /// Set or update the position/size of a floating window (and any siblings in its tab group)
     pub fn set_floating_geometry(&mut self, window: &Window, rect: Rectangle<i32, Logical>) {
         let win_id = window_stable_id(window);
         if self.floating_windows.iter().any(|w| w == window) {
@@ -1330,6 +1338,89 @@ impl LayoutManager {
             self.floating_windows.push(window.clone());
             self.floating_geometries.insert(win_id, rect);
         }
+        // Keep all siblings in the same tab group synchronized to this frame geometry
+        if let Some(group) = self.tab_groups.iter().find(|g| g.contains(&win_id)).cloned() {
+            for sibling_id in group {
+                self.floating_geometries.insert(sibling_id, rect);
+            }
+        }
+    }
+
+    /// Returns true if the window is currently managed in an active multi-window tiled layout.
+    pub fn is_window_tiled(&self, window: &Window) -> bool {
+        self.mode != LayoutMode::Floating
+            && !self.is_floating(window)
+            && self.windows.len() > 1
+    }
+
+    /// Merges `guest_id` into `host_id`'s tab group (creating a new group if `host_id` is not yet grouped).
+    pub fn merge_windows_into_tab_group(&mut self, host_id: u64, guest_id: u64) -> bool {
+        if host_id == guest_id {
+            return false;
+        }
+        self.detach_window_from_tab_group(guest_id);
+        if let Some(group) = self.tab_groups.iter_mut().find(|g| g.contains(&host_id)) {
+            if !group.contains(&guest_id) {
+                group.push(guest_id);
+            }
+        } else {
+            self.tab_groups.push(vec![host_id, guest_id]);
+        }
+        if let Some(&host_rect) = self.floating_geometries.get(&host_id) {
+            self.floating_geometries.insert(guest_id, host_rect);
+        }
+        true
+    }
+
+    /// Detaches `win_id` from any tab group it belongs to, removing singleton groups.
+    pub fn detach_window_from_tab_group(&mut self, win_id: u64) -> bool {
+        let mut detached = false;
+        for group in &mut self.tab_groups {
+            let before = group.len();
+            group.retain(|&id| id != win_id);
+            if group.len() != before {
+                detached = true;
+            }
+        }
+        self.tab_groups.retain(|g| g.len() >= 2);
+        detached
+    }
+
+    /// Returns the slice of window IDs in the tab group containing `win_id`, if any.
+    pub fn tab_group_for_window(&self, win_id: u64) -> Option<&[u64]> {
+        self.tab_groups
+            .iter()
+            .find(|g| g.len() >= 2 && g.contains(&win_id))
+            .map(Vec::as_slice)
+    }
+
+    /// Returns metadata `(member_id, label, is_current)` for all tabs in `win_id`'s tab group.
+    pub fn window_tabs_metadata(&self, win_id: u64) -> Vec<(u64, String, bool)> {
+        let Some(group) = self.tab_group_for_window(win_id) else {
+            return Vec::new();
+        };
+        group
+            .iter()
+            .map(|&member_id| {
+                let label = self
+                    .windows
+                    .iter()
+                    .chain(self.floating_windows.iter())
+                    .find(|w| window_stable_id(w) == member_id)
+                    .map(|w| {
+                        let (app, title) = window_metadata(w);
+                        if !title.trim().is_empty() {
+                            title.trim().to_string()
+                        } else if !app.trim().is_empty() {
+                            app.trim().to_string()
+                        } else {
+                            format!("Tab {}", member_id % 100)
+                        }
+                    })
+                    .unwrap_or_else(|| format!("Tab {}", member_id % 100));
+                (member_id, label, member_id == win_id)
+            })
+            .collect()
     }
 
     pub fn floating_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
@@ -1561,6 +1652,9 @@ impl LayoutManager {
     /// Returns true if any window is still mid-transition toward its target geometry or opacity.
     #[allow(dead_code)]
     pub fn is_animating(&self, usable_area: Rectangle<i32, Logical>) -> bool {
+        if self.workspace_slide_offset.abs() > 0.75 {
+            return true;
+        }
         let targets = self.arrange(usable_area);
         for (window, target_rect) in targets {
             let win_id = window_stable_id(&window);
@@ -1887,6 +1981,11 @@ impl LayoutManager {
 
         let spring_stiffness = 0.32; // Responsive 60-120fps smooth spring dampening factor
         let alpha_stiffness = 0.28_f32;
+        self.workspace_slide_offset *= 0.68;
+        if self.workspace_slide_offset.abs() < 0.75 {
+            self.workspace_slide_offset = 0.0;
+        }
+        let slide_x = self.workspace_slide_offset.round() as i32;
 
         for (window, target_rect) in targets {
             let win_id = window_stable_id(&window);
@@ -1929,7 +2028,7 @@ impl LayoutManager {
             } else {
                 Rectangle::new(
                     Point::from((
-                        current_entry.loc.x.round() as i32,
+                        (current_entry.loc.x.round() as i32) + slide_x,
                         current_entry.loc.y.round() as i32,
                     )),
                     Size::from((
@@ -1942,7 +2041,7 @@ impl LayoutManager {
             animated_results.push((window, final_rect));
         }
 
-        // Include floating windows centered or at their saved geometries
+        // Include floating windows centered or at their saved geometries with spring spawn/maximize physics
         for (i, window) in self.floating_windows.iter().enumerate() {
             let win_id = window_stable_id(window);
             let target_alpha = self.window_target_alpha(window);
@@ -1951,7 +2050,8 @@ impl LayoutManager {
             if (target_alpha - *alpha_entry).abs() < 0.015 {
                 *alpha_entry = target_alpha;
             }
-            let float_rect = if self.is_fullscreen(window) {
+            let is_fs = self.is_fullscreen(window);
+            let float_rect = if is_fs {
                 Rectangle::new(
                     Point::from((0, 0)),
                     Size::from((
@@ -1987,7 +2087,42 @@ impl LayoutManager {
                 self.floating_geometries.insert(win_id, initial_rect);
                 initial_rect
             };
-            animated_results.push((window.clone(), float_rect));
+
+            let target_fx = float_rect.loc.x as f32;
+            let target_fy = float_rect.loc.y as f32;
+            let target_fw = float_rect.size.w as f32;
+            let target_fh = float_rect.size.h as f32;
+
+            let current_entry = self.animated_rects.entry(win_id).or_insert_with(|| {
+                let spawn_inset_x = target_fw * 0.03;
+                let spawn_inset_y = target_fh * 0.03;
+                Rectangle::new(
+                    Point::from((target_fx + spawn_inset_x, target_fy + spawn_inset_y)),
+                    Size::from((target_fw * 0.94, target_fh * 0.94)),
+                )
+            });
+
+            current_entry.loc.x += (target_fx - current_entry.loc.x) * 0.38;
+            current_entry.loc.y += (target_fy - current_entry.loc.y) * 0.38;
+            current_entry.size.w += (target_fw - current_entry.size.w) * 0.38;
+            current_entry.size.h += (target_fh - current_entry.size.h) * 0.38;
+
+            let animated_float_rect = if is_fs {
+                float_rect
+            } else {
+                Rectangle::new(
+                    Point::from((
+                        (current_entry.loc.x.round() as i32) + slide_x,
+                        current_entry.loc.y.round() as i32,
+                    )),
+                    Size::from((
+                        current_entry.size.w.round() as i32,
+                        current_entry.size.h.round() as i32,
+                    )),
+                )
+            };
+
+            animated_results.push((window.clone(), animated_float_rect));
         }
 
         // Raise the active window to the very top of the Z-order:
@@ -2203,6 +2338,254 @@ pub fn snap_window_resize(
     snapped
 }
 
+/// Semantic context badge displayed in the window titlebar chrome.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TitlebarBadge {
+    pub label: &'static str,
+    pub is_dirty: bool,
+    pub color_rgb: [f32; 3],
+}
+
+/// Extracts a dynamic context badge and unsaved/dirty indicator from a window's `(app_id, title)`.
+pub fn extract_titlebar_badge(app_id: &str, title: &str) -> Option<TitlebarBadge> {
+    let hay = format!("{} {}", app_id, title).to_ascii_lowercase();
+    let is_dirty = title.contains('•')
+        || title.contains("[+]")
+        || title.contains("(modified)")
+        || title.ends_with(" *")
+        || title.starts_with("* ");
+
+    if hay.contains("terminal")
+        || hay.contains("alacritty")
+        || hay.contains("foot")
+        || hay.contains("kitty")
+        || hay.contains("wezterm")
+        || hay.contains("konsole")
+        || hay.contains("zsh")
+        || hay.contains("bash")
+    {
+        Some(TitlebarBadge {
+            label: "SHELL",
+            is_dirty,
+            color_rgb: [0.28, 0.92, 0.58],
+        })
+    } else if hay.contains("code")
+        || hay.contains("zed")
+        || hay.contains("nvim")
+        || hay.contains("neovide")
+        || hay.contains("cursor")
+        || hay.contains(".rs")
+    {
+        Some(TitlebarBadge {
+            label: "DEV",
+            is_dirty,
+            color_rgb: [0.95, 0.58, 0.22],
+        })
+    } else if hay.contains("spotify")
+        || hay.contains("vlc")
+        || hay.contains("mpv")
+        || hay.contains("amberol")
+        || hay.contains("rhythmbox")
+    {
+        Some(TitlebarBadge {
+            label: "AUDIO",
+            is_dirty: false,
+            color_rgb: [0.98, 0.72, 0.25],
+        })
+    } else if hay.contains("file")
+        || hay.contains("dosya")
+        || hay.contains("nautilus")
+        || hay.contains("dolphin")
+    {
+        Some(TitlebarBadge {
+            label: "FILES",
+            is_dirty,
+            color_rgb: [0.42, 0.78, 0.95],
+        })
+    } else if hay.contains("setting") || hay.contains("ayar") || hay.contains("config") {
+        Some(TitlebarBadge {
+            label: "SYS",
+            is_dirty,
+            color_rgb: [0.90, 0.48, 0.24],
+        })
+    } else if is_dirty {
+        Some(TitlebarBadge {
+            label: "EDIT",
+            is_dirty: true,
+            color_rgb: [0.95, 0.58, 0.22],
+        })
+    } else {
+        None
+    }
+}
+
+/// Interactive window snap layout presets exposed in the Maximize button Snap Flyout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapZone {
+    LeftHalf,
+    RightHalf,
+    LeftTwoThirds,
+    RightOneThird,
+    TopLeftQuarter,
+    BottomRightQuarter,
+}
+
+/// Computes the exact target logical rectangle for a `SnapZone` inside `usable_area`.
+pub fn compute_snap_zone_rect(
+    usable_area: Rectangle<i32, Logical>,
+    zone: SnapZone,
+    gap: i32,
+) -> Rectangle<i32, Logical> {
+    let g = gap.max(0);
+    let x = usable_area.loc.x + g;
+    let y = usable_area.loc.y + g;
+    let w = (usable_area.size.w - 2 * g).max(200);
+    let h = (usable_area.size.h - 2 * g).max(160);
+    let half_w = (w - g) / 2;
+    let half_h = (h - g) / 2;
+    let two_thirds_w = ((w - g) * 2) / 3;
+    let one_third_w = (w - g) - two_thirds_w;
+
+    match zone {
+        SnapZone::LeftHalf => Rectangle::new(Point::from((x, y)), Size::from((half_w, h))),
+        SnapZone::RightHalf => Rectangle::new(
+            Point::from((x + half_w + g, y)),
+            Size::from((w - half_w - g, h)),
+        ),
+        SnapZone::LeftTwoThirds => {
+            Rectangle::new(Point::from((x, y)), Size::from((two_thirds_w, h)))
+        }
+        SnapZone::RightOneThird => Rectangle::new(
+            Point::from((x + two_thirds_w + g, y)),
+            Size::from((one_third_w, h)),
+        ),
+        SnapZone::TopLeftQuarter => {
+            Rectangle::new(Point::from((x, y)), Size::from((half_w, half_h)))
+        }
+        SnapZone::BottomRightQuarter => Rectangle::new(
+            Point::from((x + half_w + g, y + half_h + g)),
+            Size::from((w - half_w - g, h - half_h - g)),
+        ),
+    }
+}
+
+/// Returns the logical bounds of the Snap Layouts Flyout anchored below the window's Maximize button.
+pub fn snap_flyout_bounds(win_rect: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
+    let flyout_w = 186;
+    let flyout_h = 54;
+    let fx = (win_rect.loc.x + win_rect.size.w - 194).max(win_rect.loc.x + 8);
+    let fy = win_rect.loc.y + 34;
+    Rectangle::new(Point::from((fx, fy)), Size::from((flyout_w, flyout_h)))
+}
+
+/// Returns `true` if `cursor` is hovering the Maximize (`□`) button or the Snap Layouts Flyout below it.
+pub fn is_maximize_or_flyout_hovered(
+    win_rect: Rectangle<i32, Logical>,
+    cursor: Point<f64, Logical>,
+) -> bool {
+    if win_rect.size.w <= 160 {
+        return false;
+    }
+    let rel_x = cursor.x - win_rect.loc.x as f64;
+    let rel_y = cursor.y - win_rect.loc.y as f64;
+    let on_max_btn =
+        (0.0..=36.0).contains(&rel_y) && rel_x >= (win_rect.size.w as f64 - 62.0) && rel_x <= (win_rect.size.w as f64 - 32.0);
+    if on_max_btn {
+        return true;
+    }
+    let flyout = snap_flyout_bounds(win_rect);
+    flyout.to_f64().contains(cursor)
+}
+
+/// Hit-tests the 6 miniature zone tiles inside the Snap Layouts Flyout card.
+pub fn hit_test_snap_flyout(
+    win_rect: Rectangle<i32, Logical>,
+    cursor: Point<f64, Logical>,
+) -> Option<SnapZone> {
+    let bounds = snap_flyout_bounds(win_rect);
+    if !bounds.to_f64().contains(cursor) {
+        return None;
+    }
+    let local_x = (cursor.x - bounds.loc.x as f64).clamp(0.0, bounds.size.w as f64);
+    let local_y = (cursor.y - bounds.loc.y as f64).clamp(0.0, bounds.size.h as f64);
+    let col_w = bounds.size.w as f64 / 3.0;
+
+    if local_x < col_w {
+        // Group 1: 50/50 split
+        if local_x < col_w * 0.5 {
+            Some(SnapZone::LeftHalf)
+        } else {
+            Some(SnapZone::RightHalf)
+        }
+    } else if local_x < col_w * 2.0 {
+        // Group 2: 2/3 + 1/3 split
+        let in_col = local_x - col_w;
+        if in_col < col_w * 0.62 {
+            Some(SnapZone::LeftTwoThirds)
+        } else {
+            Some(SnapZone::RightOneThird)
+        }
+    } else {
+        // Group 3: Quarter Grid (Top-Left vs Bottom-Right)
+        if local_y < (bounds.size.h as f64 * 0.5) {
+            Some(SnapZone::TopLeftQuarter)
+        } else {
+            Some(SnapZone::BottomRightQuarter)
+        }
+    }
+}
+
+/// Hit-tests interactive tab pills in the window titlebar when `tab_count >= 2`.
+pub fn hit_test_titlebar_tab(
+    win_rect: Rectangle<i32, Logical>,
+    tab_count: usize,
+    cursor: Point<f64, Logical>,
+) -> Option<usize> {
+    if tab_count < 2 || win_rect.size.w < 260 {
+        return None;
+    }
+    let rel_x = cursor.x - win_rect.loc.x as f64;
+    let rel_y = cursor.y - win_rect.loc.y as f64;
+    if !(4.0..=32.0).contains(&rel_y) {
+        return None;
+    }
+    let start_x = 148.0;
+    let max_right = (win_rect.size.w as f64 - 96.0).max(start_x + 40.0);
+    if rel_x < start_x || rel_x > max_right {
+        return None;
+    }
+    let avail_w = max_right - start_x;
+    let pill_w = (avail_w / tab_count as f64).clamp(36.0, 96.0);
+    let idx = ((rel_x - start_x) / pill_w).floor() as usize;
+    if idx < tab_count {
+        Some(idx)
+    } else {
+        None
+    }
+}
+
+/// Detects if a dragged window is hovered over the titlebar center zone of another window
+/// to merge them into a Tabbed Window Stack.
+pub fn detect_drag_tab_target(
+    cursor: Point<f64, Logical>,
+    active_layouts: &[(Window, Rectangle<i32, Logical>)],
+    dragged: &Window,
+) -> Option<(Window, Rectangle<i32, Logical>)> {
+    let dragged_id = window_stable_id(dragged);
+    for (win, rect) in active_layouts.iter().rev() {
+        if window_stable_id(win) == dragged_id {
+            continue;
+        }
+        let rel_x = cursor.x - rect.loc.x as f64;
+        let rel_y = cursor.y - rect.loc.y as f64;
+        let w = rect.size.w as f64;
+        if (0.0..=36.0).contains(&rel_y) && rel_x >= (w * 0.16).max(36.0) && rel_x <= (w - 92.0).max(60.0) {
+            return Some((win.clone(), *rect));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2375,5 +2758,76 @@ mod tests {
         assert_eq!(manager.target_alphas.get(&fake_wid).copied().unwrap_or(1.0), 1.0);
         manager.target_alphas.insert(fake_wid, 0.85);
         assert_eq!(manager.target_alphas.get(&fake_wid).copied().unwrap_or(1.0), 0.85);
+    }
+
+    #[test]
+    fn test_titlebar_badge_extraction_and_dirty_dot() {
+        let term = extract_titlebar_badge("Alacritty", "zsh — ~/Projects").unwrap();
+        assert_eq!(term.label, "SHELL");
+        assert!(!term.is_dirty);
+
+        let dirty_dev = extract_titlebar_badge("zed", "• main.rs — Corten").unwrap();
+        assert_eq!(dirty_dev.label, "DEV");
+        assert!(dirty_dev.is_dirty);
+
+        let audio = extract_titlebar_badge("spotify", "Synthwave Mix").unwrap();
+        assert_eq!(audio.label, "AUDIO");
+        assert!(!audio.is_dirty);
+    }
+
+    #[test]
+    fn test_snap_layouts_flyout_hit_testing_and_zone_rects() {
+        let usable = Rectangle::new(Point::from((0, 36)), Size::from((1920, 1044)));
+        let left_half = compute_snap_zone_rect(usable, SnapZone::LeftHalf, 12);
+        let right_half = compute_snap_zone_rect(usable, SnapZone::RightHalf, 12);
+        assert_eq!(left_half.loc.x, 12);
+        assert!(right_half.loc.x > left_half.loc.x + left_half.size.w);
+        assert_eq!(left_half.size.h, right_half.size.h);
+
+        let win_rect = Rectangle::new(Point::from((200, 100)), Size::from((800, 600)));
+        let flyout = snap_flyout_bounds(win_rect);
+        assert!(is_maximize_or_flyout_hovered(
+            win_rect,
+            Point::from((win_rect.loc.x as f64 + 755.0, win_rect.loc.y as f64 + 18.0))
+        ));
+        assert!(is_maximize_or_flyout_hovered(
+            win_rect,
+            Point::from((flyout.loc.x as f64 + 20.0, flyout.loc.y as f64 + 20.0))
+        ));
+
+        let z1 = hit_test_snap_flyout(
+            win_rect,
+            Point::from((flyout.loc.x as f64 + 10.0, flyout.loc.y as f64 + 20.0)),
+        );
+        assert_eq!(z1, Some(SnapZone::LeftHalf));
+
+        let z2 = hit_test_snap_flyout(
+            win_rect,
+            Point::from((flyout.loc.x as f64 + 80.0, flyout.loc.y as f64 + 20.0)),
+        );
+        assert_eq!(z2, Some(SnapZone::LeftTwoThirds));
+
+        let z3 = hit_test_snap_flyout(
+            win_rect,
+            Point::from((flyout.loc.x as f64 + 160.0, flyout.loc.y as f64 + 42.0)),
+        );
+        assert_eq!(z3, Some(SnapZone::BottomRightQuarter));
+    }
+
+    #[test]
+    fn test_tabbed_window_stacking_and_tab_hit_testing() {
+        let mut manager = LayoutManager::new();
+        assert!(manager.merge_windows_into_tab_group(101, 202));
+        assert!(manager.merge_windows_into_tab_group(101, 303));
+        assert_eq!(manager.tab_group_for_window(202), Some(&[101, 202, 303][..]));
+
+        let win_rect = Rectangle::new(Point::from((100, 100)), Size::from((800, 600)));
+        let tab0 = hit_test_titlebar_tab(win_rect, 3, Point::from((265.0, 118.0)));
+        assert_eq!(tab0, Some(0));
+
+        assert!(manager.detach_window_from_tab_group(202));
+        assert_eq!(manager.tab_group_for_window(101), Some(&[101, 303][..]));
+        assert!(manager.detach_window_from_tab_group(303));
+        assert_eq!(manager.tab_group_for_window(101), None);
     }
 }

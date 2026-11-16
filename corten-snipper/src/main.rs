@@ -434,6 +434,9 @@ impl Application for CortenSnipperApp {
                         let h = (start.y - end.y).abs().round() as i32;
 
                         if w > 4 && h > 4 {
+                            corten_services::acoustic::play(
+                                corten_services::acoustic::AcousticCue::Shutter,
+                            );
                             // Standard slurp geometry format: "X,Y WxH"
                             let geom_str = format!("{},{} {}x{}\n", min_x, min_y, w, h);
                             let mut stdout = std::io::stdout().lock();

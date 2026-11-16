@@ -2109,7 +2109,12 @@ fn main() -> anyhow::Result<()> {
                             state.drag_split_target = None;
                         } else {
                             let window_rects = state.layout.arrange_animated(usable_area);
-                            if let Some((target_win, dir, new_on_first, preview_rect)) =
+                            if let Some((_tab_win, tab_rect)) =
+                                crate::layout::detect_drag_tab_target(loc, &window_rects, window)
+                            {
+                                state.snap_preview = Some(tab_rect);
+                                state.drag_split_target = None;
+                            } else if let Some((target_win, dir, new_on_first, preview_rect)) =
                                 crate::layout::detect_drag_split_target(loc, &window_rects, window)
                             {
                                 state.snap_preview = Some(preview_rect);
@@ -2160,7 +2165,7 @@ fn main() -> anyhow::Result<()> {
                         if let Some((_, ref mut end_pt)) = state.selection_box {
                             *end_pt = loc;
                         }
-                        // Check hovering over window borders / corners for resize cursor
+                        // Check hovering over window borders / corners for resize cursor or Snap Layouts Flyout
                         let usable_area = {
                             let mut map = layer_map_for_output(&state.output);
                             map.arrange();
@@ -2168,6 +2173,15 @@ fn main() -> anyhow::Result<()> {
                         };
                         let window_rects = state.layout.arrange_animated(usable_area);
                         if let Some((_, rect)) = window_rects.into_iter().rev().find(|(_, r)| r.to_f64().contains(loc)) {
+                            if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, loc) {
+                                state.snap_preview = Some(crate::layout::compute_snap_zone_rect(
+                                    usable_area,
+                                    zone,
+                                    state.layout.gap(),
+                                ));
+                            } else {
+                                state.snap_preview = None;
+                            }
                             let rw_x = loc.x - rect.loc.x as f64;
                             let rw_y = loc.y - rect.loc.y as f64;
                             let w_f = rect.size.w as f64;
@@ -2189,14 +2203,17 @@ fn main() -> anyhow::Result<()> {
                                     smithay::input::pointer::CursorIcon::NsResize,
                                 );
                             }
-                        } else if let Some(sx) = state.layout.split_x(usable_area) {
-                            if (loc.x as i32 - sx).abs() <= 8
-                                && loc.y >= usable_area.loc.y as f64
-                                && loc.y <= (usable_area.loc.y + usable_area.size.h) as f64
-                            {
-                                state.cursor_status = smithay::input::pointer::CursorImageStatus::Named(
-                                    smithay::input::pointer::CursorIcon::EwResize,
-                                );
+                        } else {
+                            state.snap_preview = None;
+                            if let Some(sx) = state.layout.split_x(usable_area) {
+                                if (loc.x as i32 - sx).abs() <= 8
+                                    && loc.y >= usable_area.loc.y as f64
+                                    && loc.y <= (usable_area.loc.y + usable_area.size.h) as f64
+                                {
+                                    state.cursor_status = smithay::input::pointer::CursorImageStatus::Named(
+                                        smithay::input::pointer::CursorIcon::EwResize,
+                                    );
+                                }
                             }
                         }
                     }
@@ -2320,8 +2337,47 @@ fn main() -> anyhow::Result<()> {
                                 let h_f64 = rect.size.h as f64;
 
                                 if button_code == 1 || button_code == 272 {
+                                    if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, state.cursor_location) {
+                                        let usable_area = {
+                                            let mut map = layer_map_for_output(&state.output);
+                                            map.arrange();
+                                            map.non_exclusive_zone()
+                                        };
+                                        let snap_target = crate::layout::compute_snap_zone_rect(
+                                            usable_area,
+                                            zone,
+                                            state.layout.gap(),
+                                        );
+                                        state.layout.set_fullscreen(&window, false);
+                                        state.layout.set_maximized(&window, usable_area, false);
+                                        state.layout.set_floating_geometry(&window, snap_target);
+                                        layout::configure_window_geometry(&window, snap_target);
+                                        state.snap_preview = None;
+                                        state.sync_ipc_snapshot();
+                                        return;
+                                    }
                                     if (0.0..=36.0).contains(&rel_win_y) {
                                         // Clicked inside the Window Titlebar!
+                                        let win_id = crate::layout::window_stable_id(&window);
+                                        let tabs = state.layout.window_tabs_metadata(win_id);
+                                        if let Some(tab_idx) = crate::layout::hit_test_titlebar_tab(
+                                            rect,
+                                            tabs.len(),
+                                            state.cursor_location,
+                                        ) {
+                                            let target_tab_id = tabs[tab_idx].0;
+                                            if let Some((_, focused_win)) =
+                                                state.layout.focus_window_by_id(target_tab_id)
+                                            {
+                                                if let Some(surface) = layout::window_wl_surface(&focused_win) {
+                                                    if let Some(kb) = state.seat.get_keyboard() {
+                                                        kb.set_focus(&mut state, Some(surface), serial);
+                                                    }
+                                                }
+                                            }
+                                            state.sync_ipc_snapshot();
+                                            return;
+                                        }
                                         if rel_win_x >= (w_f64 - 32.0) && rel_win_x <= w_f64 {
                                             // Close button clicked
                                             info!("Window Titlebar: Close clicked on {:?}", window);
@@ -2416,7 +2472,25 @@ fn main() -> anyhow::Result<()> {
                         }
                     } else if button_state == ButtonState::Released {
                         if let Some((window, _, _)) = state.dragged_window.take() {
-                            if let Some((target_win, dir, new_on_first, _)) = state.drag_split_target.take() {
+                            let usable_area = {
+                                let mut map = layer_map_for_output(&state.output);
+                                map.arrange();
+                                map.non_exclusive_zone()
+                            };
+                            let window_rects = state.layout.arrange_animated(usable_area);
+                            if let Some((target_win, target_rect)) = crate::layout::detect_drag_tab_target(
+                                state.cursor_location,
+                                &window_rects,
+                                &window,
+                            ) {
+                                let host_id = crate::layout::window_stable_id(&target_win);
+                                let guest_id = crate::layout::window_stable_id(&window);
+                                state.layout.merge_windows_into_tab_group(host_id, guest_id);
+                                state.layout.set_fullscreen(&window, false);
+                                state.layout.set_floating_geometry(&window, target_rect);
+                                layout::configure_window_geometry(&window, target_rect);
+                                state.snap_preview = None;
+                            } else if let Some((target_win, dir, new_on_first, _)) = state.drag_split_target.take() {
                                 state.layout.set_fullscreen(&window, false);
                                 state.layout.set_floating(&window, false);
                                 state.layout.set_mode(corten_config::LayoutMode::Bsp);
@@ -2555,7 +2629,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            // FAZ 25: Per-Window Dual-Kawase Background Blur for translucent/terminal windows
+            // FAZ 25: Per-Window Dual-Kawase Background Blur for translucent/terminal windows & Ghost Acrylic Snap Silhouette
             if fullscreen_win.is_none() {
                 let mut win_glass_regions = Vec::new();
                 for (window, geo) in layouts.iter() {
@@ -2570,6 +2644,17 @@ fn main() -> anyhow::Result<()> {
                         );
                         win_glass_regions.push(GlassRegion::new(body_rect, 8.0, 0.22));
                     }
+                }
+                if let Some(snap_rect) = state.snap_preview {
+                    let snap_margin = 8;
+                    let inset_rect = Rectangle::new(
+                        Point::from((snap_rect.loc.x + snap_margin, snap_rect.loc.y + snap_margin)),
+                        Size::from((
+                            (snap_rect.size.w - snap_margin * 2).max(50),
+                            (snap_rect.size.h - snap_margin * 2).max(50),
+                        )),
+                    );
+                    win_glass_regions.push(GlassRegion::snap_preview(inset_rect));
                 }
                 if !win_glass_regions.is_empty() {
                     if let Some(pipeline) = blur_pipeline.as_mut() {
@@ -2665,7 +2750,7 @@ fn main() -> anyhow::Result<()> {
                             )
                         };
 
-                        // Render true GLSL hardware-accelerated smooth Gaussian neon blur halo
+                        // Render true GLSL hardware-accelerated Dual-Layer Elevation Shadow + Squircle Halo
                         if let Some(manager) = glow_shader.as_ref() {
                             let halo_color = [
                                 palette.primary.r,
@@ -2673,16 +2758,21 @@ fn main() -> anyhow::Result<()> {
                                 palette.primary.b,
                                 halo_radiance,
                             ];
-                            // 18px soft radiant blur halo with 8px curved window corners
+                            // 22px soft radiant blur halo + 16dp elevation shadow with 8px squircle corners
                             let glow_elem =
-                                manager.create_element(shifted_rect, 18, 8.0, halo_color);
+                                manager.create_element(shifted_rect, 22, 8.0, halo_color);
                             elements.push(CustomRenderElement::from(glow_elem));
                         }
 
                         // Sleek, clean Corten Patina inner core border (2px default, 3px high-vis)
                         draw_glow_ring(&mut elements, phys_rect, 0, ring_width, ring_color, 4);
                     } else {
-                        // Inactive subtle border (1px)
+                        // Grounded 4dp Dual-Layer shadow + subtle 1px border for inactive windows
+                        if let Some(manager) = glow_shader.as_ref() {
+                            let shadow_elem =
+                                manager.create_inactive_shadow_element(shifted_rect, 8.0);
+                            elements.push(CustomRenderElement::from(shadow_elem));
+                        }
                         let inactive_color = Color32F::new(
                             palette.border.r,
                             palette.border.g,
@@ -2741,6 +2831,9 @@ fn main() -> anyhow::Result<()> {
                     // Render clean Corten titlebar & controls IN DEDICATED HEADER STRIP (Never covered by client)
                     if !is_fs {
                         let is_max = state.layout.is_maximized(window);
+                        let is_tiled = state.layout.is_window_tiled(window);
+                        let win_id = layout::window_stable_id(window);
+                        let tabs = state.layout.window_tabs_metadata(win_id);
                         let (app_id, title) = layout::window_metadata(window);
                         draw_window_titlebar(
                             &mut elements,
@@ -2754,6 +2847,9 @@ fn main() -> anyhow::Result<()> {
                             fractional_scale,
                             &mut state.title_cache,
                             false,
+                            state.cursor_location,
+                            is_tiled,
+                            &tabs,
                         );
                     }
                 }
@@ -2774,27 +2870,37 @@ fn main() -> anyhow::Result<()> {
                 elements.extend(or_elements.into_iter().map(CustomRenderElement::from));
             }
 
-            // Render snap preview highlight overlay if dragging a window near screen edge (only in non-fullscreen)
+            // Render Ghost Acrylic Snap Silhouette overlay when snapping/docking a window
             if fullscreen_win.is_none() {
                 if let Some(snap_rect) = state.snap_preview {
                     let snap_margin = 8;
                     let inset_loc = Point::from((snap_rect.loc.x + snap_margin, snap_rect.loc.y + snap_margin));
                     let inset_size = Size::from(((snap_rect.size.w - snap_margin * 2).max(50), (snap_rect.size.h - snap_margin * 2).max(50)));
+                    let inset_log = Rectangle::new(inset_loc, inset_size);
                     let phys_snap = Rectangle::new(
                         inset_loc.to_physical_precise_round(fractional_scale),
                         inset_size.to_physical_precise_round(fractional_scale),
                     );
+                    if let Some(manager) = glow_shader.as_ref() {
+                        let ghost_glow = manager.create_element(
+                            inset_log,
+                            16,
+                            12.0,
+                            [palette.primary.r, palette.primary.g, palette.primary.b, 0.78],
+                        );
+                        elements.push(CustomRenderElement::from(ghost_glow));
+                    }
                     let snap_color = Color32F::new(
                         palette.primary.r,
                         palette.primary.g,
                         palette.primary.b,
-                        0.18,
+                        0.16,
                     );
                     let snap_border = Color32F::new(
                         palette.primary.r,
                         palette.primary.g,
                         palette.primary.b,
-                        0.75,
+                        0.82,
                     );
                     draw_glow_ring(
                         &mut elements,
@@ -2805,6 +2911,28 @@ fn main() -> anyhow::Result<()> {
                         14,
                     );
                     draw_glow_ring(&mut elements, phys_snap, 0, 2, snap_border, 14);
+                    // Industrial HUD corner alignment brackets
+                    let brk_len = (18.0 * fractional_scale).round().max(8.0) as i32;
+                    let brk_thk = (3.0 * fractional_scale).round().max(2.0) as i32;
+                    let brk_col = Color32F::new(1.0, 0.85, 0.65, 0.92);
+                    for (bx, by, bw, bh) in [
+                        (phys_snap.loc.x, phys_snap.loc.y, brk_len, brk_thk),
+                        (phys_snap.loc.x, phys_snap.loc.y, brk_thk, brk_len),
+                        (phys_snap.loc.x + phys_snap.size.w - brk_len, phys_snap.loc.y, brk_len, brk_thk),
+                        (phys_snap.loc.x + phys_snap.size.w - brk_thk, phys_snap.loc.y, brk_thk, brk_len),
+                        (phys_snap.loc.x, phys_snap.loc.y + phys_snap.size.h - brk_thk, brk_len, brk_thk),
+                        (phys_snap.loc.x, phys_snap.loc.y + phys_snap.size.h - brk_len, brk_thk, brk_len),
+                        (phys_snap.loc.x + phys_snap.size.w - brk_len, phys_snap.loc.y + phys_snap.size.h - brk_thk, brk_len, brk_thk),
+                        (phys_snap.loc.x + phys_snap.size.w - brk_thk, phys_snap.loc.y + phys_snap.size.h - brk_len, brk_thk, brk_len),
+                    ] {
+                        elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                            Id::new(),
+                            Rectangle::new(Point::from((bx, by)), (bw, bh).into()),
+                            cursor_commit,
+                            brk_col,
+                            Kind::Unspecified,
+                        )));
+                    }
                 }
 
                 // Render crisp Windows-style rubberband selection box on empty desktop
@@ -3396,8 +3524,11 @@ pub(crate) fn draw_window_titlebar(
     scale: f64,
     title_cache: &mut HashMap<String, (MemoryRenderBuffer, i32, i32)>,
     front_to_back: bool,
+    cursor_loc: Point<f64, smithay::utils::Logical>,
+    is_tiled: bool,
+    tabs: &[(u64, String, bool)],
 ) {
-    let mut tb_elements: Vec<CustomRenderElement> = Vec::with_capacity(48);
+    let mut tb_elements: Vec<CustomRenderElement> = Vec::with_capacity(96);
 
     let accent = if is_active {
         Color32F::new(
@@ -3413,12 +3544,12 @@ pub(crate) fn draw_window_titlebar(
 
     let header_h = (36.0 * scale).round() as i32;
     if rect.size.w > 40 && rect.size.h > 20 {
-        // 1. Solid opaque header plate background (Backmost layer of the titlebar)
+        // 1. Fused two-stage gradient header plate background (Backmost layer of the titlebar)
         let header_bar = Rectangle::new(rect.loc, (rect.size.w, header_h).into());
         let header_bg = if is_active {
-            Color32F::new(0.10, 0.11, 0.15, 0.99)
+            Color32F::new(0.09, 0.10, 0.14, 0.99)
         } else {
-            Color32F::new(0.07, 0.08, 0.11, 0.97)
+            Color32F::new(0.06, 0.07, 0.10, 0.96)
         };
         tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
             Id::new(),
@@ -3428,7 +3559,23 @@ pub(crate) fn draw_window_titlebar(
             Kind::Unspecified,
         )));
 
-        // 2. Top accent line across the window header
+        // Subtle upper sheen band for fused glass depth
+        let sheen_h = (header_h / 2).max(2);
+        let sheen_bar = Rectangle::new(rect.loc, (rect.size.w, sheen_h).into());
+        let sheen_bg = if is_active {
+            Color32F::new(0.13, 0.15, 0.20, 0.42)
+        } else {
+            Color32F::new(0.10, 0.11, 0.15, 0.22)
+        };
+        tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+            Id::new(),
+            sheen_bar,
+            CommitCounter::default(),
+            sheen_bg,
+            Kind::Unspecified,
+        )));
+
+        // 2. Top accent line + 1px Specular Glass Rim Highlight across the window header
         let top_line_h = (2.0 * scale).max(1.0) as i32;
         let header_line = Rectangle::new(rect.loc, (rect.size.w, top_line_h).into());
         tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
@@ -3439,16 +3586,47 @@ pub(crate) fn draw_window_titlebar(
             Kind::Unspecified,
         )));
 
-        // 3. Crisp bottom border separating header bar from client surface
+        let specular_line = Rectangle::new(
+            Point::from((rect.loc.x + 2, rect.loc.y + top_line_h)),
+            ((rect.size.w - 4).max(2), 1).into(),
+        );
+        let specular_color = if is_active {
+            Color32F::new(1.0, 1.0, 1.0, 0.22)
+        } else {
+            Color32F::new(1.0, 1.0, 1.0, 0.09)
+        };
+        tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+            Id::new(),
+            specular_line,
+            CommitCounter::default(),
+            specular_color,
+            Kind::Unspecified,
+        )));
+
+        // Bottom dark bevel on window frame
+        let bottom_bevel = Rectangle::new(
+            Point::from((rect.loc.x + 1, rect.loc.y + rect.size.h - 1)),
+            ((rect.size.w - 2).max(2), 1).into(),
+        );
+        tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+            Id::new(),
+            bottom_bevel,
+            CommitCounter::default(),
+            Color32F::new(0.02, 0.02, 0.04, 0.65),
+            Kind::Unspecified,
+        )));
+
+        // 3. Adaptive bottom separator (softer fused hairline when tiled)
         let bottom_line = Rectangle::new(
             Point::from((rect.loc.x, rect.loc.y + header_h - 1)),
             (rect.size.w, 1).into(),
         );
+        let sep_alpha = if is_tiled { 0.22 } else { 0.48 };
         tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
             Id::new(),
             bottom_line,
             CommitCounter::default(),
-            Color32F::new(palette.border.r, palette.border.g, palette.border.b, 0.55),
+            Color32F::new(palette.border.r, palette.border.g, palette.border.b, sep_alpha),
             Kind::Unspecified,
         )));
 
@@ -3471,7 +3649,6 @@ pub(crate) fn draw_window_titlebar(
         let stroke = (2.0 * scale).max(2.0) as i32;
 
         if hay.contains("terminal") || hay.contains("foot") || hay.contains("konsole") || hay.contains("alacritty") {
-            // Terminal prompt: >_ in Patina Green
             let term_color = Color32F::new(0.28, 0.92, 0.58, 1.0);
             let px = icon_x + (3.0 * scale) as i32;
             let py = icon_y + (4.0 * scale) as i32;
@@ -3541,7 +3718,57 @@ pub(crate) fn draw_window_titlebar(
             )));
         }
 
-        // 5. Window Title text next to Icon (100% solid high-contrast white)
+        // 4.5. Dynamic Context Badge & Unsaved Dirty Dot ('●')
+        let mut badge_offset_x = 0;
+        if let Some(badge) = crate::layout::extract_titlebar_badge(app_id, title) {
+            let pill_x = rect.loc.x + (35.0 * scale).round() as i32;
+            let pill_h = (16.0 * scale).round() as i32;
+            let pill_y = rect.loc.y + (header_h - pill_h) / 2;
+            let pill_w = (22.0 * scale).round() as i32;
+            let pill_rect = Rectangle::new(Point::from((pill_x, pill_y)), (pill_w, pill_h).into());
+            let b_rgb = badge.color_rgb;
+            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                Id::new(),
+                pill_rect,
+                CommitCounter::default(),
+                Color32F::new(b_rgb[0] * 0.25, b_rgb[1] * 0.25, b_rgb[2] * 0.25, 0.92),
+                Kind::Unspecified,
+            )));
+            let bar_w = (3.0 * scale).round().max(2.0) as i32;
+            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                Id::new(),
+                Rectangle::new(Point::from((pill_x, pill_y)), (bar_w, pill_h).into()),
+                CommitCounter::default(),
+                Color32F::new(b_rgb[0], b_rgb[1], b_rgb[2], 1.0),
+                Kind::Unspecified,
+            )));
+            if badge.is_dirty {
+                let dot_sz = (6.0 * scale).round().max(4.0) as i32;
+                let dot_x = pill_x + (pill_w - dot_sz) / 2 + (2.0 * scale) as i32;
+                let dot_y = pill_y + (pill_h - dot_sz) / 2;
+                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                    Id::new(),
+                    Rectangle::new(Point::from((dot_x, dot_y)), (dot_sz, dot_sz).into()),
+                    CommitCounter::default(),
+                    Color32F::new(0.98, 0.62, 0.18, 1.0),
+                    Kind::Unspecified,
+                )));
+            } else {
+                let tick_w = (8.0 * scale).round().max(4.0) as i32;
+                let tick_x = pill_x + bar_w + (4.0 * scale) as i32;
+                let tick_y = pill_y + (pill_h - stroke) / 2;
+                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                    Id::new(),
+                    Rectangle::new(Point::from((tick_x, tick_y)), (tick_w, stroke).into()),
+                    CommitCounter::default(),
+                    Color32F::new(b_rgb[0], b_rgb[1], b_rgb[2], 0.95),
+                    Kind::Unspecified,
+                )));
+            }
+            badge_offset_x = (28.0 * scale).round() as i32;
+        }
+
+        // 5. Window Title text next to Icon & Context Badge
         let display_title = if !title.trim().is_empty() {
             title.trim()
         } else if !app_id.trim().is_empty() {
@@ -3567,7 +3794,7 @@ pub(crate) fn draw_window_titlebar(
         };
 
         if let Some((buf, _tw, th)) = cached {
-            let text_x = rect.loc.x + (36.0 * scale).round() as i32;
+            let text_x = rect.loc.x + (36.0 * scale).round() as i32 + badge_offset_x;
             let text_y = rect.loc.y + (header_h - th) / 2;
             let text_pos: smithay::utils::Point<f64, smithay::utils::Physical> =
                 smithay::utils::Point::from((text_x as f64, text_y as f64));
@@ -3584,9 +3811,90 @@ pub(crate) fn draw_window_titlebar(
             }
         }
 
-        // 6. Window Control Action Buttons (Minimize, Maximize/Restore, Close) on top-right
-        // Capsule backgrounds are pushed BEFORE the crisp white foreground symbols ('−', '□', '✕').
+        // 5.5. Tabbed Window Stacking Strip (when window is part of a Tab Group)
+        if tabs.len() >= 2 && rect.size.w >= (260.0 * scale).round() as i32 {
+            let start_x = rect.loc.x + (148.0 * scale).round() as i32;
+            let max_right = rect.loc.x + rect.size.w - (96.0 * scale).round() as i32;
+            let avail_w = (max_right - start_x).max(60);
+            let tab_count = tabs.len() as i32;
+            let slot_w = (avail_w / tab_count).clamp((36.0 * scale) as i32, (96.0 * scale) as i32);
+            let tab_h = (22.0 * scale).round() as i32;
+            let tab_y = rect.loc.y + (header_h - tab_h) / 2;
+            let gap_px = (4.0 * scale).round().max(2.0) as i32;
+
+            for (idx, (_tid, _tlabel, is_current)) in tabs.iter().enumerate() {
+                let tx = start_x + (idx as i32) * slot_w;
+                let tw = (slot_w - gap_px).max(16);
+                let tab_rect = Rectangle::new(Point::from((tx, tab_y)), (tw, tab_h).into());
+                let bg = if *is_current {
+                    Color32F::new(0.20, 0.24, 0.32, 0.98)
+                } else {
+                    Color32F::new(0.11, 0.13, 0.18, 0.90)
+                };
+                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                    Id::new(),
+                    tab_rect,
+                    CommitCounter::default(),
+                    bg,
+                    Kind::Unspecified,
+                )));
+                if *is_current {
+                    let top_ind = Rectangle::new(
+                        Point::from((tx + 2, tab_y)),
+                        ((tw - 4).max(4), (2.0 * scale).round().max(2.0) as i32).into(),
+                    );
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        top_ind,
+                        CommitCounter::default(),
+                        accent,
+                        Kind::Unspecified,
+                    )));
+                }
+                // Inner tab index bar glyph
+                let bar_w = (tw - (14.0 * scale) as i32).clamp(6, (36.0 * scale) as i32);
+                let bar_x = tx + (tw - bar_w) / 2;
+                let bar_y = tab_y + (tab_h - stroke) / 2;
+                let bar_col = if *is_current {
+                    Color32F::new(1.0, 1.0, 1.0, 0.95)
+                } else {
+                    Color32F::new(0.65, 0.70, 0.80, 0.65)
+                };
+                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                    Id::new(),
+                    Rectangle::new(Point::from((bar_x, bar_y)), (bar_w, stroke).into()),
+                    CommitCounter::default(),
+                    bar_col,
+                    Kind::Unspecified,
+                )));
+            }
+        }
+
+        // 6. Haptic Window Control Action Capsules (Minimalist Dots when idle -> Full Action Capsules on header hover)
         if rect.size.w > 140 {
+            let log_rect = Rectangle::new(
+                Point::from((
+                    (rect.loc.x as f64 / scale).round() as i32,
+                    (rect.loc.y as f64 / scale).round() as i32,
+                )),
+                Size::from((
+                    (rect.size.w as f64 / scale).round() as i32,
+                    (rect.size.h as f64 / scale).round() as i32,
+                )),
+            );
+            let rel_cx = cursor_loc.x - log_rect.loc.x as f64;
+            let rel_cy = cursor_loc.y - log_rect.loc.y as f64;
+            let w_log = log_rect.size.w as f64;
+
+            let flyout_hovered = crate::layout::is_maximize_or_flyout_hovered(log_rect, cursor_loc);
+            let header_hovered = (0.0..=40.0).contains(&rel_cy)
+                && (0.0..=w_log).contains(&rel_cx)
+                || flyout_hovered;
+
+            let hover_close = (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 32.0) && rel_cx <= w_log;
+            let hover_max = (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 60.0) && rel_cx < (w_log - 32.0);
+            let hover_min = (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 88.0) && rel_cx < (w_log - 60.0);
+
             let btn_size = (22.0 * scale).round() as i32;
             let btn_y = rect.loc.y + (header_h - btn_size) / 2;
             let btn_pad = (5.0 * scale).round() as i32;
@@ -3596,70 +3904,234 @@ pub(crate) fn draw_window_titlebar(
             let max_x = rect.loc.x + rect.size.w - (58.0 * scale).round() as i32;
             let min_x = rect.loc.x + rect.size.w - (86.0 * scale).round() as i32;
 
-            let close_rect = Rectangle::new(Point::from((close_x, btn_y)), (btn_size, btn_size).into());
-            let max_rect = Rectangle::new(Point::from((max_x, btn_y)), (btn_size, btn_size).into());
-            let min_rect = Rectangle::new(Point::from((min_x, btn_y)), (btn_size, btn_size).into());
+            if !header_hovered && !is_maximized {
+                // Minimalist Industrial Micro-Dots when cursor is away from header
+                let dot_sz = (10.0 * scale).round().max(6.0) as i32;
+                let dot_y = rect.loc.y + (header_h - dot_sz) / 2;
+                let dot_off = (btn_size - dot_sz) / 2;
 
-            let close_bg = if is_active {
-                Color32F::new(0.95, 0.25, 0.20, 1.0)
+                let close_dot_col = if is_active {
+                    Color32F::new(0.92, 0.30, 0.24, 0.88)
+                } else {
+                    Color32F::new(0.45, 0.25, 0.24, 0.55)
+                };
+                let max_dot_col = if is_active {
+                    Color32F::new(0.95, 0.62, 0.22, 0.85)
+                } else {
+                    Color32F::new(0.42, 0.35, 0.25, 0.50)
+                };
+                let min_dot_col = if is_active {
+                    Color32F::new(0.38, 0.76, 0.62, 0.82)
+                } else {
+                    Color32F::new(0.30, 0.38, 0.42, 0.50)
+                };
+
+                for (bx, col) in [
+                    (close_x + dot_off, close_dot_col),
+                    (max_x + dot_off, max_dot_col),
+                    (min_x + dot_off, min_dot_col),
+                ] {
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((bx, dot_y)), (dot_sz, dot_sz).into()),
+                        CommitCounter::default(),
+                        col,
+                        Kind::Unspecified,
+                    )));
+                }
             } else {
-                Color32F::new(0.78, 0.24, 0.20, 0.96)
-            };
-            let cap_bg = if is_active {
-                Color32F::new(0.25, 0.30, 0.38, 1.0)
-            } else {
-                Color32F::new(0.19, 0.23, 0.30, 0.96)
-            };
-            let cap_border = Color32F::new(0.55, 0.62, 0.75, 0.85);
-            let sym_white = Color32F::new(1.0, 1.0, 1.0, 1.0);
+                // Expanded Haptic Action Capsules with hover pop
+                let grow = (1.0 * scale).round().max(1.0) as i32;
+                let close_rect = if hover_close {
+                    Rectangle::new(
+                        Point::from((close_x - grow, btn_y - grow)),
+                        (btn_size + grow * 2, btn_size + grow * 2).into(),
+                    )
+                } else {
+                    Rectangle::new(Point::from((close_x, btn_y)), (btn_size, btn_size).into())
+                };
+                let max_rect = if hover_max || flyout_hovered {
+                    Rectangle::new(
+                        Point::from((max_x - grow, btn_y - grow)),
+                        (btn_size + grow * 2, btn_size + grow * 2).into(),
+                    )
+                } else {
+                    Rectangle::new(Point::from((max_x, btn_y)), (btn_size, btn_size).into())
+                };
+                let min_rect = if hover_min {
+                    Rectangle::new(
+                        Point::from((min_x - grow, btn_y - grow)),
+                        (btn_size + grow * 2, btn_size + grow * 2).into(),
+                    )
+                } else {
+                    Rectangle::new(Point::from((min_x, btn_y)), (btn_size, btn_size).into())
+                };
 
-            // --- A. Button Capsule Backgrounds & Borders ---
-            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                Id::new(),
-                close_rect,
-                CommitCounter::default(),
-                close_bg,
-                Kind::Unspecified,
-            )));
-            draw_glow_ring(&mut tb_elements, close_rect, 0, 1, Color32F::new(1.0, 0.50, 0.40, 0.85), 4);
+                let close_bg = if hover_close {
+                    Color32F::new(1.0, 0.32, 0.25, 1.0)
+                } else if is_active {
+                    Color32F::new(0.95, 0.25, 0.20, 1.0)
+                } else {
+                    Color32F::new(0.78, 0.24, 0.20, 0.96)
+                };
+                let max_bg = if hover_max || flyout_hovered {
+                    Color32F::new(0.88, 0.48, 0.18, 1.0)
+                } else if is_active {
+                    Color32F::new(0.25, 0.30, 0.38, 1.0)
+                } else {
+                    Color32F::new(0.19, 0.23, 0.30, 0.96)
+                };
+                let min_bg = if hover_min {
+                    Color32F::new(0.32, 0.38, 0.48, 1.0)
+                } else if is_active {
+                    Color32F::new(0.25, 0.30, 0.38, 1.0)
+                } else {
+                    Color32F::new(0.19, 0.23, 0.30, 0.96)
+                };
+                let cap_border = Color32F::new(0.55, 0.62, 0.75, 0.85);
+                let sym_white = Color32F::new(1.0, 1.0, 1.0, 1.0);
 
-            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                Id::new(),
-                max_rect,
-                CommitCounter::default(),
-                cap_bg,
-                Kind::Unspecified,
-            )));
-            draw_glow_ring(&mut tb_elements, max_rect, 0, 1, cap_border, 4);
-
-            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                Id::new(),
-                min_rect,
-                CommitCounter::default(),
-                cap_bg,
-                Kind::Unspecified,
-            )));
-            draw_glow_ring(&mut tb_elements, min_rect, 0, 1, cap_border, 4);
-
-            // --- B. Button Foreground Symbols (Topmost layer of titlebar) ---
-            // 1. Close '✕' symbol
-            let cross_span = (btn_size - btn_pad * 2 - stroke).max(2);
-            for i in 0..=cross_span {
+                // --- A. Button Capsule Backgrounds & Borders ---
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
-                    Rectangle::new(
-                        Point::from((close_x + btn_pad + i, btn_y + btn_pad + i)),
-                        (stroke, stroke).into(),
-                    ),
+                    close_rect,
                     CommitCounter::default(),
-                    sym_white,
+                    close_bg,
                     Kind::Unspecified,
                 )));
+                draw_glow_ring(&mut tb_elements, close_rect, 0, 1, Color32F::new(1.0, 0.50, 0.40, 0.85), 4);
+
+                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                    Id::new(),
+                    max_rect,
+                    CommitCounter::default(),
+                    max_bg,
+                    Kind::Unspecified,
+                )));
+                draw_glow_ring(&mut tb_elements, max_rect, 0, 1, cap_border, 4);
+
+                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                    Id::new(),
+                    min_rect,
+                    CommitCounter::default(),
+                    min_bg,
+                    Kind::Unspecified,
+                )));
+                draw_glow_ring(&mut tb_elements, min_rect, 0, 1, cap_border, 4);
+
+                // --- B. Button Foreground Symbols (Topmost layer of titlebar) ---
+                // 1. Close '✕' symbol
+                let cross_span = (btn_size - btn_pad * 2 - stroke).max(2);
+                for i in 0..=cross_span {
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(
+                            Point::from((close_x + btn_pad + i, btn_y + btn_pad + i)),
+                            (stroke, stroke).into(),
+                        ),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(
+                            Point::from((close_x + btn_size - btn_pad - stroke - i, btn_y + btn_pad + i)),
+                            (stroke, stroke).into(),
+                        ),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                }
+
+                // 2. Maximize / Restore '□' symbol
+                if is_maximized {
+                    let r_w = (9.0 * scale).round() as i32;
+                    let r_h = (9.0 * scale).round() as i32;
+                    let off = (3.0 * scale).round() as i32;
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_pad + off, btn_y + btn_pad)), (r_w, stroke).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_pad + off + r_w - stroke, btn_y + btn_pad)), (stroke, r_h).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad + off)), (r_w, stroke).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad + off + r_h - stroke)), (r_w, stroke).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad + off)), (stroke, r_h).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_pad + r_w - stroke, btn_y + btn_pad + off)), (stroke, r_h).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                } else {
+                    let sq_w = btn_size - btn_pad * 2;
+                    let sq_h = btn_size - btn_pad * 2;
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad)), (sq_w, stroke).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_size - btn_pad - stroke)), (sq_w, stroke).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad)), (stroke, sq_h).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                    tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(Point::from((max_x + btn_size - btn_pad - stroke, btn_y + btn_pad)), (stroke, sq_h).into()),
+                        CommitCounter::default(),
+                        sym_white,
+                        Kind::Unspecified,
+                    )));
+                }
+
+                // 3. Minimize '−' symbol
+                let dash_w = btn_size - btn_pad * 2;
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
                     Rectangle::new(
-                        Point::from((close_x + btn_size - btn_pad - stroke - i, btn_y + btn_pad + i)),
-                        (stroke, stroke).into(),
+                        Point::from((min_x + btn_pad, btn_y + (btn_size - stroke) / 2)),
+                        (dash_w, stroke).into(),
                     ),
                     CommitCounter::default(),
                     sym_white,
@@ -3667,100 +4139,93 @@ pub(crate) fn draw_window_titlebar(
                 )));
             }
 
-            // 2. Maximize / Restore '□' symbol
-            if is_maximized {
-                let r_w = (9.0 * scale).round() as i32;
-                let r_h = (9.0 * scale).round() as i32;
-                let off = (3.0 * scale).round() as i32;
-                // Back frame (top & right edges)
+            // 7. Interactive Snap Layouts Flyout Card when hovering Maximize ('□') button
+            if flyout_hovered {
+                let flyout_log = crate::layout::snap_flyout_bounds(log_rect);
+                let hovered_zone = crate::layout::hit_test_snap_flyout(log_rect, cursor_loc);
+                let flyout_phys = Rectangle::new(
+                    flyout_log.loc.to_physical_precise_round(scale),
+                    flyout_log.size.to_physical_precise_round(scale),
+                );
+
+                // Smoked acrylic flyout plate
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_pad + off, btn_y + btn_pad)), (r_w, stroke).into()),
+                    flyout_phys,
                     CommitCounter::default(),
-                    sym_white,
+                    Color32F::new(0.08, 0.09, 0.13, 0.97),
+                    Kind::Unspecified,
+                )));
+                draw_glow_ring(&mut tb_elements, flyout_phys, 0, 2, accent, 4);
+
+                let pad = (6.0 * scale).round() as i32;
+                let gap = (4.0 * scale).round() as i32;
+                let group_w = (flyout_phys.size.w - pad * 2 - gap * 2) / 3;
+                let group_h = (flyout_phys.size.h - pad * 2).max(16);
+                let gy = flyout_phys.loc.y + pad;
+
+                let tile_color = |zone: crate::layout::SnapZone| {
+                    if hovered_zone == Some(zone) {
+                        Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, 0.95)
+                    } else {
+                        Color32F::new(0.22, 0.26, 0.34, 0.92)
+                    }
+                };
+
+                // Group 1: [1/2 Left | 1/2 Right]
+                let g1_x = flyout_phys.loc.x + pad;
+                let half_gw = (group_w - gap) / 2;
+                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                    Id::new(),
+                    Rectangle::new(Point::from((g1_x, gy)), (half_gw, group_h).into()),
+                    CommitCounter::default(),
+                    tile_color(crate::layout::SnapZone::LeftHalf),
                     Kind::Unspecified,
                 )));
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_pad + off + r_w - stroke, btn_y + btn_pad)), (stroke, r_h).into()),
+                    Rectangle::new(Point::from((g1_x + half_gw + gap, gy)), (group_w - half_gw - gap, group_h).into()),
                     CommitCounter::default(),
-                    sym_white,
+                    tile_color(crate::layout::SnapZone::RightHalf),
                     Kind::Unspecified,
                 )));
-                // Front frame (all 4 edges)
+
+                // Group 2: [2/3 Left | 1/3 Right]
+                let g2_x = g1_x + group_w + gap;
+                let two_thirds_gw = ((group_w - gap) * 2) / 3;
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad + off)), (r_w, stroke).into()),
+                    Rectangle::new(Point::from((g2_x, gy)), (two_thirds_gw, group_h).into()),
                     CommitCounter::default(),
-                    sym_white,
-                    Kind::Unspecified,
-                )));
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad + off + r_h - stroke)), (r_w, stroke).into()),
-                    CommitCounter::default(),
-                    sym_white,
+                    tile_color(crate::layout::SnapZone::LeftTwoThirds),
                     Kind::Unspecified,
                 )));
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad + off)), (stroke, r_h).into()),
+                    Rectangle::new(Point::from((g2_x + two_thirds_gw + gap, gy)), (group_w - two_thirds_gw - gap, group_h).into()),
                     CommitCounter::default(),
-                    sym_white,
+                    tile_color(crate::layout::SnapZone::RightOneThird),
+                    Kind::Unspecified,
+                )));
+
+                // Group 3: [Top-Left 1/4 | Bottom-Right 1/4]
+                let g3_x = g2_x + group_w + gap;
+                let half_gh = (group_h - gap) / 2;
+                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                    Id::new(),
+                    Rectangle::new(Point::from((g3_x, gy)), (group_w, half_gh).into()),
+                    CommitCounter::default(),
+                    tile_color(crate::layout::SnapZone::TopLeftQuarter),
                     Kind::Unspecified,
                 )));
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_pad + r_w - stroke, btn_y + btn_pad + off)), (stroke, r_h).into()),
+                    Rectangle::new(Point::from((g3_x, gy + half_gh + gap)), (group_w, group_h - half_gh - gap).into()),
                     CommitCounter::default(),
-                    sym_white,
-                    Kind::Unspecified,
-                )));
-            } else {
-                let sq_w = btn_size - btn_pad * 2;
-                let sq_h = btn_size - btn_pad * 2;
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad)), (sq_w, stroke).into()),
-                    CommitCounter::default(),
-                    sym_white,
-                    Kind::Unspecified,
-                )));
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_size - btn_pad - stroke)), (sq_w, stroke).into()),
-                    CommitCounter::default(),
-                    sym_white,
-                    Kind::Unspecified,
-                )));
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_pad, btn_y + btn_pad)), (stroke, sq_h).into()),
-                    CommitCounter::default(),
-                    sym_white,
-                    Kind::Unspecified,
-                )));
-                tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    Rectangle::new(Point::from((max_x + btn_size - btn_pad - stroke, btn_y + btn_pad)), (stroke, sq_h).into()),
-                    CommitCounter::default(),
-                    sym_white,
+                    tile_color(crate::layout::SnapZone::BottomRightQuarter),
                     Kind::Unspecified,
                 )));
             }
-
-            // 3. Minimize '−' symbol
-            let dash_w = btn_size - btn_pad * 2;
-            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                Id::new(),
-                Rectangle::new(
-                    Point::from((min_x + btn_pad, btn_y + (btn_size - stroke) / 2)),
-                    (dash_w, stroke).into(),
-                ),
-                CommitCounter::default(),
-                sym_white,
-                Kind::Unspecified,
-            )));
         }
     }
 

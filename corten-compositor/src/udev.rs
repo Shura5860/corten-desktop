@@ -390,8 +390,16 @@ fn build_secondary_scene(
         // 2. Window Titlebar & Controls (rendered IN FRONT of client surface)
         if !is_fs {
             let is_max = state.layout_for_output(output).is_maximized(&window);
+            let is_tiled = state.layout_for_output(output).is_window_tiled(&window);
+            let win_id = crate::layout::window_stable_id(&window);
+            let tabs = state.layout_for_output(output).window_tabs_metadata(win_id);
             let (app_id, title) = crate::layout::window_metadata(&window);
             let scale = output.current_scale().fractional_scale();
+            let out_loc = output.current_location();
+            let rel_cursor = smithay::utils::Point::from((
+                state.cursor_location.x - out_loc.x as f64,
+                state.cursor_location.y - out_loc.y as f64,
+            ));
             draw_window_titlebar(
                 &mut elements,
                 renderer,
@@ -404,6 +412,9 @@ fn build_secondary_scene(
                 scale,
                 &mut state.title_cache,
                 true,
+                rel_cursor,
+                is_tiled,
+                &tabs,
             );
         }
 
@@ -2115,7 +2126,12 @@ pub fn run_drm(
                                 } else {
                                     let window_rects = state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
                                     let out_rel_loc = Point::from((rel_x, rel_y));
-                                    if let Some((target_win, dir, new_on_first, preview_rect)) =
+                                    if let Some((_tab_win, tab_rect)) =
+                                        crate::layout::detect_drag_tab_target(out_rel_loc, &window_rects, window)
+                                    {
+                                        state.snap_preview = Some(tab_rect);
+                                        state.drag_split_target = None;
+                                    } else if let Some((target_win, dir, new_on_first, preview_rect)) =
                                         crate::layout::detect_drag_split_target(out_rel_loc, &window_rects, window)
                                     {
                                         state.snap_preview = Some(preview_rect);
@@ -2185,7 +2201,8 @@ pub fn run_drm(
                                 let rel_y = loc.y - out_loc.y as f64;
                                 let out_rel_loc = Point::from((rel_x, rel_y));
 
-                                // Hover detection for window borders / corner resizing
+                                // Hover detection for window borders / corner resizing or Snap Layouts Flyout
+                                let gap = state.layout_for_output(&target_output).gap();
                                 let window_rects =
                                     state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
                                 if let Some((_, rect)) = window_rects
@@ -2193,6 +2210,15 @@ pub fn run_drm(
                                     .rev()
                                     .find(|(_, r)| r.to_f64().contains(out_rel_loc))
                                 {
+                                    if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
+                                        state.snap_preview = Some(crate::layout::compute_snap_zone_rect(
+                                            usable_area,
+                                            zone,
+                                            gap,
+                                        ));
+                                    } else {
+                                        state.snap_preview = None;
+                                    }
                                     let rw_x = out_rel_loc.x - rect.loc.x as f64;
                                     let rw_y = out_rel_loc.y - rect.loc.y as f64;
                                     let w_f = rect.size.w as f64;
@@ -2442,8 +2468,49 @@ pub fn run_drm(
                                         let h_f64 = rect.size.h as f64;
 
                                         if b.button() == 272 {
+                                            if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
+                                                let usable_area = {
+                                                    let mut map = layer_map_for_output(&target_output);
+                                                    map.arrange();
+                                                    map.non_exclusive_zone()
+                                                };
+                                                let gap = state.layout_for_output(&target_output).gap();
+                                                let snap_target = crate::layout::compute_snap_zone_rect(
+                                                    usable_area,
+                                                    zone,
+                                                    gap,
+                                                );
+                                                let layout = state.layout_for_output_mut(&target_output);
+                                                layout.set_fullscreen(&window, false);
+                                                layout.set_maximized(&window, usable_area, false);
+                                                layout.set_floating_geometry(&window, snap_target);
+                                                crate::layout::configure_window_geometry(&window, snap_target);
+                                                state.snap_preview = None;
+                                                state.sync_ipc_snapshot();
+                                                continue;
+                                            }
                                             if (0.0..=36.0).contains(&rel_win_y) {
                                                 // Clicked inside the Window Titlebar!
+                                                let win_id = crate::layout::window_stable_id(&window);
+                                                let tabs = state.layout_for_output(&target_output).window_tabs_metadata(win_id);
+                                                if let Some(tab_idx) = crate::layout::hit_test_titlebar_tab(
+                                                    rect,
+                                                    tabs.len(),
+                                                    out_rel_loc,
+                                                ) {
+                                                    let target_tab_id = tabs[tab_idx].0;
+                                                    if let Some((_, focused_win)) =
+                                                        state.layout_for_output_mut(&target_output).focus_window_by_id(target_tab_id)
+                                                    {
+                                                        if let Some(surface) = crate::layout::window_wl_surface(&focused_win) {
+                                                            if let Some(kb) = state.seat.get_keyboard() {
+                                                                kb.set_focus(&mut state, Some(surface), serial);
+                                                            }
+                                                        }
+                                                    }
+                                                    state.sync_ipc_snapshot();
+                                                    continue;
+                                                }
                                                 if rel_win_x >= (w_f64 - 32.0) && rel_win_x <= w_f64
                                                 {
                                                     // Close button clicked
@@ -2570,7 +2637,31 @@ pub fn run_drm(
                             } else if button_state == ButtonState::Released {
                                 if let Some((window, _, _)) = state.dragged_window.take() {
                                     let target_output = state.output_at(state.cursor_location);
-                                    if let Some((target_win, dir, new_on_first, _)) = state.drag_split_target.take() {
+                                    let usable_area = {
+                                        let mut map = layer_map_for_output(&target_output);
+                                        map.arrange();
+                                        map.non_exclusive_zone()
+                                    };
+                                    let out_loc = target_output.current_location();
+                                    let out_rel_loc = Point::from((
+                                        state.cursor_location.x - out_loc.x as f64,
+                                        state.cursor_location.y - out_loc.y as f64,
+                                    ));
+                                    let window_rects = state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
+                                    if let Some((target_win, target_rect)) = crate::layout::detect_drag_tab_target(
+                                        out_rel_loc,
+                                        &window_rects,
+                                        &window,
+                                    ) {
+                                        let host_id = crate::layout::window_stable_id(&target_win);
+                                        let guest_id = crate::layout::window_stable_id(&window);
+                                        let layout = state.layout_for_output_mut(&target_output);
+                                        layout.merge_windows_into_tab_group(host_id, guest_id);
+                                        layout.set_fullscreen(&window, false);
+                                        layout.set_floating_geometry(&window, target_rect);
+                                        crate::layout::configure_window_geometry(&window, target_rect);
+                                        state.snap_preview = None;
+                                    } else if let Some((target_win, dir, new_on_first, _)) = state.drag_split_target.take() {
                                         let layout = state.layout_for_output_mut(&target_output);
                                         layout.set_fullscreen(&window, false);
                                         layout.set_floating(&window, false);
@@ -3338,6 +3429,9 @@ pub fn run_drm(
             // 2. Render Corten Industrial Titlebar & Controls IN FRONT of client surface
             if !is_fs {
                 let is_max = state.layout.is_maximized(window);
+                let is_tiled = state.layout.is_window_tiled(window);
+                let win_id = crate::layout::window_stable_id(window);
+                let tabs = state.layout.window_tabs_metadata(win_id);
                 let (app_id, title) = crate::layout::window_metadata(window);
                 draw_window_titlebar(
                     &mut elements,
@@ -3351,6 +3445,9 @@ pub fn run_drm(
                     fractional_scale,
                     &mut state.title_cache,
                     true,
+                    state.cursor_location,
+                    is_tiled,
+                    &tabs,
                 );
             }
 
@@ -3395,11 +3492,15 @@ pub fn run_drm(
                         palette.primary.b,
                         halo_radiance,
                     ];
-                    let glow_elem = manager.create_element(shifted_rect, 18, 8.0, halo_color);
+                    let glow_elem = manager.create_element(shifted_rect, 22, 8.0, halo_color);
                     elements.push(CustomRenderElement::from(glow_elem));
                 }
                 draw_glow_ring(&mut elements, phys_rect, 0, ring_width, ring_color, 4);
             } else if !is_fs {
+                if let Some(manager) = glow_shader.as_ref() {
+                    let shadow_elem = manager.create_inactive_shadow_element(shifted_rect, 8.0);
+                    elements.push(CustomRenderElement::from(shadow_elem));
+                }
                 let inactive_color =
                     Color32F::new(palette.border.r, palette.border.g, palette.border.b, 0.45);
                 draw_glow_ring(&mut elements, phys_rect, 0, 1, inactive_color, 3);
@@ -3407,26 +3508,36 @@ pub fn run_drm(
         }
 
         if !has_fullscreen {
-            // Render snap preview highlight overlay if dragging a window near screen edge
+            // Render Ghost Acrylic Snap Silhouette overlay when snapping/docking a window
             if let Some(snap_rect) = state.snap_preview {
                 let snap_margin = 8;
                 let inset_loc = smithay::utils::Point::from((snap_rect.loc.x + snap_margin, snap_rect.loc.y + snap_margin));
                 let inset_size = smithay::utils::Size::from(((snap_rect.size.w - snap_margin * 2).max(50), (snap_rect.size.h - snap_margin * 2).max(50)));
+                let inset_log = Rectangle::new(inset_loc, inset_size);
                 let phys_snap = Rectangle::new(
                     inset_loc.to_physical_precise_round(fractional_scale),
                     inset_size.to_physical_precise_round(fractional_scale),
                 );
+                if let Some(manager) = glow_shader.as_ref() {
+                    let ghost_glow = manager.create_element(
+                        inset_log,
+                        16,
+                        12.0,
+                        [palette.primary.r, palette.primary.g, palette.primary.b, 0.78],
+                    );
+                    elements.push(CustomRenderElement::from(ghost_glow));
+                }
                 let snap_color = Color32F::new(
                     palette.primary.r,
                     palette.primary.g,
                     palette.primary.b,
-                    0.18,
+                    0.16,
                 );
                 let snap_border = Color32F::new(
                     palette.primary.r,
                     palette.primary.g,
                     palette.primary.b,
-                    0.75,
+                    0.82,
                 );
                 draw_glow_ring(
                     &mut elements,
@@ -3437,6 +3548,27 @@ pub fn run_drm(
                     14,
                 );
                 draw_glow_ring(&mut elements, phys_snap, 0, 2, snap_border, 14);
+                let brk_len = (18.0 * fractional_scale).round().max(8.0) as i32;
+                let brk_thk = (3.0 * fractional_scale).round().max(2.0) as i32;
+                let brk_col = Color32F::new(1.0, 0.85, 0.65, 0.92);
+                for (bx, by, bw, bh) in [
+                    (phys_snap.loc.x, phys_snap.loc.y, brk_len, brk_thk),
+                    (phys_snap.loc.x, phys_snap.loc.y, brk_thk, brk_len),
+                    (phys_snap.loc.x + phys_snap.size.w - brk_len, phys_snap.loc.y, brk_len, brk_thk),
+                    (phys_snap.loc.x + phys_snap.size.w - brk_thk, phys_snap.loc.y, brk_thk, brk_len),
+                    (phys_snap.loc.x, phys_snap.loc.y + phys_snap.size.h - brk_thk, brk_len, brk_thk),
+                    (phys_snap.loc.x, phys_snap.loc.y + phys_snap.size.h - brk_len, brk_thk, brk_len),
+                    (phys_snap.loc.x + phys_snap.size.w - brk_len, phys_snap.loc.y + phys_snap.size.h - brk_thk, brk_len, brk_thk),
+                    (phys_snap.loc.x + phys_snap.size.w - brk_thk, phys_snap.loc.y + phys_snap.size.h - brk_len, brk_thk, brk_len),
+                ] {
+                    elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
+                        Rectangle::new(smithay::utils::Point::from((bx, by)), (bw, bh).into()),
+                        cursor_commit,
+                        brk_col,
+                        Kind::Unspecified,
+                    )));
+                }
             }
 
             // Render crisp Windows-style rubberband selection box on empty desktop

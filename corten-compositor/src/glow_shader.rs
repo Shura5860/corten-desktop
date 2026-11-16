@@ -39,9 +39,11 @@ uniform vec4 u_region;
 uniform vec2 u_size;
 uniform float u_radius;
 
-float rounded_box(vec2 p, vec2 b, float r) {
-    vec2 d = abs(p) - b + vec2(r);
-    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;
+// Continuous G2 Squircle (L4 superellipse) signed distance function
+float squircle_box(vec2 p, vec2 b, float r) {
+    vec2 d = max(abs(p) - b + vec2(r), 0.0);
+    float l4 = pow(pow(d.x, 4.0) + pow(d.y, 4.0), 0.25);
+    return min(max( abs(p.x) - b.x + r, abs(p.y) - b.y + r ), 0.0) + l4 - r;
 }
 
 void main() {
@@ -50,7 +52,7 @@ void main() {
         vec2 norm_coord = (v_coords - u_region.xy) / u_region.zw;
         vec2 p = (norm_coord - 0.5) * u_size;
         vec2 b = u_size * 0.5;
-        float dist = rounded_box(p, b, u_radius);
+        float dist = squircle_box(p, b, u_radius);
         mask = 1.0 - smoothstep(-0.8, 0.8, dist);
         if (mask <= 0.001) {
             discard;
@@ -66,7 +68,11 @@ void main() {
     sum += texture2D(tex, v_coords + vec2(0.0, -u_halfpixel.y * 2.0));
     sum += texture2D(tex, v_coords + vec2(-u_halfpixel.x, -u_halfpixel.y)) * 2.0;
     vec4 blurred = sum / 12.0;
-    vec3 frosted = mix(blurred.rgb, vec3(0.09, 0.10, 0.12), u_tint);
+    // Slight chroma saturation boost (+10%) + procedural smoked acrylic micro-grain
+    float luma = dot(blurred.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 saturated = mix(vec3(luma), blurred.rgb, 1.10);
+    float grain = (fract(sin(dot(v_coords * 512.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.012;
+    vec3 frosted = clamp(mix(saturated, vec3(0.09, 0.10, 0.12), u_tint) + vec3(grain), 0.0, 1.0);
     gl_FragColor = vec4(frosted, 1.0) * alpha * mask;
 }
 "#;
@@ -123,6 +129,14 @@ impl GlassRegion {
             rect,
             corner_radius: 16.0,
             tint: 0.32,
+        }
+    }
+
+    pub fn snap_preview(rect: Rectangle<i32, Logical>) -> Self {
+        Self {
+            rect,
+            corner_radius: 12.0,
+            tint: 0.16,
         }
     }
 }
@@ -486,10 +500,11 @@ uniform vec4 u_glow_color;
 uniform float u_radius;
 uniform float u_glow_size;
 
-// Signed distance function for a 2D rounded box
-float sd_rounded_box(vec2 p, vec2 b, float r) {
-    vec2 q = abs(p) - b + vec2(r);
-    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+// Continuous G2 Squircle (L4 superellipse) signed distance function
+float sd_squircle_box(vec2 p, vec2 b, float r) {
+    vec2 d = max(abs(p) - b + vec2(r), 0.0);
+    float l4 = pow(pow(d.x, 4.0) + pow(d.y, 4.0), 0.25);
+    return min(max(abs(p.x) - b.x + r, abs(p.y) - b.y + r), 0.0) + l4 - r;
 }
 
 void main() {
@@ -499,21 +514,36 @@ void main() {
     vec2 half_window = center - vec2(u_glow_size);
 
     vec2 p = pixel_coord - center;
-    float dist = sd_rounded_box(p, half_window, u_radius);
+    float dist = sd_squircle_box(p, half_window, u_radius);
 
     if (dist < 0.0) {
         // Inside the window bounds - discard so window surface shows through
         discard;
     } else if (dist <= u_glow_size) {
-        // True smooth exponential Gaussian falloff
         float norm_d = dist / u_glow_size;
-        // Soft exponential falloff for real blur simulation
-        float intensity = exp(-norm_d * norm_d * 4.2);
-        // Bright core highlight line near window border
-        float core = exp(-norm_d * 12.0) * 0.45;
-        float final_a = clamp((intensity + core) * u_glow_color.a * alpha, 0.0, 1.0);
 
-        gl_FragColor = vec4(u_glow_color.rgb * final_a, final_a);
+        // Layer 1: Ambient Occlusion (Tight 5px dark contact shadow shifted +1.8px downward)
+        vec2 p_ao = p - vec2(0.0, 1.8);
+        float dist_ao = max(sd_squircle_box(p_ao, half_window, u_radius), 0.0);
+        float ao_alpha = exp(-dist_ao * 0.55) * 0.52;
+
+        // Layer 2: Key-Light Elevation Shadow (Soft downward-cast Gaussian shadow shifted +4.5px)
+        vec2 p_key = p - vec2(0.0, 4.5);
+        float dist_key = max(sd_squircle_box(p_key, half_window, u_radius), 0.0) / max(u_glow_size, 1.0);
+        float key_alpha = exp(-dist_key * dist_key * 3.6) * 0.38;
+
+        // Layer 3: Corten Radiant Halo & Specular Rim Highlight
+        float halo_intensity = exp(-norm_d * norm_d * 4.2);
+        float core = exp(-norm_d * 12.0) * 0.48;
+        float top_specular = (p.y < -half_window.y + 3.0 && dist < 2.2) ? exp(-dist * 1.4) * 0.28 : 0.0;
+
+        float color_a = clamp((halo_intensity + core) * u_glow_color.a, 0.0, 1.0);
+        float shadow_a = clamp(ao_alpha + key_alpha, 0.0, 0.72) * clamp(u_glow_color.a + 0.35, 0.0, 1.0);
+
+        vec3 base_rgb = u_glow_color.rgb * color_a + vec3(1.0) * top_specular;
+        float final_a = clamp((max(color_a, shadow_a) + top_specular) * alpha, 0.0, 1.0);
+
+        gl_FragColor = vec4(clamp(base_rgb, 0.0, 1.0), final_a);
     } else {
         discard;
     }
@@ -574,6 +604,15 @@ impl GlowShaderManager {
             uniforms,
             Kind::Unspecified,
         )
+    }
+
+    /// Creates a grounded 4dp Dual-Layer elevation shadow element for inactive windows.
+    pub fn create_inactive_shadow_element(
+        &self,
+        window_rect: Rectangle<i32, Logical>,
+        corner_radius: f32,
+    ) -> PixelShaderElement {
+        self.create_element(window_rect, 12, corner_radius, [0.04, 0.05, 0.07, 0.28])
     }
 }
 

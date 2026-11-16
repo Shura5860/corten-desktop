@@ -21,7 +21,7 @@ use corten_theme::{
 };
 use iced::widget::{
     button, column, container, horizontal_space, image, mouse_area, row, scrollable, slider, text,
-    text_input, tooltip, vertical_space,
+    text_input, vertical_space,
 };
 
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
@@ -519,6 +519,9 @@ pub struct CortenPanelApp {
     audio_vu_level: (f32, f32),
     last_dock_width: u32,
     hovered_dock_item: Option<String>,
+    launch_bounce: Option<(ActiveApp, u8)>,
+    eq_tick: u8,
+    osd_display_level: f32,
 }
 
 fn check_system_integrity(sentinel_mtimes: &mut std::collections::HashMap<std::path::PathBuf, u64>) -> Option<String> {
@@ -828,20 +831,23 @@ fn get_trash_count() -> usize {
 
 impl CortenPanelApp {
     fn calculate_dock_width(&self) -> u32 {
-        let start_orb_w = 64 + 12; // Start Orb + spacing
-        let capsule_padding = 40; // 20px padding left + right
+        let start_orb_w = 58 + 12; // Independent Start Orb (58px) + 12px gap
+        let capsule_padding = 36;  // 18px left + 18px right inner padding
 
-        // Pinned apps width (dynamic based on pinned count + 56px for all_apps_btn)
+        // 1. Left Zone: Workspaces (fixed slot grid so width never jitters)
+        let mut ws_set = std::collections::BTreeSet::from([1usize, 2usize, self.active_workspace]);
+        for &occ in &self.occupied_workspaces {
+            let occ_u = occ as usize;
+            if (1..=9).contains(&occ_u) {
+                ws_set.insert(occ_u);
+            }
+        }
+        let workspaces_w = (ws_set.len() as u32) * 34 + 18;
+
+        // 2. Center Zone: Pinned Apps + Unpinned Running Apps + Launchpad Grid Button
         let pinned_count = self.config.pinned_apps.len() as u32;
-        let pinned_w = if pinned_count > 0 {
-            pinned_count * 54 + pinned_count * 10 + 46
-        } else {
-            46
-        };
-
-        // Dynamic unpinned running apps
         let mut seen = std::collections::HashSet::new();
-        let mut dyn_unpinned_count = 0;
+        let mut dyn_unpinned_count = 0u32;
         for (_, app_id, _title, _, _, _) in &self.compositor_windows {
             let effective_id = if !app_id.trim().is_empty() {
                 app_id.as_str()
@@ -850,85 +856,27 @@ impl CortenPanelApp {
             } else {
                 continue;
             };
-            let is_pinned = self.config.pinned_apps.iter().any(|pin| is_matching_pinned(effective_id, pin));
+            let is_pinned = self
+                .config
+                .pinned_apps
+                .iter()
+                .any(|pin| is_matching_pinned(effective_id, pin));
             if !is_pinned && seen.insert(effective_id.to_string()) {
                 dyn_unpinned_count += 1;
             }
         }
-        let dynamic_apps_w = dyn_unpinned_count * 66;
+        let total_app_slots = pinned_count + dyn_unpinned_count + 1; // +1 for All Apps Launchpad
+        let apps_w = total_app_slots * 56;
 
-        // Media player capsule
-        let active_player = self
-            .media_players
-            .iter()
-            .find(|p| p.playback_status == corten_services::mpris::PlaybackStatus::Playing)
-            .or_else(|| self.media_players.first());
-        let media_w = if active_player.map(|p| !p.title.is_empty()).unwrap_or(false) {
-            210
-        } else {
-            0
-        };
+        // 3. Right Zone: Unified Control Center Pill + Downloads + Trash + Clock (Fixed width)
+        let tray_w = (self.tray_items.len() as u32) * 28;
+        let right_w = 248 + tray_w;
 
-        // Divider
-        let divider_w = 13;
+        let dividers_w = 26; // Two 1px vertical dividers + spacing
+        let total_content_w =
+            start_orb_w + capsule_padding + workspaces_w + apps_w + dividers_w + right_w;
 
-        // Right section
-        let mut right_w = 0;
-        let mut right_items_count = 0;
-
-        if self.recording_active {
-            right_w += 70;
-            right_items_count += 1;
-        }
-        if self.mic_active {
-            right_w += 65;
-            right_items_count += 1;
-        }
-        if self.config.show_audio {
-            right_w += if self.show_volume_slider { 220 } else { 38 };
-            right_items_count += 1;
-            if self.audio_vu_level.0 > 0.05 || self.audio_vu_level.1 > 0.05 {
-                right_w += 50;
-                right_items_count += 1;
-            }
-        }
-        if self.config.show_network {
-            right_w += if self.show_wifi_details { 140 } else { 38 };
-            right_items_count += 1;
-        }
-        if !self.tray_items.is_empty() {
-            right_w += self.tray_items.len() as u32 * 32;
-            right_items_count += 1;
-        }
-        let active_scripts = self.custom_script_outputs.iter().filter(|s| !s.text.is_empty()).count();
-        if active_scripts > 0 {
-            right_w += active_scripts as u32 * 80;
-            right_items_count += active_scripts;
-        }
-        // downloads, trash, clock
-        right_w += 36 + 42 + 95;
-        right_items_count += 3;
-
-        if right_items_count > 1 {
-            right_w += (right_items_count - 1) as u32 * 8;
-        }
-
-        let total_content_w = start_orb_w + capsule_padding + pinned_w + dynamic_apps_w as u32 + media_w + divider_w + right_w + 40;
-
-        let popover_open = self.show_control_center
-            || self.show_power_menu
-            || self.show_calendar
-            || self.show_clipboard_modal
-            || self.show_notification_center
-            || self.show_downloads_stack
-            || self.show_mini_task_manager
-            || self.dock_context_menu.is_some()
-            || self.active_window_previews.is_some()
-            || self.show_net_speed_details
-            || self.show_desktop_context_hub;
-
-        let min_w = if popover_open { 560 } else { 520 };
-        total_content_w.max(min_w).clamp(520, 1800)
+        total_content_w.clamp(680, 1800)
     }
 
     fn layer_config_task(&self) -> Task<Message> {
@@ -950,19 +898,14 @@ impl CortenPanelApp {
         } else if popover_open {
             560
         } else if self.osd_state.is_some() {
-            136
+            128
         } else {
-            78
-        };
-
-        let target_width = if popover_open {
-            dynamic_width.max(430)
-        } else {
-            dynamic_width
+            68
         };
 
         Task::done(Message::LayerAction(LayershellCustomActions::SizeChange((
-            target_width, height,
+            dynamic_width,
+            height,
         ))))
     }
 }
@@ -1095,6 +1038,9 @@ impl Application for CortenPanelApp {
                 audio_vu_level: (0.0, 0.0),
                 last_dock_width: 600,
                 hovered_dock_item: None,
+                launch_bounce: None,
+                eq_tick: 0,
+                osd_display_level: 50.0,
             };
         let init_dock_w = app.calculate_dock_width();
         app.last_dock_width = init_dock_w;
@@ -1133,6 +1079,11 @@ impl Application for CortenPanelApp {
         let timer = iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick);
         
         let needs_animation = !self.popover_transition.is_complete()
+            || self.launch_bounce.is_some()
+            || self
+                .osd_state
+                .as_ref()
+                .is_some_and(|(_, lvl, _)| (self.osd_display_level - *lvl as f32).abs() > 0.2)
             || self.media_players.iter().any(|p| p.playback_status == corten_services::mpris::PlaybackStatus::Playing)
             || !self.app_streams.is_empty()
             || self.audio_vu_level.0 > 0.01
@@ -1206,9 +1157,21 @@ impl Application for CortenPanelApp {
         match message {
             Message::AnimationTick => {
                 self.popover_transition.tick(16);
+                if let Some((_, target_lvl, _)) = &self.osd_state {
+                    self.osd_display_level =
+                        Transition::smooth_lerp(self.osd_display_level, *target_lvl as f32, 0.28);
+                }
+                if let Some((b_app, ticks)) = self.launch_bounce {
+                    if ticks > 1 {
+                        self.launch_bounce = Some((b_app, ticks - 1));
+                    } else {
+                        self.launch_bounce = None;
+                    }
+                }
                 let is_audio_playing = self.media_players.iter().any(|p| p.playback_status == corten_services::mpris::PlaybackStatus::Playing) || !self.app_streams.is_empty();
                 if is_audio_playing {
                     let now = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis();
+                    self.eq_tick = ((now / 180) % 4) as u8;
                     let phase = (now as f32 / 110.0).sin();
                     let phase2 = (now as f32 / 75.0).cos();
                     let target_l = (0.50 + 0.35 * phase + 0.12 * phase2).clamp(0.12, 0.96);
@@ -1509,6 +1472,9 @@ impl Application for CortenPanelApp {
                     self.listening_ports = SystemInfo::get_listening_dev_ports();
                     self.app_streams = corten_services::pipewire::list_app_streams();
                 }
+                if current_secs.is_multiple_of(4) {
+                    self.top_processes = SystemInfo::get_top_memory_processes(6);
+                }
                 let (_rx_s, _tx_s, rx_fmt, tx_fmt) = self.net_speed_tracker.sample_speed();
                 self.net_speed_display = (rx_fmt, tx_fmt);
                 self.tray_items = SystemInfo::get_active_tray_items();
@@ -1732,6 +1698,8 @@ impl Application for CortenPanelApp {
             }
             Message::SelectApp(app) => {
                 self.active_app = app;
+                self.launch_bounce = Some((app, 18));
+                corten_services::acoustic::play(corten_services::acoustic::AcousticCue::ToggleClick);
                 let existing_id = self.compositor_windows.iter().find_map(
                     |(id, app_id, title, _, _, _)| {
                         if is_matching_window(app_id, title, app) {
@@ -1888,7 +1856,9 @@ impl Application for CortenPanelApp {
                 }
             }
             Message::DockHover(hover_app_opt) => {
-                self.hovered_dock_item = hover_app_opt;
+                if self.hovered_dock_item != hover_app_opt {
+                    self.hovered_dock_item = hover_app_opt;
+                }
             }
             Message::MediaPlayersUpdated(players) => {
                 self.media_players = players;
@@ -2067,9 +2037,17 @@ impl Application for CortenPanelApp {
                 self.mic_active = SystemInfo::is_mic_active();
             }
             Message::ToggleAudioSlider => {
-                self.show_volume_slider = !self.show_volume_slider;
-                if self.show_volume_slider {
-                    self.show_wifi_details = false;
+                self.show_control_center = !self.show_control_center;
+                if self.show_control_center {
+                    self.show_power_menu = false;
+                    self.show_calendar = false;
+                    self.dock_context_menu = None;
+                    self.active_window_previews = None;
+                    self.show_net_speed_details = false;
+                    self.show_downloads_stack = false;
+                    self.show_mini_task_manager = false;
+                    self.show_desktop_context_hub = false;
+                    self.popover_transition.restart();
                 }
                 return self.layer_config_task();
             }
@@ -2136,12 +2114,13 @@ impl Application for CortenPanelApp {
                     self.show_calendar = false;
                     self.show_power_menu = false;
                     self.show_wifi_modal = false;
-                    let config_task = self.layer_config_task();
-                    let scan_task = Task::perform(
-                        async { tokio::task::spawn_blocking(corten_services::network::scan_wifi).await.unwrap_or_default() },
-                        Message::WifiScanned,
-                    );
-                    return Task::batch(vec![config_task, scan_task]);
+                    self.dock_context_menu = None;
+                    self.active_window_previews = None;
+                    self.show_net_speed_details = false;
+                    self.show_downloads_stack = false;
+                    self.show_mini_task_manager = false;
+                    self.show_desktop_context_hub = false;
+                    self.popover_transition.restart();
                 }
                 return self.layer_config_task();
             }
@@ -2183,6 +2162,7 @@ impl Application for CortenPanelApp {
             }
             Message::ToggleCaffeine => {
                 self.caffeine_enabled = !self.caffeine_enabled;
+                corten_services::acoustic::play(corten_services::acoustic::AcousticCue::ToggleClick);
                 if self.caffeine_enabled {
                     info!("Caffeine mode activated: screen keep-awake enabled");
                     let _ = std::process::Command::new("systemd-inhibit")
@@ -2202,11 +2182,13 @@ impl Application for CortenPanelApp {
                 }
             }
             Message::SetPowerProfile(profile) => {
+                corten_services::acoustic::play(corten_services::acoustic::AcousticCue::ToggleClick);
                 let _ = corten_services::power_profiles::set_active_profile(&profile);
                 self.active_power_profile = profile;
             }
             Message::ToggleDnd => {
                 self.dnd_enabled = !self.dnd_enabled;
+                corten_services::acoustic::play(corten_services::acoustic::AcousticCue::ToggleClick);
                 let enabled = self.dnd_enabled;
                 tokio::spawn(async move {
                     if let Ok(conn) = zbus::Connection::session().await {
@@ -2230,6 +2212,7 @@ impl Application for CortenPanelApp {
             }
             Message::ToggleNightLight => {
                 self.night_light_enabled = !self.night_light_enabled;
+                corten_services::acoustic::play(corten_services::acoustic::AcousticCue::ToggleClick);
                 if let Ok(mut cm) = corten_config::ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default("displays") {
                     let mut cfg = cm.get().clone();
                     cfg.night_light = self.night_light_enabled;
@@ -2384,6 +2367,7 @@ impl Application for CortenPanelApp {
                 self.recording_active = active;
             }
             Message::ToggleBluetooth => {
+                corten_services::acoustic::play(corten_services::acoustic::AcousticCue::ToggleClick);
                 let powered = self.bluetooth_status.0;
                 if bluetooth::set_powered(!powered) {
                     self.bluetooth_status = bluetooth::status();
@@ -2568,7 +2552,9 @@ impl Application for CortenPanelApp {
 
     fn view(&self) -> Element<'_, Self::Message> {
         let palette = Palette::for_mode(self.theme_mode).with_patina(self.active_patina);
-        let popover_alpha = (0.72 + 0.28 * self.popover_transition.spring()).clamp(0.0, 1.0);
+        let popover_spring = self.popover_transition.spring();
+        let popover_alpha = (0.68 + 0.32 * popover_spring).clamp(0.0, 1.0);
+        let popover_lift_gap = (4.0 + 8.0 * popover_spring.clamp(0.0, 1.15)).round();
 
         let render_vu_meter = |left: f32, right: f32, pal: Palette| -> Element<'_, Self::Message> {
             let bars = [" ", " ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -2606,16 +2592,16 @@ impl Application for CortenPanelApp {
         };
 
         // ==================== SECTION 1: LAUNCHER & WORKSPACES ====================
-        // ==================== SECTION 1: LAUNCHER & WORKSPACES ====================
-        // Corten Independent Start Orb (Floating Start Emblem Button)
+        // ==================== SECTION 1: DETACHED START ORB & WORKSPACES ====================
+        // Corten Independent Start Orb (58x58 Floating Start Emblem Button matching 58px Dock Capsule)
         let start_orb = button(
             container(
                 image(image::Handle::from_bytes(LOGO_PNG.to_vec()))
-                    .width(Length::Fixed(36.0))
-                    .height(Length::Fixed(36.0)),
+                    .width(Length::Fixed(32.0))
+                    .height(Length::Fixed(32.0)),
             )
-            .width(Length::Fixed(64.0))
-            .height(Length::Fixed(64.0))
+            .width(Length::Fixed(58.0))
+            .height(Length::Fixed(58.0))
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .style(move |_| container::Style {
@@ -2625,13 +2611,13 @@ impl Application for CortenPanelApp {
                 border: iced::Border {
                     color: palette.primary.to_iced(),
                     width: 1.5,
-                    radius: iced::border::Radius::from(32.0),
+                    radius: iced::border::Radius::from(29.0),
                 },
                 ..Default::default()
             }),
         )
-        .width(Length::Fixed(64.0))
-        .height(Length::Fixed(64.0))
+        .width(Length::Fixed(58.0))
+        .height(Length::Fixed(58.0))
         .padding(0)
         .style(move |_, status| {
             let bg = match status {
@@ -2646,7 +2632,7 @@ impl Application for CortenPanelApp {
             button::Style {
                 background: bg,
                 border: iced::Border {
-                    radius: iced::border::Radius::from(32.0),
+                    radius: iced::border::Radius::from(29.0),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -2654,57 +2640,8 @@ impl Application for CortenPanelApp {
         })
         .on_press(Message::OpenLauncher);
 
-        // Workspaces Module: [<] [Active Workspace] [ 1 ] [ 2 ] matching concept
+        // Symmetrical Left Zone: Fixed-Slot Workspaces Strip ([ 1 ] [ 2 ] ...)
         let t = self.language.t();
-        let prev_ws_btn = button(text("<").size(12.0).color(palette.text_muted.to_iced()))
-            .padding([2, 5])
-            .style(|_, _| button::Style::default())
-            .on_press(Message::SwitchWorkspace(if self.active_workspace > 1 {
-                self.active_workspace - 1
-            } else {
-                1
-            }));
-
-        let (current_icon, current_name) = match self.active_workspace {
-            1 => (Icon::CODE, t.ws_code),
-            2 => (Icon::GLOBE, t.ws_web),
-            3 => (Icon::APP_WINDOW, t.ws_chat),
-            4 => (Icon::MUSIC, t.ws_media),
-            5 => (Icon::SETTINGS, "5"),
-            _ => (Icon::MONITOR, "ws"),
-        };
-
-        let active_ws_label = container(
-            row![
-                text(current_icon).font(LUCIDE_FONT).size(13.0).color(palette.primary.to_iced()),
-                text(format!("{}: {}", self.active_workspace, current_name))
-                    .size(11.0)
-                    .color(palette.primary.to_iced()),
-            ]
-            .spacing(4)
-            .align_y(Alignment::Center),
-        )
-        .padding([4, 8])
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                palette.primary.r,
-                palette.primary.g,
-                palette.primary.b,
-                0.12,
-            ))),
-            border: iced::Border {
-                color: iced::Color::from_rgba(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.25,
-                ),
-                width: 1.0,
-                radius: iced::border::Radius::from(8.0),
-            },
-            ..Default::default()
-        });
-
         let mut visible_workspaces: Vec<usize> = vec![1, 2];
         if !visible_workspaces.contains(&self.active_workspace) {
             visible_workspaces.push(self.active_workspace);
@@ -2717,9 +2654,7 @@ impl Application for CortenPanelApp {
         }
         visible_workspaces.sort_unstable();
 
-        let mut spaces_row = row![prev_ws_btn, active_ws_label]
-            .spacing(6)
-            .align_y(Alignment::Center);
+        let mut spaces_row = row![].spacing(6).align_y(Alignment::Center);
 
         for ws_num in visible_workspaces {
             let is_current = self.active_workspace == ws_num;
@@ -2740,52 +2675,97 @@ impl Application for CortenPanelApp {
                 } else {
                     palette.text_muted.to_iced()
                 }),
-                text(format!("{}", ws_num)).size(11.0).font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                }).color(if is_current {
-                    palette.text_primary.to_iced()
-                } else {
-                    palette.text_muted.to_iced()
-                }),
+                text(format!("{}", ws_num))
+                    .size(11.0)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..Default::default()
+                    })
+                    .color(if is_current {
+                        palette.text_primary.to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    }),
             ]
             .spacing(3)
             .align_y(Alignment::Center);
 
             let ws_btn = button(
                 container(ws_content)
-                    .padding([2, 6])
+                    .width(Length::Fixed(30.0))
+                    .height(Length::Fixed(28.0))
                     .center_x(Length::Fill)
                     .center_y(Length::Fill),
             )
+            .width(Length::Fixed(30.0))
+            .height(Length::Fixed(28.0))
             .padding(0)
-            .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(if is_current {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.16)
-                } else if is_occupied {
-                    iced::Color::from_rgba(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.12,
-                    )
-                } else {
-                    iced::Color::TRANSPARENT
-                })),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(6.0),
+            .style(move |_, status| {
+                let hovered = matches!(status, button::Status::Hovered);
+                button::Style {
+                    background: Some(iced::Background::Color(if is_current {
+                        iced::Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.22,
+                        )
+                    } else if hovered {
+                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.14)
+                    } else if is_occupied {
+                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.07)
+                    } else {
+                        iced::Color::TRANSPARENT
+                    })),
+                    border: iced::Border {
+                        color: if is_current {
+                            iced::Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.55,
+                            )
+                        } else {
+                            iced::Color::TRANSPARENT
+                        },
+                        width: 1.0,
+                        radius: iced::border::Radius::from(8.0),
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
+                }
             })
             .on_press(Message::SwitchWorkspace(ws_num));
             spaces_row = spaces_row.push(ws_btn);
         }
 
-        let _left_section: Element<'_, Self::Message> = spaces_row.into();
+        let divider1 = container(row![])
+            .width(Length::Fixed(1.0))
+            .height(Length::Fixed(30.0))
+            .style(|_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.12,
+                ))),
+                ..Default::default()
+            });
 
-        // ==================== SECTION 2: OPEN APPS WITH ACTIVE BAR & RUNNING DOTS ====================
-        let mut apps_row = row![].spacing(10).align_y(Alignment::Center);
+        // ==================== SECTION 2: CENTER APPS (FIXED-SLOT GRID, ZERO CLICK DROP) ====================
+        let mut apps_row = row![].spacing(6).align_y(Alignment::Center);
+        let hovered_pinned_idx = self
+            .hovered_dock_item
+            .as_ref()
+            .and_then(|h| self.config.pinned_apps.iter().position(|p| p == h));
+        let is_build_active = self.top_processes.iter().any(|p| {
+            let n = p.name.to_lowercase();
+            n.contains("cargo")
+                || n.contains("rustc")
+                || n.contains("make")
+                || n.contains("gcc")
+                || n.contains("clang")
+                || n.contains("npm")
+        }) || self.compositor_windows.iter().any(|(_, _, title, _, _, _)| {
+            let t = title.to_lowercase();
+            t.contains("cargo ") || t.contains("compiling") || t.contains("building")
+        });
 
         for (idx, app_name) in self.config.pinned_apps.iter().enumerate() {
             let app = match app_name.as_str() {
@@ -2819,10 +2799,24 @@ impl Application for CortenPanelApp {
                 .any(|(_, aid, title, _, act, _)| is_matching_window(aid, title, app) && *act)
                 || (app == self.active_app && is_running);
 
-            let is_hovered = self.hovered_dock_item.as_deref() == Some(app_name.as_str());
+            // Parabolic Dock Magnification & Damped Harmonic Launch Bounce inside a fixed 50x48 slot
+            let hover_dist = hovered_pinned_idx.map(|h| h.abs_diff(idx));
+            let (icon_size, glyph_size, base_lift) = match hover_dist {
+                Some(0) => (36.0, 29.0, 4.0),
+                Some(1) => (33.0, 26.5, 2.0),
+                _ => (30.0, 24.0, 0.0),
+            };
+            let bounce_lift = match self.launch_bounce {
+                Some((b_app, ticks)) if b_app == app => {
+                    (ticks as f32 * 0.65).sin().abs() * (ticks as f32 / 18.0) * 5.0
+                }
+                _ => 0.0,
+            };
+            let total_lift = (base_lift + bounce_lift).clamp(0.0, 5.0);
+            let top_pad = 5.0 - total_lift;
+            let bottom_pad = total_lift;
 
             let real_icon = resolve_system_icon(app_name);
-            let icon_size = if is_hovered { 38.0 } else { 34.0 };
             let icon_view: Element<'_, Self::Message> = if let Some(ref icon_path) = real_icon {
                 iced::widget::image(image::Handle::from_path(icon_path))
                     .width(Length::Fixed(icon_size))
@@ -2839,50 +2833,57 @@ impl Application for CortenPanelApp {
                 };
                 text(icon_char)
                     .font(LUCIDE_FONT)
-                    .size(if is_hovered { 32.0 } else { 28.0 })
+                    .size(glyph_size)
                     .color(if is_active {
                         palette.primary.to_iced()
                     } else if is_running {
                         iced::Color::from_rgba(1.0, 1.0, 1.0, 0.95)
                     } else {
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.50)
+                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.55)
                     })
                     .into()
             };
 
             let icon_container = container(icon_view)
-                .width(Length::Fixed(50.0))
-                .height(Length::Fixed(44.0))
+                .width(Length::Fixed(48.0))
+                .height(Length::Fixed(36.0))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill);
 
             let elevated_icon = iced::widget::column![
-                vertical_space().height(if is_hovered { 0.0 } else { 6.0 }),
+                vertical_space().height(top_pad),
                 icon_container,
-                vertical_space().height(if is_hovered { 6.0 } else { 0.0 }),
+                vertical_space().height(bottom_pad),
             ]
             .align_x(Alignment::Center);
 
-            // Running indicator: Glowing bar if active, 2 dots if multiple windows, 1 dot if 1 window
-            let indicator: Element<'_, Self::Message> = if is_active {
+            let show_build_badge = app == ActiveApp::Terminal && is_build_active;
+            let bar_color = if show_build_badge {
+                palette.warning.to_iced()
+            } else {
+                palette.primary.to_iced()
+            };
+
+            // Running indicator: Refined glowing pill/dot
+            let indicator: Element<'_, Self::Message> = if is_active || show_build_badge {
                 container(row![])
-                    .width(Length::Fixed(24.0))
-                    .height(Length::Fixed(4.0))
+                    .width(Length::Fixed(if show_build_badge { 22.0 } else { 18.0 }))
+                    .height(Length::Fixed(3.5))
                     .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(palette.primary.to_iced())),
+                        background: Some(iced::Background::Color(bar_color)),
                         border: iced::Border {
                             radius: iced::border::Radius::from(2.0),
                             ..Default::default()
                         },
                         shadow: iced::Shadow {
                             color: iced::Color::from_rgba(
-                                palette.primary.r,
-                                palette.primary.g,
-                                palette.primary.b,
-                                0.70,
+                                bar_color.r,
+                                bar_color.g,
+                                bar_color.b,
+                                0.75,
                             ),
                             offset: iced::Vector::new(0.0, 0.0),
-                            blur_radius: 6.0,
+                            blur_radius: 5.0,
                         },
                         ..Default::default()
                     })
@@ -2890,18 +2891,13 @@ impl Application for CortenPanelApp {
             } else if win_count >= 2 {
                 let make_dot = || {
                     container(row![])
-                        .width(Length::Fixed(4.5))
-                        .height(Length::Fixed(4.5))
+                        .width(Length::Fixed(4.0))
+                        .height(Length::Fixed(4.0))
                         .style(move |_| container::Style {
                             background: Some(iced::Background::Color(palette.primary.to_iced())),
                             border: iced::Border {
                                 radius: iced::border::Radius::from(Radius::FULL),
                                 ..Default::default()
-                            },
-                            shadow: iced::Shadow {
-                                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.65),
-                                offset: iced::Vector::new(0.0, 0.0),
-                                blur_radius: 4.0,
                             },
                             ..Default::default()
                         })
@@ -2912,18 +2908,13 @@ impl Application for CortenPanelApp {
                     .into()
             } else if is_running {
                 container(row![])
-                    .width(Length::Fixed(5.0))
-                    .height(Length::Fixed(5.0))
+                    .width(Length::Fixed(4.5))
+                    .height(Length::Fixed(4.5))
                     .style(move |_| container::Style {
                         background: Some(iced::Background::Color(palette.primary.to_iced())),
                         border: iced::Border {
                             radius: iced::border::Radius::from(Radius::FULL),
                             ..Default::default()
-                        },
-                        shadow: iced::Shadow {
-                            color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.60),
-                            offset: iced::Vector::new(0.0, 0.0),
-                            blur_radius: 4.0,
                         },
                         ..Default::default()
                     })
@@ -2931,7 +2922,7 @@ impl Application for CortenPanelApp {
             } else {
                 container(row![])
                     .width(Length::Fixed(4.0))
-                    .height(Length::Fixed(4.0))
+                    .height(Length::Fixed(3.5))
                     .style(|_| container::Style {
                         background: Some(iced::Background::Color(iced::Color::TRANSPARENT)),
                         ..Default::default()
@@ -2947,13 +2938,23 @@ impl Application for CortenPanelApp {
 
             let app_item = button(
                 iced::widget::column![elevated_icon, indicator]
-                    .spacing(2)
+                    .spacing(1)
                     .align_x(Alignment::Center),
             )
+            .width(Length::Fixed(50.0))
+            .height(Length::Fixed(48.0))
             .padding(0)
             .style(move |_, status| match status {
+                button::Status::Hovered => button::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(10.0),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
                 button::Status::Pressed => button::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10))),
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.14))),
                     border: iced::Border {
                         radius: iced::border::Radius::from(10.0),
                         ..Default::default()
@@ -2975,7 +2976,6 @@ impl Application for CortenPanelApp {
             let app_area = mouse_area(app_item)
                 .on_right_press(Message::OpenDockContextMenu(DockMenuTarget::Pinned(app, idx)))
                 .on_enter(Message::DockHover(Some(app_hover_name)))
-                .on_exit(Message::DockHover(None))
                 .on_middle_press(if idx + 1 < self.config.pinned_apps.len() {
                     Message::MoveDockItemRight(idx)
                 } else {
@@ -3010,7 +3010,7 @@ impl Application for CortenPanelApp {
                     .filter(|(_, aid, _, _, _, _)| aid == effective_id)
                     .count();
 
-                let icon_size = if is_hovered { 38.0 } else { 34.0 };
+                let icon_size = if is_hovered { 35.0 } else { 30.0 };
                 let icon_view: Element<'_, Self::Message> = if let Some(ref icon_path) = real_icon {
                     iced::widget::image(image::Handle::from_path(icon_path))
                         .width(Length::Fixed(icon_size))
@@ -3020,7 +3020,7 @@ impl Application for CortenPanelApp {
                     let icon_char = app_icon_char(effective_id);
                     text(icon_char)
                         .font(LUCIDE_FONT)
-                        .size(if is_hovered { 32.0 } else { 28.0 })
+                        .size(if is_hovered { 28.0 } else { 24.0 })
                         .color(if is_act {
                             palette.primary.to_iced()
                         } else {
@@ -3030,22 +3030,22 @@ impl Application for CortenPanelApp {
                 };
 
                 let icon_container = container(icon_view)
-                    .width(Length::Fixed(50.0))
-                    .height(Length::Fixed(44.0))
+                    .width(Length::Fixed(48.0))
+                    .height(Length::Fixed(36.0))
                     .center_x(Length::Fill)
                     .center_y(Length::Fill);
 
                 let elevated_icon = iced::widget::column![
-                    vertical_space().height(if is_hovered { 0.0 } else { 6.0 }),
+                    vertical_space().height(if is_hovered { 1.0 } else { 5.0 }),
                     icon_container,
-                    vertical_space().height(if is_hovered { 6.0 } else { 0.0 }),
+                    vertical_space().height(if is_hovered { 4.0 } else { 0.0 }),
                 ]
                 .align_x(Alignment::Center);
 
                 let indicator: Element<'_, Self::Message> = if is_act {
                     container(row![])
-                        .width(Length::Fixed(24.0))
-                        .height(Length::Fixed(4.0))
+                        .width(Length::Fixed(18.0))
+                        .height(Length::Fixed(3.5))
                         .style(move |_| container::Style {
                             background: Some(iced::Background::Color(palette.primary.to_iced())),
                             border: iced::Border {
@@ -3058,18 +3058,13 @@ impl Application for CortenPanelApp {
                 } else if app_win_count >= 2 {
                     let make_dot = || {
                         container(row![])
-                            .width(Length::Fixed(4.5))
-                            .height(Length::Fixed(4.5))
+                            .width(Length::Fixed(4.0))
+                            .height(Length::Fixed(4.0))
                             .style(move |_| container::Style {
                                 background: Some(iced::Background::Color(palette.primary.to_iced())),
                                 border: iced::Border {
                                     radius: iced::border::Radius::from(Radius::FULL),
                                     ..Default::default()
-                                },
-                                shadow: iced::Shadow {
-                                    color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.65),
-                                    offset: iced::Vector::new(0.0, 0.0),
-                                    blur_radius: 4.0,
                                 },
                                 ..Default::default()
                             })
@@ -3080,18 +3075,13 @@ impl Application for CortenPanelApp {
                         .into()
                 } else {
                     container(row![])
-                        .width(Length::Fixed(5.0))
-                        .height(Length::Fixed(5.0))
+                        .width(Length::Fixed(4.5))
+                        .height(Length::Fixed(4.5))
                         .style(move |_| container::Style {
                             background: Some(iced::Background::Color(palette.primary.to_iced())),
                             border: iced::Border {
                                 radius: iced::border::Radius::from(Radius::FULL),
                                 ..Default::default()
-                            },
-                            shadow: iced::Shadow {
-                                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.60),
-                                offset: iced::Vector::new(0.0, 0.0),
-                                blur_radius: 4.0,
                             },
                             ..Default::default()
                         })
@@ -3106,19 +3096,22 @@ impl Application for CortenPanelApp {
 
                 let dyn_btn = button(
                     iced::widget::column![elevated_icon, indicator]
-                        .spacing(2)
+                        .spacing(1)
                         .align_x(Alignment::Center),
                 )
+                .width(Length::Fixed(50.0))
+                .height(Length::Fixed(48.0))
                 .padding(0)
                 .style(|_, status| {
                     let bg = match status {
-                        button::Status::Pressed => Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10))),
+                        button::Status::Hovered => Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
+                        button::Status::Pressed => Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.14))),
                         _ => Some(iced::Background::Color(iced::Color::TRANSPARENT)),
                     };
                     button::Style {
                         background: bg,
                         border: iced::Border {
-                            width: 0.0,
+                            radius: iced::border::Radius::from(10.0),
                             ..Default::default()
                         },
                         ..Default::default()
@@ -3132,8 +3125,7 @@ impl Application for CortenPanelApp {
                         app_id: app_id.clone(),
                         title: String::new(),
                     }))
-                    .on_enter(Message::DockHover(Some(dyn_hover_id)))
-                    .on_exit(Message::DockHover(None));
+                    .on_enter(Message::DockHover(Some(dyn_hover_id)));
                 apps_row = apps_row.push(dyn_area);
             }
         }
@@ -3142,11 +3134,11 @@ impl Application for CortenPanelApp {
         let all_apps_icon = container(
             text(Icon::APP_WINDOW)
                 .font(LUCIDE_FONT)
-                .size(24.0)
+                .size(20.0)
                 .color(palette.primary.to_iced()),
         )
-        .width(Length::Fixed(46.0))
-        .height(Length::Fixed(46.0))
+        .width(Length::Fixed(40.0))
+        .height(Length::Fixed(40.0))
         .center_x(Length::Fill)
         .center_y(Length::Fill)
         .style(move |_| container::Style {
@@ -3164,43 +3156,43 @@ impl Application for CortenPanelApp {
                     0.35,
                 ),
                 width: 1.0,
-                radius: iced::border::Radius::from(12.0),
+                radius: iced::border::Radius::from(11.0),
             },
             ..Default::default()
         });
 
-        let all_apps_btn = button(
-            iced::widget::column![all_apps_icon]
-                .align_x(Alignment::Center),
-        )
-        .padding(0)
-        .style(|_, status| {
-            let bg = match status {
-                button::Status::Hovered => Some(iced::Background::Color(iced::Color::from_rgba(
-                    1.0, 1.0, 1.0, 0.14,
-                ))),
-                button::Status::Pressed => Some(iced::Background::Color(iced::Color::from_rgba(
-                    1.0, 1.0, 1.0, 0.22,
-                ))),
-                _ => Some(iced::Background::Color(iced::Color::TRANSPARENT)),
-            };
-            button::Style {
-                background: bg,
-                border: iced::Border {
-                    radius: iced::border::Radius::from(12.0),
+        let all_apps_btn = button(all_apps_icon)
+            .width(Length::Fixed(44.0))
+            .height(Length::Fixed(44.0))
+            .padding(2)
+            .style(|_, status| {
+                let bg = match status {
+                    button::Status::Hovered => Some(iced::Background::Color(iced::Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.12,
+                    ))),
+                    button::Status::Pressed => Some(iced::Background::Color(iced::Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.20,
+                    ))),
+                    _ => Some(iced::Background::Color(iced::Color::TRANSPARENT)),
+                };
+                button::Style {
+                    background: bg,
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(12.0),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
-        .on_press(Message::OpenDashboard);
+                }
+            })
+            .on_press(Message::OpenDashboard);
 
         apps_row = apps_row.push(all_apps_btn);
+        let apps_section = mouse_area(apps_row).on_exit(Message::DockHover(None));
 
         // ==================== VERTICAL DIVIDER 2 ====================
         let divider2 = container(row![])
             .width(Length::Fixed(1.0))
-            .height(Length::Fixed(40.0))
+            .height(Length::Fixed(30.0))
             .style(|_| container::Style {
                 background: Some(iced::Background::Color(iced::Color::from_rgba(
                     1.0, 1.0, 1.0, 0.12,
@@ -3208,146 +3200,133 @@ impl Application for CortenPanelApp {
                 ..Default::default()
             });
 
-        // ==================== SECTION 3: AUDIO, WIFI & TWO-LINE CLOCK ====================
-        let current_vol = self.audio_status.map(|(v, _)| v).unwrap_or(50);
+        // ==================== SECTION 3: UNIFIED CONTROL CENTER PILL & CLOCK ====================
         let is_muted = self.audio_status.map(|(_, m)| m).unwrap_or(false);
+        let (is_online, _net_name, _) = &self.network_status;
 
-        let audio_btn = button(text(Icon::VOLUME).font(LUCIDE_FONT).size(26.0).color(
-            if is_muted {
-                palette.danger.to_iced()
-            } else {
-                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.85)
-            },
-        ))
-        .padding([4, 8])
-        .style(move |_, status| {
-            let bg = match status {
-                button::Status::Hovered => Some(iced::Background::Color(iced::Color::from_rgba(
-                    1.0, 1.0, 1.0, 0.10,
-                ))),
-                _ => None,
-            };
-            button::Style {
-                background: bg,
-                border: iced::Border {
-                    radius: iced::border::Radius::from(8.0),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
-        .on_press(Message::ToggleAudioSlider);
+        let active_playing = self
+            .media_players
+            .iter()
+            .any(|p| p.playback_status == corten_services::mpris::PlaybackStatus::Playing);
 
-        // Audio popover or inline volume widget
-        let audio_control: Element<'_, Self::Message> = if self.show_volume_slider {
-            let vol_slider = slider(0..=100, current_vol, Message::SetVolume)
-                .width(Length::Fixed(100.0))
-                .step(2)
-                .style(corten_theme::iced_styles::capsule_slider_style(palette));
-            let mute_btn = button(text(if is_muted { "Sesi Aç" } else { "Sessize Al" }).size(12.0))
-                .padding([2, 6])
-                .style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(palette.primary.to_iced())),
-                    border: iced::Border {
-                        radius: iced::border::Radius::from(6.0),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .on_press(Message::ToggleAudioMute);
-
-            row![audio_btn, vol_slider, mute_btn]
-                .spacing(8)
-                .align_y(Alignment::Center)
-                .into()
-        } else {
-            audio_btn.into()
-        };
-
-        let (is_online, net_name, _) = &self.network_status;
-        let wifi_btn = button(
+        let mut status_pill_items = row![].spacing(8).align_y(Alignment::Center);
+        if active_playing {
+            let wave = ["▂▅▃", "▅▃▆", "▃▆▂", "▆▂▅"][(self.eq_tick as usize) % 4];
+            status_pill_items = status_pill_items.push(
+                text(wave).size(11.0).color(palette.primary.to_iced()),
+            );
+        }
+        if self.recording_active || self.mic_active {
+            status_pill_items = status_pill_items.push(
+                text("⏺")
+                    .size(11.0)
+                    .color(if self.recording_active {
+                        palette.danger.to_iced()
+                    } else {
+                        palette.warning.to_iced()
+                    }),
+            );
+        }
+        status_pill_items = status_pill_items.push(
+            text(Icon::VOLUME)
+                .font(LUCIDE_FONT)
+                .size(15.0)
+                .color(if is_muted {
+                    palette.danger.to_iced()
+                } else {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.88)
+                }),
+        );
+        status_pill_items = status_pill_items.push(
             text(Icon::WIFI)
                 .font(LUCIDE_FONT)
-                .size(24.0)
+                .size(14.0)
                 .color(if *is_online {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.85)
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.88)
                 } else {
                     palette.warning.to_iced()
                 }),
+        );
+        if let Some((pct, _charging)) = self.battery_status {
+            status_pill_items = status_pill_items.push(
+                row![
+                    text(Icon::BATTERY)
+                        .font(LUCIDE_FONT)
+                        .size(14.0)
+                        .color(if pct <= 20 {
+                            palette.danger.to_iced()
+                        } else {
+                            palette.primary.to_iced()
+                        }),
+                    text(format!("{}%", pct))
+                        .size(11.0)
+                        .color(palette.text_primary.to_iced()),
+                ]
+                .spacing(3)
+                .align_y(Alignment::Center),
+            );
+        }
+
+        let cc_active = self.show_control_center;
+        let control_center_pill = button(
+            container(status_pill_items)
+                .padding([5, 11])
+                .center_y(Length::Shrink),
         )
-        .padding([4, 8])
+        .padding(0)
         .style(move |_, status| {
-            let bg = match status {
-                button::Status::Hovered => Some(iced::Background::Color(iced::Color::from_rgba(
-                    1.0, 1.0, 1.0, 0.10,
-                ))),
-                _ => None,
+            let bg = if cc_active {
+                iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.24,
+                )
+            } else if matches!(status, button::Status::Hovered) {
+                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12)
+            } else {
+                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06)
             };
             button::Style {
-                background: bg,
+                background: Some(iced::Background::Color(bg)),
                 border: iced::Border {
-                    radius: iced::border::Radius::from(8.0),
-                    ..Default::default()
+                    color: if cc_active {
+                        palette.primary.to_iced()
+                    } else {
+                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12)
+                    },
+                    width: 1.0,
+                    radius: iced::border::Radius::from(14.0),
                 },
                 ..Default::default()
             }
         })
-        .on_press(Message::ToggleWifiDetails);
-
-        let wifi_control: Element<'_, Self::Message> = if self.show_wifi_details {
-            let badge = container(
-                text(if *is_online {
-                    net_name.as_str()
-                } else {
-                    "Çevrimdışı"
-                })
-                .size(12.0)
-                .color(if *is_online {
-                    palette.text_primary.to_iced()
-                } else {
-                    palette.warning.to_iced()
-                }),
-            )
-            .padding([3, 8])
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.2, 0.22, 0.26, 0.85,
-                ))),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(6.0),
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
-
-            row![wifi_btn, badge]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .into()
-        } else {
-            wifi_btn.into()
-        };
+        .on_press(Message::ToggleControlCenter);
 
         let clock_column = button(
             iced::widget::column![
                 text(&self.current_time)
-                    .size(18.0)
+                    .size(15.0)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..Default::default()
+                    })
                     .color(palette.text_primary.to_iced()),
                 text(&self.current_date)
-                    .size(13.0)
+                    .size(10.5)
                     .color(palette.text_muted.to_iced()),
             ]
             .spacing(1)
             .align_x(Alignment::End),
         )
-        .padding([2, 6])
+        .padding([3, 7])
         .style(|_, status| {
             let bg = match status {
                 button::Status::Hovered => Some(iced::Background::Color(iced::Color::from_rgba(
-                    1.0, 1.0, 1.0, 0.08,
+                    1.0, 1.0, 1.0, 0.10,
                 ))),
                 button::Status::Pressed => Some(iced::Background::Color(iced::Color::from_rgba(
-                    1.0, 1.0, 1.0, 0.15,
+                    1.0, 1.0, 1.0, 0.16,
                 ))),
                 _ => None,
             };
@@ -3362,81 +3341,16 @@ impl Application for CortenPanelApp {
         })
         .on_press(Message::ToggleCalendar);
 
-        let mut right_row = row![].spacing(14).align_y(Alignment::Center);
-        if self.recording_active {
-            let rec_pill = container(
-                row![
-                    text("⏺")
-                        .size(13.0)
-                        .color(iced::Color::from_rgb(1.0, 0.25, 0.25)),
-                    text("REC")
-                        .size(11.0)
-                        .color(iced::Color::from_rgb(1.0, 0.25, 0.25)),
-                ]
-                .spacing(4)
-                .align_y(Alignment::Center),
-            )
-            .padding([3, 8])
-            .style(|_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 0.15, 0.15, 0.20))),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(1.0, 0.25, 0.25, 0.60),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(Radius::FULL),
-                },
-                ..Default::default()
-            });
-            let rec_btn = button(rec_pill)
-                .padding(0)
-                .style(|_, _| button::Style::default())
-                .on_press(Message::ToggleRecording);
-
-            right_row = right_row.push(rec_btn);
-        }
-        if self.mic_active {
-            let mic_pill = container(
-                row![
-                    text(Icon::MIC)
-                        .font(LUCIDE_FONT)
-                        .size(13.0)
-                        .color(iced::Color::from_rgb(1.0, 0.65, 0.2)),
-                    text("MİK")
-                        .size(11.0)
-                        .color(iced::Color::from_rgb(1.0, 0.65, 0.2)),
-                ]
-                .spacing(4)
-                .align_y(Alignment::Center),
-            )
-            .padding([3, 8])
-            .style(|_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 0.60, 0.15, 0.20))),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(1.0, 0.65, 0.20, 0.60),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(Radius::FULL),
-                },
-                ..Default::default()
-            });
-            right_row = right_row.push(mic_pill);
-        }
-        if self.config.show_audio {
-            right_row = right_row.push(audio_control);
-            if self.audio_vu_level.0 > 0.05 || self.audio_vu_level.1 > 0.05 {
-                right_row = right_row.push(render_vu_meter(self.audio_vu_level.0, self.audio_vu_level.1, palette));
-            }
-        }
-        if self.config.show_network {
-            right_row = right_row.push(wifi_control);
-        }
+        let mut right_row = row![control_center_pill].spacing(8).align_y(Alignment::Center);
 
         // StatusNotifierItem (SNI) / Background App Tray
         if !self.tray_items.is_empty() {
-            let mut tray_row = row![].spacing(6).align_y(Alignment::Center);
+            let mut tray_row = row![].spacing(4).align_y(Alignment::Center);
             for item in &self.tray_items {
                 let id = item.id.clone();
                 let id_right = item.id.clone();
-                let tray_btn = button(text(&item.icon).size(15.0))
-                    .padding([2, 5])
+                let tray_btn = button(text(&item.icon).size(14.0))
+                    .padding([3, 5])
                     .style(|_, status| {
                         let bg = match status {
                             button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.15),
@@ -3459,77 +3373,6 @@ impl Application for CortenPanelApp {
             right_row = right_row.push(tray_row);
         }
 
-        // Custom Dynamic Script Modules (Waybar/Polybar JSON Applet Standard)
-        for (idx, applet) in self.custom_script_outputs.iter().enumerate() {
-            if !applet.text.is_empty() {
-                let icon_str = applet.icon.as_deref().unwrap_or("⚙");
-                let bg_color = match applet.class.as_deref() {
-                    Some("critical" | "alert" | "error") => iced::Color::from_rgba(0.9, 0.2, 0.2, 0.25),
-                    Some("warning") => iced::Color::from_rgba(0.9, 0.6, 0.1, 0.25),
-                    Some("success") => iced::Color::from_rgba(0.2, 0.8, 0.3, 0.25),
-                    Some("info") => iced::Color::from_rgba(0.1, 0.7, 0.9, 0.25),
-                    _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-                };
-                let border_color = match applet.class.as_deref() {
-                    Some("critical" | "alert" | "error") => iced::Color::from_rgba(0.9, 0.2, 0.2, 0.5),
-                    Some("warning") => iced::Color::from_rgba(0.9, 0.6, 0.1, 0.5),
-                    Some("success") => iced::Color::from_rgba(0.2, 0.8, 0.3, 0.5),
-                    Some("info") => iced::Color::from_rgba(0.1, 0.7, 0.9, 0.5),
-                    _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.15),
-                };
-
-                let pill_content = container(
-                    row![
-                        text(icon_str).size(13.0),
-                        text(applet.text.as_str()).size(12.0).color(palette.text_primary.to_iced()),
-                    ]
-                    .spacing(4)
-                    .align_y(Alignment::Center),
-                )
-                .padding([3, 8])
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(bg_color)),
-                    border: iced::Border {
-                        color: border_color,
-                        width: 1.0,
-                        radius: iced::border::Radius::from(8.0),
-                    },
-                    ..Default::default()
-                });
-
-                let click_btn = button(pill_content)
-                    .padding(0)
-                    .style(|_, _| button::Style::default())
-                    .on_press(Message::ClickCustomScript(idx));
-
-                let interactive_applet = mouse_area(click_btn)
-                    .on_right_press(Message::RightClickCustomScript(idx));
-
-                let final_applet: Element<'_, Message> = if let Some(ref tt) = applet.tooltip {
-                    tooltip(
-                        interactive_applet,
-                        container(text(tt.as_str()).size(11.0).color(iced::Color::WHITE))
-                            .padding([4, 8])
-                            .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(0.1, 0.1, 0.1, 0.95))),
-                                border: iced::Border {
-                                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.2),
-                                    width: 1.0,
-                                    radius: iced::border::Radius::from(6.0),
-                                },
-                                ..Default::default()
-                            }),
-                        tooltip::Position::Top,
-                    )
-                    .into()
-                } else {
-                    interactive_applet.into()
-                };
-
-                right_row = right_row.push(final_applet);
-            }
-        }
-
         let downloads_btn = button(
             text(Icon::DOWNLOAD)
                 .font(LUCIDE_FONT)
@@ -3540,8 +3383,23 @@ impl Application for CortenPanelApp {
                     palette.text_muted.to_iced()
                 }),
         )
-        .padding([3, 5])
-        .style(|_, _| button::Style::default())
+        .padding([4, 6])
+        .style(|_, status| {
+            let bg = match status {
+                button::Status::Hovered => Some(iced::Background::Color(iced::Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.10,
+                ))),
+                _ => None,
+            };
+            button::Style {
+                background: bg,
+                border: iced::Border {
+                    radius: iced::border::Radius::from(8.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        })
         .on_press(Message::ToggleDownloadsStack);
 
         let is_trash_full = self.trash_item_count > 0;
@@ -3577,8 +3435,23 @@ impl Application for CortenPanelApp {
             );
         }
         let trash_btn = button(trash_inner)
-            .padding([3, 5])
-            .style(|_, _| button::Style::default())
+            .padding([4, 6])
+            .style(|_, status| {
+                let bg = match status {
+                    button::Status::Hovered => Some(iced::Background::Color(iced::Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.10,
+                    ))),
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(8.0),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            })
             .on_press(Message::OpenTrash);
 
         let right_section = row![
@@ -3587,112 +3460,33 @@ impl Application for CortenPanelApp {
             trash_btn,
             clock_column,
         ]
-        .spacing(10)
+        .spacing(8)
         .align_y(Alignment::Center);
 
-        // ==================== NOW PLAYING DYNAMIC CAPSULE ====================
-        let now_playing_capsule: Option<Element<'_, Self::Message>> = {
-            let active_player = self
-                .media_players
-                .iter()
-                .find(|p| p.playback_status == corten_services::mpris::PlaybackStatus::Playing)
-                .or_else(|| self.media_players.first());
-            if let Some(player) = active_player {
-                if !player.title.is_empty() {
-                    let bus_name = player.bus_name.clone();
-                    let title_display = if player.title.chars().count() > 18 {
-                        format!("{}...", player.title.chars().take(16).collect::<String>())
-                    } else {
-                        player.title.clone()
-                    };
-                    let is_playing = player.playback_status == corten_services::mpris::PlaybackStatus::Playing;
-                    let wave = if is_playing { "ılılı" } else { "---" };
+        // ==================== SYMMETRICAL 3-ZONE DOCK CAPSULE (58px HEIGHT) ====================
+        let dock_items = row![
+            spaces_row,
+            divider1,
+            apps_section,
+            divider2,
+            right_section,
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .padding([4, 18]);
 
-                    let cap = button(
-                        row![
-                            text(wave).size(11.0).color(palette.primary.to_iced()),
-                            text(title_display)
-                                .size(11.0)
-                                .color(palette.text_primary.to_iced()),
-                            button(
-                                text(if is_playing { "⏸" } else { "▶" })
-                                    .size(11.0)
-                                    .color(palette.primary.to_iced()),
-                            )
-                            .padding([1, 4])
-                            .style(|_, _| button::Style::default())
-                            .on_press(Message::MprisPlayPause(bus_name.clone())),
-                        ]
-                        .spacing(5)
-                        .align_y(Alignment::Center),
-                    )
-                    .padding([3, 8])
-                    .style(move |_, status| {
-                        let bg = match status {
-                            button::Status::Hovered => iced::Color::from_rgba(
-                                palette.primary.r,
-                                palette.primary.g,
-                                palette.primary.b,
-                                0.20,
-                            ),
-                            _ => iced::Color::from_rgba(
-                                palette.primary.r,
-                                palette.primary.g,
-                                palette.primary.b,
-                                0.10,
-                            ),
-                        };
-                        button::Style {
-                            background: Some(iced::Background::Color(bg)),
-                            border: iced::Border {
-                                color: iced::Color::from_rgba(
-                                    palette.primary.r,
-                                    palette.primary.g,
-                                    palette.primary.b,
-                                    0.35,
-                                ),
-                                width: 1.0,
-                                radius: iced::border::Radius::from(Radius::FULL),
-                            },
-                            ..Default::default()
-                        }
-                    })
-                    .on_press(Message::MprisPlayPause(bus_name));
-
-                    Some(cap.into())
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
-
-        // ==================== COMPLETE COMPACT DOCK BAR CONTAINER ====================
-        let mut dock_items = row![apps_row]
-            .spacing(12)
-            .align_y(Alignment::Center);
-
-        if let Some(media_capsule) = now_playing_capsule {
-            dock_items = dock_items.push(media_capsule);
-        }
-
-        dock_items = dock_items.push(divider2);
-        dock_items = dock_items.push(right_section);
-
-        let dock_row = dock_items.padding([6, 20]);
-
-        let dock_capsule = container(dock_row)
+        let dock_capsule = container(dock_items)
             .width(Length::Shrink)
-            .height(Length::Fixed(68.0))
+            .height(Length::Fixed(58.0))
+            .center_y(Length::Fixed(58.0))
             .style(move |_| container::Style {
                 background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.09, 0.10, 0.13, 0.92,
+                    0.08, 0.09, 0.12, 0.94,
                 ))),
                 border: iced::Border {
-                    color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
+                    color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.38),
                     width: 1.0,
-                    radius: iced::border::Radius::from(28.0),
+                    radius: iced::border::Radius::from(26.0),
                 },
                 ..Default::default()
             });
@@ -3777,8 +3571,11 @@ impl Application for CortenPanelApp {
                 text(format!("Ses: {}%", current_vol))
                     .size(12.0)
                     .color(palette.text_primary.to_iced()),
+                horizontal_space(),
+                render_vu_meter(self.audio_vu_level.0, self.audio_vu_level.1, palette),
             ]
             .spacing(8)
+            .width(Length::Fill)
             .align_y(Alignment::Center);
 
             let bri_slider = slider(5..=100, self.brightness_pct, Message::SetBrightness)
@@ -3878,52 +3675,6 @@ impl Application for CortenPanelApp {
                 .width(Length::Fill)
                 .align_y(Alignment::Center);
 
-            // Caffeine (Keep-Awake) & Developer Ports
-            let caffeine_btn = button(
-                row![
-                    text(Icon::COFFEE)
-                        .font(LUCIDE_FONT)
-                        .size(14.0)
-                        .color(if self.caffeine_enabled {
-                            palette.primary.to_iced()
-                        } else {
-                            palette.text_muted.to_iced()
-                        }),
-                    text(if self.caffeine_enabled {
-                        "Kafein: Açık"
-                    } else {
-                        "Kafein: Kapalı"
-                    })
-                    .size(12.0)
-                    .color(if self.caffeine_enabled {
-                        palette.primary.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-            )
-            .padding([5, 10])
-            .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(if self.caffeine_enabled {
-                    iced::Color::from_rgba(0.85, 0.42, 0.26, 0.25)
-                } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
-                })),
-                border: iced::Border {
-                    color: if self.caffeine_enabled {
-                        palette.primary.to_iced()
-                    } else {
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.1)
-                    },
-                    width: 1.0,
-                    radius: iced::border::Radius::from(8.0),
-                },
-                ..Default::default()
-            })
-            .on_press(Message::ToggleCaffeine);
-
             let ports_str = if self.listening_ports.is_empty() {
                 "Yok".to_string()
             } else {
@@ -3935,61 +3686,22 @@ impl Application for CortenPanelApp {
                     .join(" ")
             };
 
-            let night_light_btn = button(
-                row![
-                    text(Icon::MOON)
-                        .font(LUCIDE_FONT)
-                        .size(13.0)
-                        .color(if self.night_light_enabled {
-                            palette.primary.to_iced()
-                        } else {
-                            palette.text_muted.to_iced()
-                        }),
-                    text(if self.night_light_enabled {
-                        "Gece: Açık"
-                    } else {
-                        "Gece: Kapalı"
-                    })
-                    .size(11.0)
-                    .color(if self.night_light_enabled {
-                        palette.primary.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
-                ]
-                .spacing(5)
-                .align_y(Alignment::Center),
-            )
-            .padding([4, 8])
-            .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(if self.night_light_enabled {
-                    iced::Color::from_rgba(0.95, 0.60, 0.20, 0.22)
-                } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
-                })),
-                border: iced::Border {
-                    color: if self.night_light_enabled {
-                        palette.primary.to_iced()
-                    } else {
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.1)
-                    },
-                    width: 1.0,
-                    radius: iced::border::Radius::from(6.0),
-                },
-                ..Default::default()
-            })
-            .on_press(Message::ToggleNightLight);
-
             let profiles = [
-                ("power-saver", "🍃 Tasarruf"),
-                ("balanced", "⚖️ Dengeli"),
-                ("performance", "🚀 Performans"),
+                ("power-saver", "Tasarruf"),
+                ("balanced", "Dengeli"),
+                ("performance", "Performans"),
             ];
             let mut power_profile_row = row![
+                text(Icon::GAUGE)
+                    .font(LUCIDE_FONT)
+                    .size(13.0)
+                    .color(palette.primary.to_iced()),
                 text("Güç:")
                     .size(11.0)
                     .color(palette.text_muted.to_iced()),
-            ].spacing(6).align_y(Alignment::Center);
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center);
 
             for (p_id, p_label) in profiles {
                 let is_active = self.active_power_profile == p_id;
@@ -4002,23 +3714,9 @@ impl Application for CortenPanelApp {
                             palette.text_muted.to_iced()
                         }),
                 )
-                .padding([3, 7])
-                .style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(if is_active {
-                        iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.20)
-                    } else {
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
-                    })),
-                    border: iced::Border {
-                        color: if is_active {
-                            palette.primary.to_iced()
-                        } else {
-                            iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10)
-                        },
-                        width: 1.0,
-                        radius: iced::border::Radius::from(6.0),
-                    },
-                    ..Default::default()
+                .padding([4, 9])
+                .style(move |_, status| {
+                    corten_theme::iced_styles::bento_tile_button_style(palette, is_active, status)
                 })
                 .on_press(Message::SetPowerProfile(p_id.to_string()));
                 power_profile_row = power_profile_row.push(prof_btn);
@@ -4033,177 +3731,196 @@ impl Application for CortenPanelApp {
                     .size(11.0)
                     .color(palette.text_muted.to_iced()),
                 horizontal_space(),
-                night_light_btn,
-                caffeine_btn,
-            ]
-            .spacing(6)
-            .width(Length::Fill)
-            .align_y(Alignment::Center);
-
-            let privacy_status_row = row![
                 text(Icon::SHIELD)
                     .font(LUCIDE_FONT)
                     .size(12.0)
                     .color(palette.primary.to_iced()),
-                text("Gizlilik:")
-                    .size(11.0)
-                    .color(palette.text_muted.to_iced()),
-                text(if self.mic_active { "Mikrofon Aktif" } else { "Boşta" })
+                text(if self.mic_active { "Mikrofon Aktif" } else { "Mikrofon Boşta" })
                     .size(11.0)
                     .color(if self.mic_active {
                         palette.warning.to_iced()
                     } else {
                         palette.text_muted.to_iced()
                     }),
-                text("•").size(10.0).color(palette.border.to_iced()),
-                text(if self.recording_active { "Kayıt Aktif" } else { "Boşta" })
-                    .size(11.0)
-                    .color(if self.recording_active {
-                        palette.danger.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
             ]
             .spacing(6)
+            .width(Length::Fill)
             .align_y(Alignment::Center);
 
-            // Quick Tools Row: Bluetooth, Screenshot (Crop), DND (Do Not Disturb)
+            // 2x2 Bento Quick-Toggles Grid (Bluetooth, Night Light, Do Not Disturb, Caffeine)
             let (bt_powered, bt_name) = &self.bluetooth_status;
-            let bt_btn = button(
+            let bt_sub: &str = if let Some(dev) = bt_name {
+                dev.as_str()
+            } else if *bt_powered {
+                "Açık"
+            } else {
+                "Kapalı"
+            };
+
+            let bento_toggle = |icon_char: char,
+                                title: &'static str,
+                                subtitle: &str,
+                                is_active: bool,
+                                msg: Message|
+             -> Element<'_, Self::Message> {
+                button(
+                    row![
+                        container(
+                            text(icon_char)
+                                .font(LUCIDE_FONT)
+                                .size(15.0)
+                                .color(if is_active {
+                                    palette.on_primary().to_iced()
+                                } else {
+                                    palette.primary.to_iced()
+                                }),
+                        )
+                        .padding([6, 7])
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(if is_active {
+                                palette.primary.to_iced()
+                            } else {
+                                iced::Color::from_rgba(
+                                    palette.primary.r,
+                                    palette.primary.g,
+                                    palette.primary.b,
+                                    0.14,
+                                )
+                            })),
+                            border: iced::Border {
+                                radius: iced::border::Radius::from(8.0),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                        column![
+                            text(title)
+                                .size(12.0)
+                                .font(iced::Font {
+                                    weight: iced::font::Weight::Semibold,
+                                    ..Default::default()
+                                })
+                                .color(palette.text_primary.to_iced()),
+                            text(subtitle.to_string())
+                                .size(11.0)
+                                .color(if is_active {
+                                    palette.primary.to_iced()
+                                } else {
+                                    palette.text_muted.to_iced()
+                                }),
+                        ]
+                        .spacing(1),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                )
+                .padding([8, 10])
+                .width(Length::FillPortion(1))
+                .style(move |_, status| {
+                    corten_theme::iced_styles::bento_tile_button_style(palette, is_active, status)
+                })
+                .on_press(msg)
+                .into()
+            };
+
+            let bento_quick_grid = column![
                 row![
-                    text("ᛒ").size(13.0).color(if *bt_powered {
-                        palette.primary.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
-                    text(if let Some(dev) = bt_name {
-                        dev.as_str()
-                    } else if *bt_powered {
-                        "BT: Açık"
-                    } else {
-                        "BT: Kapalı"
-                    })
-                    .size(11.0)
-                    .color(palette.text_primary.to_iced()),
+                    bento_toggle(
+                        Icon::WIFI,
+                        "Bluetooth",
+                        bt_sub,
+                        *bt_powered,
+                        Message::ToggleBluetooth,
+                    ),
+                    bento_toggle(
+                        Icon::MOON,
+                        "Gece Işığı",
+                        if self.night_light_enabled { "Sıcak Ton" } else { "Kapalı" },
+                        self.night_light_enabled,
+                        Message::ToggleNightLight,
+                    ),
                 ]
-                .spacing(5)
-                .align_y(Alignment::Center),
-            )
-            .padding([4, 8])
-            .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(if *bt_powered {
-                    iced::Color::from_rgba(0.85, 0.42, 0.26, 0.20)
-                } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
-                })),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(6.0),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
-            .on_press(Message::ToggleBluetooth);
+                .spacing(8)
+                .width(Length::Fill),
+                row![
+                    bento_toggle(
+                        Icon::BELL,
+                        "Rahatsız Etme",
+                        if self.dnd_enabled { "Sessiz" } else { "Açık" },
+                        self.dnd_enabled,
+                        Message::ToggleDnd,
+                    ),
+                    bento_toggle(
+                        Icon::COFFEE,
+                        "Uyanık Tut",
+                        if self.caffeine_enabled { "Etkin" } else { "Normal" },
+                        self.caffeine_enabled,
+                        Message::ToggleCaffeine,
+                    ),
+                ]
+                .spacing(8)
+                .width(Length::Fill),
+            ]
+            .spacing(8)
+            .width(Length::Fill);
 
             let screenshot_btn = button(
                 row![
                     text(Icon::CAMERA)
                         .font(LUCIDE_FONT)
-                        .size(12.0)
-                        .color(palette.text_primary.to_iced()),
-                    text("Kırp")
+                        .size(13.0)
+                        .color(palette.primary.to_iced()),
+                    text("Ekran Kesiti")
                         .size(11.0)
                         .color(palette.text_primary.to_iced()),
                 ]
-                .spacing(4)
+                .spacing(6)
                 .align_y(Alignment::Center),
             )
-            .padding([4, 8])
-            .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    1.0, 1.0, 1.0, 0.08,
-                ))),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(6.0),
-                    ..Default::default()
-                },
-                ..Default::default()
+            .padding([6, 10])
+            .width(Length::FillPortion(1))
+            .style(move |_, status| {
+                corten_theme::iced_styles::bento_tile_button_style(palette, false, status)
             })
             .on_press(Message::TakeScreenshot(true));
 
-            let dnd_btn = button(
-                row![
-                    text(Icon::BELL)
-                        .font(LUCIDE_FONT)
-                        .size(12.0)
-                        .color(if self.dnd_enabled {
-                            palette.danger.to_iced()
-                        } else {
-                            palette.text_muted.to_iced()
-                        }),
-                    text(if self.dnd_enabled {
-                        "Rahatsız Etme: Açık"
-                    } else {
-                        "Rahatsız Etme: Kapalı"
-                    })
-                    .size(11.0)
-                    .color(if self.dnd_enabled {
-                        palette.warning.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
-                ]
-                .spacing(4)
-                .align_y(Alignment::Center),
-            )
-            .padding([4, 8])
-            .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(if self.dnd_enabled {
-                    iced::Color::from_rgba(0.95, 0.60, 0.20, 0.20)
-                } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
-                })),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(6.0),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
-            .on_press(Message::ToggleDnd);
-
             let recording_btn = button(
                 row![
-                    text(if self.recording_active { "⏹" } else { "⏺" }).size(12.0),
+                    text(Icon::ACTIVITY)
+                        .font(LUCIDE_FONT)
+                        .size(13.0)
+                        .color(if self.recording_active {
+                            palette.danger.to_iced()
+                        } else {
+                            palette.primary.to_iced()
+                        }),
                     text(if self.recording_active {
                         "Kaydı Durdur"
                     } else {
-                        "Kayıt"
+                        "Ekran Kaydı"
                     })
                     .size(11.0)
                     .color(if self.recording_active {
-                        palette.warning.to_iced()
+                        palette.danger.to_iced()
                     } else {
                         palette.text_primary.to_iced()
                     }),
                 ]
-                .spacing(4)
+                .spacing(6)
                 .align_y(Alignment::Center),
             )
-            .padding([4, 8])
-            .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(if self.recording_active {
-                    iced::Color::from_rgba(0.9, 0.2, 0.2, 0.22)
-                } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
-                })),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(6.0),
-                    ..Default::default()
-                },
-                ..Default::default()
+            .padding([6, 10])
+            .width(Length::FillPortion(1))
+            .style(move |_, status| {
+                corten_theme::iced_styles::bento_tile_button_style(
+                    palette,
+                    self.recording_active,
+                    status,
+                )
             })
             .on_press(Message::ToggleRecording);
 
-            let quick_tools_row = row![bt_btn, screenshot_btn, dnd_btn, recording_btn]
+            let quick_tools_row = row![screenshot_btn, recording_btn]
                 .spacing(8)
                 .width(Length::Fill)
                 .align_y(Alignment::Center);
@@ -4614,25 +4331,87 @@ impl Application for CortenPanelApp {
                 ..Default::default()
             });
 
+            let telemetry_row = container(
+                row![
+                    text(Icon::ACTIVITY)
+                        .font(LUCIDE_FONT)
+                        .size(13.0)
+                        .color(palette.primary.to_iced()),
+                    text(format!("↓ {} · ↑ {}", self.net_speed_display.0, self.net_speed_display.1))
+                        .size(11.0)
+                        .color(palette.text_primary.to_iced()),
+                    horizontal_space(),
+                    button(
+                        row![
+                            text(Icon::CPU)
+                                .font(LUCIDE_FONT)
+                                .size(12.0)
+                                .color(palette.primary.to_iced()),
+                            text(format!(
+                                "RAM {:.0}% ({} MB)",
+                                self.memory_summary.2, self.memory_summary.0
+                            ))
+                                .size(11.0)
+                                .color(palette.text_muted.to_iced()),
+                        ]
+                        .spacing(4)
+                        .align_y(Alignment::Center),
+                    )
+                    .padding([2, 6])
+                    .style(|_, status| {
+                        let bg = match status {
+                            button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10),
+                            _ => iced::Color::TRANSPARENT,
+                        };
+                        button::Style {
+                            background: Some(iced::Background::Color(bg)),
+                            border: iced::Border {
+                                radius: iced::border::Radius::from(6.0),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }
+                    })
+                    .on_press(Message::ToggleMiniTaskManager),
+                ]
+                .spacing(6)
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+            )
+            .padding([6, 10])
+            .style(|_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.0, 0.0, 0.0, 0.22,
+                ))),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(8.0),
+                },
+                ..Default::default()
+            });
+
             let cc_card = container(
                 iced::widget::column![
                     row![
                         text(t.control_center_title)
                             .size(15.0)
                             .color(palette.text_primary.to_iced()),
-                        button(text("✕").size(12.0).color(palette.text_muted.to_iced()))
+                        horizontal_space(),
+                        button(text(Icon::X).font(LUCIDE_FONT).size(12.0).color(palette.text_muted.to_iced()))
                             .padding([2, 6])
                             .style(|_, _| button::Style::default())
                             .on_press(Message::ToggleControlCenter),
                     ]
                     .width(Length::Fill)
                     .align_y(Alignment::Center),
+                    telemetry_row,
+                    bento_quick_grid,
                     media_section,
                     sliders_box,
                     sinks_col,
                     app_streams_col,
                     sys_status_row,
-                    privacy_status_row,
                     wifi_col,
                     wifi_modal_element,
                     quick_tools_row,
@@ -4641,7 +4420,7 @@ impl Application for CortenPanelApp {
                     dev_ports_row,
                     quick_power_row,
                 ]
-                .spacing(9)
+                .spacing(8)
                 .width(Length::Fill)
                 .max_width(390.0),
             )
@@ -4660,7 +4439,7 @@ impl Application for CortenPanelApp {
             });
 
             iced::widget::column![cc_card, dock_cluster]
-                .spacing(12)
+                .spacing(popover_lift_gap)
                 .align_x(Alignment::Center)
                 .into()
         } else if self.show_power_menu {
@@ -4724,7 +4503,11 @@ impl Application for CortenPanelApp {
             };
 
             let power_header = row![
-                text(format!("⚡ {}", t.power_hub_title))
+                text(Icon::ZAP)
+                    .font(LUCIDE_FONT)
+                    .size(14.0)
+                    .color(palette.primary.to_iced()),
+                text(t.power_hub_title)
                     .size(14.0)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
@@ -4745,6 +4528,7 @@ impl Application for CortenPanelApp {
                     .style(|_, _| button::Style::default())
                     .on_press(Message::TogglePowerMenu),
             ]
+            .spacing(6)
             .width(Length::Fill)
             .align_y(Alignment::Center);
 
@@ -4837,7 +4621,11 @@ impl Application for CortenPanelApp {
             let t = self.language.t();
             // Corten Takvim & Hava Durumu Modülü
             let header = row![
-                text(format!("📅 {}", t.weather_calendar_title))
+                text(Icon::CALENDAR)
+                    .font(LUCIDE_FONT)
+                    .size(14.0)
+                    .color(palette.primary.to_iced()),
+                text(t.weather_calendar_title)
                     .size(14.0)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
@@ -4846,6 +4634,7 @@ impl Application for CortenPanelApp {
                     .style(|_, _| button::Style::default())
                     .on_press(Message::ToggleCalendar),
             ]
+            .spacing(6)
             .width(Length::Fill)
             .align_y(Alignment::Center);
 
@@ -4872,8 +4661,18 @@ impl Application for CortenPanelApp {
                         .spacing(2),
                         horizontal_space(),
                         column![
-                            text(format!("💧 {}: %{}", t.weather_humidity, self.weather_report.humidity)).size(11.0).color(palette.text_muted.to_iced()),
-                            text(format!("💨 {}: {} km/s", t.weather_wind, self.weather_report.wind_kmh)).size(11.0).color(palette.text_muted.to_iced()),
+                            row![
+                                text(Icon::DROPLET).font(LUCIDE_FONT).size(11.0).color(palette.primary.to_iced()),
+                                text(format!("{}: %{}", t.weather_humidity, self.weather_report.humidity)).size(11.0).color(palette.text_muted.to_iced()),
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center),
+                            row![
+                                text(Icon::WIND).font(LUCIDE_FONT).size(11.0).color(palette.text_muted.to_iced()),
+                                text(format!("{}: {} km/s", t.weather_wind, self.weather_report.wind_kmh)).size(11.0).color(palette.text_muted.to_iced()),
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center),
                         ]
                         .spacing(4),
                     ]
@@ -5251,7 +5050,11 @@ impl Application for CortenPanelApp {
                 .into()
         } else if self.show_downloads_stack {
             let header = row![
-                text("📥 İndirilenler (Downloads)")
+                text(Icon::DOWNLOAD)
+                    .font(LUCIDE_FONT)
+                    .size(13.0)
+                    .color(palette.primary.to_iced()),
+                text("İndirilenler")
                     .size(13.0)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
@@ -5264,6 +5067,7 @@ impl Application for CortenPanelApp {
                     .style(|_, _| button::Style::default())
                     .on_press(Message::ToggleDownloadsStack),
             ]
+            .spacing(6)
             .align_y(Alignment::Center);
 
             let mut dl_col = iced::widget::column![].spacing(6);
@@ -5278,7 +5082,7 @@ impl Application for CortenPanelApp {
                     let path_clone = path.clone();
                     let item = button(
                         row![
-                            text("📄").size(14.0),
+                            text(Icon::FOLDER).font(LUCIDE_FONT).size(14.0).color(palette.primary.to_iced()),
                             column![
                                 text(name.clone()).size(12.0).color(palette.text_primary.to_iced()),
                                 text(size_str.clone()).size(10.0).color(palette.text_muted.to_iced()),
@@ -5366,8 +5170,41 @@ impl Application for CortenPanelApp {
                 }
             };
 
+            let status_badge = container(
+                text(if is_running { "● AÇIK" } else { "○ HAZIR" })
+                    .size(9.5)
+                    .font(iced::Font::MONOSPACE)
+                    .color(if is_running {
+                        palette.success.to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    }),
+            )
+            .padding([2, 6])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(if is_running {
+                    iced::Color::from_rgba(
+                        palette.success.r,
+                        palette.success.g,
+                        palette.success.b,
+                        0.15,
+                    )
+                } else {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
+                })),
+                border: iced::Border {
+                    radius: iced::border::Radius::from(Radius::FULL),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+
             let header = row![
-                text(format!("⚡ {}", disp_title))
+                text(Icon::APP_WINDOW)
+                    .font(LUCIDE_FONT)
+                    .size(14.0)
+                    .color(palette.primary.to_iced()),
+                text(disp_title)
                     .size(13.0)
                     .font(iced::Font {
                         weight: iced::font::Weight::Semibold,
@@ -5375,26 +5212,117 @@ impl Application for CortenPanelApp {
                     })
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
+                status_badge,
                 button(text("✕").size(12.0).color(palette.text_muted.to_iced()))
                     .padding([2, 5])
                     .style(|_, _| button::Style::default())
                     .on_press(Message::CloseDockContextMenu),
             ]
+            .spacing(6)
             .width(Length::Fill)
             .align_y(Alignment::Center);
 
-            let header_sep = container(iced::widget::Space::new(Length::Fill, Length::Fixed(1.0)))
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
-                    ..Default::default()
-                });
+            let make_sep = || {
+                container(iced::widget::Space::new(Length::Fill, Length::Fixed(1.0))).style(
+                    move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(
+                            1.0, 1.0, 1.0, 0.08,
+                        ))),
+                        ..Default::default()
+                    },
+                )
+            };
 
             let mut menu_items = column![].spacing(4);
 
+            // List open windows matching this app (Exposé quick jump)
+            let app_windows: Vec<_> = self
+                .compositor_windows
+                .iter()
+                .filter(|(wid, aid, title, _, _, _)| {
+                    if let Some(target_wid) = win_id_opt {
+                        *wid == target_wid
+                    } else {
+                        aid.to_lowercase().contains(&app_id_str)
+                            || title.to_lowercase().contains(&app_id_str)
+                    }
+                })
+                .take(4)
+                .collect();
+
+            if !app_windows.is_empty() {
+                menu_items = menu_items.push(
+                    text("AÇIK PENCERELER")
+                        .size(9.5)
+                        .color(palette.text_muted.to_iced()),
+                );
+                for (wid, aid, wtitle, ws, is_act, _) in app_windows {
+                    let w_id = *wid;
+                    let w_label = if wtitle.is_empty() { aid } else { wtitle };
+                    let w_short = if w_label.chars().count() > 24 {
+                        format!("{}…", w_label.chars().take(22).collect::<String>())
+                    } else {
+                        w_label.clone()
+                    };
+                    let w_active = *is_act;
+                    let win_row_btn = button(
+                        row![
+                            text(if w_active { "●" } else { "○" })
+                                .size(10.0)
+                                .color(if w_active {
+                                    palette.primary.to_iced()
+                                } else {
+                                    palette.text_muted.to_iced()
+                                }),
+                            text(w_short)
+                                .size(11.5)
+                                .color(palette.text_primary.to_iced())
+                                .width(Length::Fill),
+                            text(format!("M{ws}"))
+                                .size(9.5)
+                                .font(iced::Font::MONOSPACE)
+                                .color(palette.text_muted.to_iced()),
+                        ]
+                        .spacing(6)
+                        .align_y(Alignment::Center),
+                    )
+                    .width(Length::Fill)
+                    .padding([5, 8])
+                    .style(move |_, status| {
+                        let bg = match status {
+                            button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+                            _ if w_active => iced::Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.14,
+                            ),
+                            _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+                        };
+                        button::Style {
+                            background: Some(iced::Background::Color(bg)),
+                            border: iced::Border {
+                                radius: iced::border::Radius::from(6.0),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }
+                    })
+                    .on_press(Message::DockMenuAction(DockAction::Focus(w_id)));
+                    menu_items = menu_items.push(win_row_btn);
+                }
+                menu_items = menu_items.push(make_sep());
+            }
+
             let new_win_btn = button(
                 row![
-                    text("🚀").size(13.0),
-                    text("Yeni Pencere Aç").size(12.0).color(palette.text_primary.to_iced()),
+                    text(Icon::APP_WINDOW)
+                        .font(LUCIDE_FONT)
+                        .size(13.0)
+                        .color(palette.primary.to_iced()),
+                    text("Yeni Pencere Aç")
+                        .size(12.0)
+                        .color(palette.text_primary.to_iced()),
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),
@@ -5422,8 +5350,13 @@ impl Application for CortenPanelApp {
                 let focus_id = win_id_opt.unwrap_or(0);
                 let focus_btn = button(
                     row![
-                        text("🔍").size(13.0),
-                        text("Öne Getir / Odaklan").size(12.0).color(palette.text_primary.to_iced()),
+                        text(Icon::SEARCH)
+                            .font(LUCIDE_FONT)
+                            .size(13.0)
+                            .color(palette.text_muted.to_iced()),
+                        text("Öne Getir / Odaklan")
+                            .size(12.0)
+                            .color(palette.text_primary.to_iced()),
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),
@@ -5446,36 +5379,6 @@ impl Application for CortenPanelApp {
                 })
                 .on_press(Message::DockMenuAction(DockAction::Focus(focus_id)));
                 menu_items = menu_items.push(focus_btn);
-
-                let close_btn = button(
-                    row![
-                        text(Icon::X)
-                            .font(LUCIDE_FONT)
-                            .size(13.0)
-                            .color(palette.danger.to_iced()),
-                        text("Pencereyi Kapat / Sonlandır").size(12.0).color(palette.danger.to_iced()),
-                    ]
-                    .spacing(8)
-                    .align_y(Alignment::Center),
-                )
-                .width(Length::Fill)
-                .padding([6, 10])
-                .style(|_, status| {
-                    let bg = match status {
-                        button::Status::Hovered => iced::Color::from_rgba(1.0, 0.2, 0.2, 0.22),
-                        _ => iced::Color::from_rgba(1.0, 0.2, 0.2, 0.08),
-                    };
-                    button::Style {
-                        background: Some(iced::Background::Color(bg)),
-                        border: iced::Border {
-                            radius: iced::border::Radius::from(6.0),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    }
-                })
-                .on_press(Message::DockMenuAction(DockAction::CloseWindow(focus_id, app_id_str.clone())));
-                menu_items = menu_items.push(close_btn);
             }
 
             if let Some(idx) = pin_idx_opt {
@@ -5483,8 +5386,11 @@ impl Application for CortenPanelApp {
                 let can_right = idx + 1 < self.config.pinned_apps.len();
                 let reorder_row = row![
                     button(
-                        row![text("◀").size(11.0), text(" Sola").size(11.0).color(palette.text_primary.to_iced())]
-                            .align_y(Alignment::Center)
+                        row![
+                            text("◀").size(11.0),
+                            text(" Sola").size(11.0).color(palette.text_primary.to_iced())
+                        ]
+                        .align_y(Alignment::Center)
                     )
                     .width(Length::Fill)
                     .padding([5, 8])
@@ -5498,14 +5404,26 @@ impl Application for CortenPanelApp {
                         };
                         button::Style {
                             background: Some(iced::Background::Color(bg)),
-                            border: iced::Border { radius: iced::border::Radius::from(6.0), ..Default::default() },
+                            border: iced::Border {
+                                radius: iced::border::Radius::from(6.0),
+                                ..Default::default()
+                            },
                             ..Default::default()
                         }
                     })
-                    .on_press_maybe(if can_left { Some(Message::MoveDockItemLeft(idx)) } else { None }),
+                    .on_press_maybe(if can_left {
+                        Some(Message::MoveDockItemLeft(idx))
+                    } else {
+                        None
+                    }),
                     button(
-                        row![text("Sağa ").size(11.0).color(palette.text_primary.to_iced()), text("▶").size(11.0)]
-                            .align_y(Alignment::Center)
+                        row![
+                            text("Sağa ")
+                                .size(11.0)
+                                .color(palette.text_primary.to_iced()),
+                            text("▶").size(11.0)
+                        ]
+                        .align_y(Alignment::Center)
                     )
                     .width(Length::Fill)
                     .padding([5, 8])
@@ -5519,11 +5437,18 @@ impl Application for CortenPanelApp {
                         };
                         button::Style {
                             background: Some(iced::Background::Color(bg)),
-                            border: iced::Border { radius: iced::border::Radius::from(6.0), ..Default::default() },
+                            border: iced::Border {
+                                radius: iced::border::Radius::from(6.0),
+                                ..Default::default()
+                            },
                             ..Default::default()
                         }
                     })
-                    .on_press_maybe(if can_right { Some(Message::MoveDockItemRight(idx)) } else { None }),
+                    .on_press_maybe(if can_right {
+                        Some(Message::MoveDockItemRight(idx))
+                    } else {
+                        None
+                    }),
                 ]
                 .spacing(6)
                 .width(Length::Fill);
@@ -5538,7 +5463,13 @@ impl Application for CortenPanelApp {
                         .font(LUCIDE_FONT)
                         .size(13.0)
                         .color(palette.primary.to_iced()),
-                    text(if is_pinned { "Dock'tan Kaldır" } else { "Dock'a Sabitle" }).size(12.0).color(palette.text_primary.to_iced()),
+                    text(if is_pinned {
+                        "Dock'tan Kaldır"
+                    } else {
+                        "Dock'a Sabitle"
+                    })
+                    .size(12.0)
+                    .color(palette.text_primary.to_iced()),
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),
@@ -5569,8 +5500,17 @@ impl Application for CortenPanelApp {
             let is_dodge = self.config.autohide_mode == "dodge";
             let autohide_btn = button(
                 row![
-                    text("🛡️").size(13.0),
-                    text(if is_dodge { "Akıllı Gizlenme: Açık" } else { "Akıllı Gizlenme: Kapalı" }).size(12.0).color(palette.text_primary.to_iced()),
+                    text(Icon::SHIELD)
+                        .font(LUCIDE_FONT)
+                        .size(13.0)
+                        .color(palette.text_muted.to_iced()),
+                    text(if is_dodge {
+                        "Akıllı Gizlenme: Açık"
+                    } else {
+                        "Akıllı Gizlenme: Kapalı"
+                    })
+                    .size(12.0)
+                    .color(palette.text_primary.to_iced()),
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),
@@ -5594,14 +5534,61 @@ impl Application for CortenPanelApp {
             .on_press(Message::ToggleAutohideMode);
             menu_items = menu_items.push(autohide_btn);
 
-            let menu_card = container(column![header, header_sep, menu_items].spacing(8))
+            if is_running {
+                let focus_id = win_id_opt.unwrap_or(0);
+                menu_items = menu_items.push(make_sep());
+                let close_btn = button(
+                    row![
+                        text(Icon::X)
+                            .font(LUCIDE_FONT)
+                            .size(13.0)
+                            .color(palette.danger.to_iced()),
+                        text("Pencereyi Kapat / Sonlandır")
+                            .size(12.0)
+                            .color(palette.danger.to_iced())
+                            .width(Length::Fill),
+                        text("Alt+F4")
+                            .size(9.5)
+                            .font(iced::Font::MONOSPACE)
+                            .color(palette.text_muted.to_iced()),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                )
+                .width(Length::Fill)
+                .padding([6, 10])
+                .style(|_, status| {
+                    let bg = match status {
+                        button::Status::Hovered => iced::Color::from_rgba(1.0, 0.2, 0.2, 0.22),
+                        _ => iced::Color::from_rgba(1.0, 0.2, 0.2, 0.08),
+                    };
+                    button::Style {
+                        background: Some(iced::Background::Color(bg)),
+                        border: iced::Border {
+                            radius: iced::border::Radius::from(6.0),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }
+                })
+                .on_press(Message::DockMenuAction(DockAction::CloseWindow(
+                    focus_id,
+                    app_id_str.clone(),
+                )));
+                menu_items = menu_items.push(close_btn);
+            }
+
+            let menu_card = container(column![header, make_sep(), menu_items].spacing(8))
                 .padding([12, 14])
-                .width(Length::Fixed(260.0))
+                .width(Length::Fixed(276.0))
                 .style(move |_| {
                     let mut style = acrylic_glass_style(palette, 16.0);
                     if let Some(iced::Background::Color(color)) = style.background {
                         style.background = Some(iced::Background::Color(iced::Color::from_rgba(
-                            color.r, color.g, color.b, color.a * popover_alpha,
+                            color.r,
+                            color.g,
+                            color.b,
+                            color.a * popover_alpha,
                         )));
                     }
                     style
@@ -5617,7 +5604,11 @@ impl Application for CortenPanelApp {
                 .into()
         } else if self.show_mini_task_manager {
             let header = row![
-                text("📊 Mini Görev Yöneticisi")
+                text(Icon::ACTIVITY)
+                    .font(LUCIDE_FONT)
+                    .size(13.0)
+                    .color(palette.primary.to_iced()),
+                text("Mini Görev Yöneticisi")
                     .size(13.0)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
@@ -5630,6 +5621,7 @@ impl Application for CortenPanelApp {
                     .style(|_, _| button::Style::default())
                     .on_press(Message::ToggleMiniTaskManager),
             ]
+            .spacing(6)
             .align_y(Alignment::Center);
 
             let mem_bar = row![
@@ -5787,9 +5779,9 @@ impl Application for CortenPanelApp {
                         .into()
                     } else if lower_aid.contains("file") {
                         row![
-                            column![text("📁").size(14.0), text("Belgeler").size(7.0).color(palette.text_muted.to_iced())].align_x(Alignment::Center),
-                            column![text("📁").size(14.0), text("İndirilen").size(7.0).color(palette.text_muted.to_iced())].align_x(Alignment::Center),
-                            column![text("📁").size(14.0), text("Resimler").size(7.0).color(palette.text_muted.to_iced())].align_x(Alignment::Center),
+                            column![text(Icon::FOLDER).font(LUCIDE_FONT).size(14.0).color(palette.primary.to_iced()), text("Belgeler").size(7.0).color(palette.text_muted.to_iced())].align_x(Alignment::Center),
+                            column![text(Icon::FOLDER).font(LUCIDE_FONT).size(14.0).color(palette.primary.to_iced()), text("İndirilen").size(7.0).color(palette.text_muted.to_iced())].align_x(Alignment::Center),
+                            column![text(Icon::FOLDER).font(LUCIDE_FONT).size(14.0).color(palette.primary.to_iced()), text("Resimler").size(7.0).color(palette.text_muted.to_iced())].align_x(Alignment::Center),
                         ]
                         .spacing(10)
                         .padding(10)
@@ -5905,7 +5897,11 @@ impl Application for CortenPanelApp {
         } else if self.show_net_speed_details {
             let (is_online, net_name, ip_addr) = &self.network_status;
             let header = row![
-                text("🌐 Canlı Ağ ve Trafik Detayı")
+                text(Icon::GLOBE)
+                    .font(LUCIDE_FONT)
+                    .size(13.0)
+                    .color(palette.primary.to_iced()),
+                text("Canlı Ağ ve Trafik Detayı")
                     .size(13.0)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
@@ -5914,13 +5910,20 @@ impl Application for CortenPanelApp {
                     .style(|_, _| button::Style::default())
                     .on_press(Message::ToggleNetSpeedDetails),
             ]
+            .spacing(6)
             .align_y(Alignment::Center);
 
             let status_row = row![
-                text(if *is_online { "🟢 Bağlı" } else { "🔴 Çevrimdışı" }).size(12.0),
+                text("●")
+                    .size(11.0)
+                    .color(if *is_online { palette.success.to_iced() } else { palette.danger.to_iced() }),
+                text(if *is_online { "Bağlı" } else { "Çevrimdışı" })
+                    .size(12.0)
+                    .color(if *is_online { palette.success.to_iced() } else { palette.danger.to_iced() }),
                 text(format!("{} ({})", net_name, ip_addr)).size(12.0).color(palette.text_primary.to_iced()),
             ]
-            .spacing(8);
+            .spacing(8)
+            .align_y(Alignment::Center);
 
             let speed_boxes = row![
                 container(
@@ -5972,10 +5975,10 @@ impl Application for CortenPanelApp {
                 .align_x(Alignment::Center)
                 .into()
         } else if self.show_desktop_context_hub {
-            let hub_action_btn = |icon_char: &'static str, label_text: &'static str, msg: Message, pal: Palette| {
+            let hub_action_btn = |icon_char: char, label_text: &'static str, msg: Message, pal: Palette| {
                 button(
                     column![
-                        text(icon_char).size(20.0),
+                        text(icon_char).font(LUCIDE_FONT).size(18.0).color(pal.primary.to_iced()),
                         text(label_text).size(10.0).color(pal.text_primary.to_iced()),
                     ]
                     .spacing(4)
@@ -6016,7 +6019,7 @@ impl Application for CortenPanelApp {
 
             let wallpaper_row = container(
                 row![
-                    text("🖼️").size(16.0),
+                    text(Icon::MONITOR).font(LUCIDE_FONT).size(16.0).color(palette.primary.to_iced()),
                     column![
                         text("Duvarkağıdı & Ambiance Uyum").size(12.0).color(palette.text_primary.to_iced()),
                         text("Canlı Renk & Atmosferik Senkronizasyon").size(9.0).color(palette.text_muted.to_iced()),
@@ -6067,17 +6070,17 @@ impl Application for CortenPanelApp {
             });
 
             let tools_grid = row![
-                hub_action_btn("📸", "Ekran Kesiti", Message::LaunchCommand("corten-snipper".into()), palette),
-                hub_action_btn(">_", "Terminal", Message::LaunchCommand("corten-terminal || alacritty || foot".into()), palette),
-                hub_action_btn("📁", "Dosyalar", Message::LaunchCommand("corten-files".into()), palette),
-                hub_action_btn("📊", "Monitör", Message::OpenFullTaskManager, palette),
+                hub_action_btn(Icon::CAMERA, "Ekran Kesiti", Message::LaunchCommand("corten-snipper".into()), palette),
+                hub_action_btn(Icon::TERMINAL, "Terminal", Message::LaunchCommand("corten-terminal || alacritty || foot".into()), palette),
+                hub_action_btn(Icon::FOLDER, "Dosyalar", Message::LaunchCommand("corten-files".into()), palette),
+                hub_action_btn(Icon::ACTIVITY, "Monitör", Message::OpenFullTaskManager, palette),
             ]
             .spacing(8)
             .width(Length::Fill);
 
             let zen_toggle_row = button(
                 row![
-                    text("👁️").size(14.0),
+                    text(Icon::EYE).font(LUCIDE_FONT).size(14.0).color(palette.primary.to_iced()),
                     text("Masaüstü HUD Göstergelerini Değiştir (Zen Modu)")
                         .size(11.0)
                         .color(palette.text_primary.to_iced()),
@@ -6129,7 +6132,7 @@ impl Application for CortenPanelApp {
                 });
 
             iced::widget::column![hub_card, dock_cluster]
-                .spacing(12)
+                .spacing(popover_lift_gap)
                 .align_x(Alignment::Center)
                 .into()
         } else {
@@ -6221,13 +6224,13 @@ impl Application for CortenPanelApp {
                     }
                     OsdKind::MicMute(is_muted) => {
                         let (icon, label, color) = if *is_muted {
-                            ("🛡️", "Mikrofon Susturuldu", palette.danger)
+                            (Icon::SHIELD, "Mikrofon Susturuldu", palette.danger)
                         } else {
-                            ("🎙️", "Mikrofon Aktif", palette.success)
+                            (Icon::MIC, "Mikrofon Aktif", palette.success)
                         };
                         container(
                             row![
-                                text(icon).size(16.0),
+                                text(icon).font(LUCIDE_FONT).size(15.0).color(color.to_iced()),
                                 text(label).size(12.0).color(color.to_iced()),
                             ]
                             .spacing(8)
@@ -6243,7 +6246,7 @@ impl Application for CortenPanelApp {
                     OsdKind::BatteryWarning(pct) => {
                         container(
                             row![
-                                text("⚡").size(16.0).color(palette.warning.to_iced()),
+                                text(Icon::ZAP).font(LUCIDE_FONT).size(15.0).color(palette.warning.to_iced()),
                                 text(format!("Düşük Pil Uyarısı: %{} (Şarja Takın)", pct))
                                     .size(12.0)
                                     .color(palette.warning.to_iced()),
@@ -6260,26 +6263,17 @@ impl Application for CortenPanelApp {
                     }
                     OsdKind::Volume | OsdKind::Brightness => {
                         let icon = match kind {
-                            OsdKind::Volume => {
-                                if *lvl == 0 {
-                                    "🔇"
-                                } else if *lvl < 33 {
-                                    "🔈"
-                                } else if *lvl < 66 {
-                                    "🔉"
-                                } else {
-                                    "🔊"
-                                }
-                            }
-                            OsdKind::Brightness => "🔆",
-                            _ => "",
+                            OsdKind::Volume => Icon::VOLUME,
+                            OsdKind::Brightness => Icon::SUN,
+                            _ => Icon::VOLUME,
                         };
                         let label = match kind {
                             OsdKind::Volume => "Ses",
                             OsdKind::Brightness => "Parlaklık",
                             _ => "",
                         };
-                        let fill_pct = (*lvl as f32 / 100.0).clamp(0.0, 1.0);
+                        let fill_pct = (self.osd_display_level / 100.0).clamp(0.0, 1.0);
+                        let display_lvl = self.osd_display_level.round() as u8;
                         let bar_width = 110.0;
                         let filled_width = (fill_pct * bar_width).clamp(0.5, bar_width);
 
@@ -6311,10 +6305,10 @@ impl Application for CortenPanelApp {
 
                         container(
                             row![
-                                text(icon).size(15.0),
+                                text(icon).font(LUCIDE_FONT).size(15.0).color(palette.primary.to_iced()),
                                 text(label).size(12.0).color(palette.text_muted.to_iced()),
                                 liquid_bar,
-                                text(format!("{}%", lvl))
+                                text(format!("{}%", display_lvl.max(*lvl)))
                                     .size(12.0)
                                     .font(iced::Font::MONOSPACE)
                                     .color(palette.text_primary.to_iced()),
@@ -6541,6 +6535,38 @@ mod tests {
 
         app.show_calendar = true;
         app.dock_context_menu = None;
+        let _ = app.view();
+    }
+
+    #[test]
+    fn test_dock_width_stability_and_instant_control_center() {
+        use super::*;
+        let config_manager = ConfigManager::<PanelConfig>::load_or_default("panel").unwrap();
+        let flags = PanelAppFlags {
+            config_manager,
+            ipc_rx: None,
+            output_name: None,
+        };
+        let (mut app, _) = CortenPanelApp::new(flags);
+        let base_width = app.calculate_dock_width();
+
+        // Changing audio VU, volume slider, Wi-Fi details, network speed, or opening Control Center
+        // must NEVER alter the dock width (preventing Wayland SizeChange jitter and dropped clicks)
+        app.audio_vu_level = (0.85, 0.92);
+        assert_eq!(app.calculate_dock_width(), base_width);
+
+        app.show_volume_slider = true;
+        assert_eq!(app.calculate_dock_width(), base_width);
+
+        app.show_wifi_details = true;
+        assert_eq!(app.calculate_dock_width(), base_width);
+
+        app.net_speed_display = ("980.4 MB/s".into(), "412.9 MB/s".into());
+        assert_eq!(app.calculate_dock_width(), base_width);
+
+        let _ = app.update(Message::ToggleControlCenter);
+        assert!(app.show_control_center);
+        assert_eq!(app.calculate_dock_width(), base_width);
         let _ = app.view();
     }
 }

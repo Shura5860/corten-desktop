@@ -1017,6 +1017,7 @@ version = "0.1.0"
 dependencies = [
  "corten-config",
  "corten-ipc",
+ "corten-services",
  "corten-theme",
  "futures",
  "iced",
@@ -1143,6 +1144,7 @@ name = "corten-snipper"
 version = "0.1.0"
 dependencies = [
  "corten-config",
+ "corten-services",
  "corten-theme",
  "iced",
  "iced_layershell",

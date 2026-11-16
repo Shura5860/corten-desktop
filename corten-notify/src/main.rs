@@ -7,8 +7,10 @@ use tracing::{info, warn};
 use zbus::connection::Builder;
 
 use corten_config::{AppearanceConfig, ConfigManager};
+use corten_theme::iced_styles::acrylic_glass_style;
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Spacing, ThemeMode, Transition, Typography, LUCIDE_FONT, LUCIDE_FONT_BYTES,
+    Icon, Palette, PatinaVariant, Spacing, ThemeMode, Transition, Typography, LUCIDE_FONT,
+    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
 };
 use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Element, Length, Subscription};
@@ -118,21 +120,22 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let app_watcher = if let Ok(app_mgr) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
-        if let Ok((w, app_rx)) = app_mgr.spawn_watcher() {
-            let app_tx = event_tx.clone();
-            std::thread::spawn(move || {
-                while app_rx.recv().is_ok() {
-                    let _ = app_tx.send(NotifyEvent::ReloadConfig);
-                }
-            });
-            Some(w)
+    let app_watcher =
+        if let Ok(app_mgr) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
+            if let Ok((w, app_rx)) = app_mgr.spawn_watcher() {
+                let app_tx = event_tx.clone();
+                std::thread::spawn(move || {
+                    while app_rx.recv().is_ok() {
+                        let _ = app_tx.send(NotifyEvent::ReloadConfig);
+                    }
+                });
+                Some(w)
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    };
+        };
 
     let anchor = match initial_config.position {
         Position::TopRight => Anchor::Top | Anchor::Right,
@@ -155,7 +158,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     CortenNotificationApp::run(Settings {
         id: Some("corten-notify".into()),
         flags,
-        fonts: vec![Cow::Borrowed(LUCIDE_FONT_BYTES)],
+        fonts: vec![
+            Cow::Borrowed(LUCIDE_FONT_BYTES),
+            Cow::Borrowed(NOTO_SANS_BYTES),
+        ],
         layer_settings: LayerShellSettings {
             anchor,
             layer: Layer::Top,
@@ -170,7 +176,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             keyboard_interactivity: KeyboardInteractivity::None,
             binded_output_name: None,
         },
-        default_font: iced::Font::default(),
+        default_font: NOTO_SANS,
         default_text_size: iced::Pixels(16.0),
         antialiasing: false,
         virtual_keyboard_support: None,
@@ -216,6 +222,7 @@ pub enum Message {
     ToggleHistoryDrawer,
     ActionInvoked(u32, String),
     Tick,
+    AnimationTick,
     LayerAction(LayershellCustomActions),
 }
 
@@ -247,10 +254,21 @@ pub struct CortenNotificationApp {
 fn resolve_notification_icon(icon: &str, app_name: &str, summary: &str) -> char {
     let icon_lower = icon.to_lowercase();
     if !icon_lower.is_empty() {
-        if icon_lower.contains("term") || icon_lower.contains("alacritty") || icon_lower.contains("kitty") || icon_lower.contains("foot") || icon_lower.contains("konsole") || icon_lower.contains("bash") {
+        if icon_lower.contains("term")
+            || icon_lower.contains("alacritty")
+            || icon_lower.contains("kitty")
+            || icon_lower.contains("foot")
+            || icon_lower.contains("konsole")
+            || icon_lower.contains("bash")
+        {
             return Icon::TERMINAL;
         }
-        if icon_lower.contains("music") || icon_lower.contains("spotify") || icon_lower.contains("audacious") || icon_lower.contains("vlc") || icon_lower.contains("mpv") {
+        if icon_lower.contains("music")
+            || icon_lower.contains("spotify")
+            || icon_lower.contains("audacious")
+            || icon_lower.contains("vlc")
+            || icon_lower.contains("mpv")
+        {
             return Icon::MUSIC;
         }
         if icon_lower.contains("wifi") || icon_lower.contains("network") {
@@ -259,25 +277,50 @@ fn resolve_notification_icon(icon: &str, app_name: &str, summary: &str) -> char 
         if icon_lower.contains("battery") || icon_lower.contains("power") {
             return Icon::BATTERY;
         }
-        if icon_lower.contains("code") || icon_lower.contains("git") || icon_lower.contains("antigravity") || icon_lower.contains("rust") {
+        if icon_lower.contains("code")
+            || icon_lower.contains("git")
+            || icon_lower.contains("antigravity")
+            || icon_lower.contains("rust")
+        {
             return Icon::CODE;
         }
-        if icon_lower.contains("folder") || icon_lower.contains("file") || icon_lower.contains("thunar") || icon_lower.contains("dolphin") || icon_lower.contains("nautilus") {
+        if icon_lower.contains("folder")
+            || icon_lower.contains("file")
+            || icon_lower.contains("thunar")
+            || icon_lower.contains("dolphin")
+            || icon_lower.contains("nautilus")
+        {
             return Icon::FOLDER;
         }
         if icon_lower.contains("download") {
             return Icon::DOWNLOAD;
         }
-        if icon_lower.contains("web") || icon_lower.contains("browser") || icon_lower.contains("firefox") || icon_lower.contains("chrome") || icon_lower.contains("brave") || icon_lower.contains("zen") {
+        if icon_lower.contains("web")
+            || icon_lower.contains("browser")
+            || icon_lower.contains("firefox")
+            || icon_lower.contains("chrome")
+            || icon_lower.contains("brave")
+            || icon_lower.contains("zen")
+        {
             return Icon::GLOBE;
         }
-        if icon_lower.contains("mail") || icon_lower.contains("thunderbird") || icon_lower.contains("email") {
+        if icon_lower.contains("mail")
+            || icon_lower.contains("thunderbird")
+            || icon_lower.contains("email")
+        {
             return Icon::BELL;
         }
-        if icon_lower.contains("setting") || icon_lower.contains("preference") || icon_lower.contains("control") {
+        if icon_lower.contains("setting")
+            || icon_lower.contains("preference")
+            || icon_lower.contains("control")
+        {
             return Icon::SETTINGS;
         }
-        if icon_lower.contains("warn") || icon_lower.contains("alert") || icon_lower.contains("shield") || icon_lower.contains("security") {
+        if icon_lower.contains("warn")
+            || icon_lower.contains("alert")
+            || icon_lower.contains("shield")
+            || icon_lower.contains("security")
+        {
             return Icon::SHIELD;
         }
         if icon_lower.contains("bell") {
@@ -287,25 +330,54 @@ fn resolve_notification_icon(icon: &str, app_name: &str, summary: &str) -> char 
 
     let name_lower = app_name.to_lowercase();
     let summary_lower = summary.to_lowercase();
-    if name_lower.contains("term") || name_lower.contains("bash") || name_lower.contains("alacritty") || summary_lower.contains("terminal") {
+    if name_lower.contains("term")
+        || name_lower.contains("bash")
+        || name_lower.contains("alacritty")
+        || summary_lower.contains("terminal")
+    {
         Icon::TERMINAL
-    } else if name_lower.contains("music") || name_lower.contains("spotify") || summary_lower.contains("track") || summary_lower.contains("music") {
+    } else if name_lower.contains("music")
+        || name_lower.contains("spotify")
+        || summary_lower.contains("track")
+        || summary_lower.contains("music")
+    {
         Icon::MUSIC
-    } else if name_lower.contains("wifi") || name_lower.contains("network") || summary_lower.contains("connection") || summary_lower.contains("wifi") {
+    } else if name_lower.contains("wifi")
+        || name_lower.contains("network")
+        || summary_lower.contains("connection")
+        || summary_lower.contains("wifi")
+    {
         Icon::WIFI
-    } else if name_lower.contains("battery") || summary_lower.contains("battery") || summary_lower.contains("charge") {
+    } else if name_lower.contains("battery")
+        || summary_lower.contains("battery")
+        || summary_lower.contains("charge")
+    {
         Icon::BATTERY
-    } else if name_lower.contains("code") || name_lower.contains("git") || name_lower.contains("build") || summary_lower.contains("compile") {
+    } else if name_lower.contains("code")
+        || name_lower.contains("git")
+        || name_lower.contains("build")
+        || summary_lower.contains("compile")
+    {
         Icon::CODE
     } else if name_lower.contains("download") || summary_lower.contains("download") {
         Icon::DOWNLOAD
     } else if name_lower.contains("file") || summary_lower.contains("file") {
         Icon::FOLDER
-    } else if name_lower.contains("web") || name_lower.contains("browser") || name_lower.contains("firefox") || summary_lower.contains("tab") {
+    } else if name_lower.contains("web")
+        || name_lower.contains("browser")
+        || name_lower.contains("firefox")
+        || summary_lower.contains("tab")
+    {
         Icon::GLOBE
-    } else if name_lower.contains("mail") || summary_lower.contains("mail") || summary_lower.contains("email") {
+    } else if name_lower.contains("mail")
+        || summary_lower.contains("mail")
+        || summary_lower.contains("email")
+    {
         Icon::BELL
-    } else if name_lower.contains("setting") || summary_lower.contains("setting") || summary_lower.contains("config") {
+    } else if name_lower.contains("setting")
+        || summary_lower.contains("setting")
+        || summary_lower.contains("config")
+    {
         Icon::SETTINGS
     } else {
         Icon::APP_WINDOW
@@ -326,9 +398,17 @@ impl Application for CortenNotificationApp {
             .map(|rx| Arc::new(tokio::sync::Mutex::new(rx)));
 
         let load_font_task = iced::font::load(LUCIDE_FONT_BYTES).map(|_| Message::Tick);
-        let active_patina = ConfigManager::<AppearanceConfig>::load_or_default("appearance")
-            .map(|c| PatinaVariant::from_code(&c.get().patina))
-            .unwrap_or(PatinaVariant::Rust);
+        let (active_patina, theme_mode) =
+            ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                .map(|c| {
+                    let pat = PatinaVariant::from_code(&c.get().patina);
+                    let mode = match c.get().theme_mode {
+                        corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                        _ => ThemeMode::Dark,
+                    };
+                    (pat, mode)
+                })
+                .unwrap_or((PatinaVariant::Rust, ThemeMode::Dark));
 
         (
             Self {
@@ -341,7 +421,7 @@ impl Application for CortenNotificationApp {
                 notifications: Vec::new(),
                 notification_history: Vec::new(),
                 show_history_drawer: false,
-                theme_mode: ThemeMode::Dark,
+                theme_mode,
                 active_patina,
             },
             load_font_task,
@@ -365,6 +445,11 @@ impl Application for CortenNotificationApp {
         } else {
             Subscription::none()
         };
+        let anim_timer = if self.notifications.iter().any(|n| !n.entrance.is_complete()) {
+            iced::time::every(Duration::from_millis(16)).map(|_| Message::AnimationTick)
+        } else {
+            Subscription::none()
+        };
 
         if let Some(rx_arc) = &self.event_rx {
             let rx_clone = Arc::clone(rx_arc);
@@ -375,9 +460,9 @@ impl Application for CortenNotificationApp {
                 Some((Message::DbusEvent(event), rx))
             });
             let dbus_sub = Subscription::run_with_id("corten-dbus-receiver", stream);
-            Subscription::batch(vec![timer, dbus_sub])
+            Subscription::batch(vec![timer, anim_timer, dbus_sub])
         } else {
-            timer
+            Subscription::batch(vec![timer, anim_timer])
         }
     }
 
@@ -403,7 +488,7 @@ impl Application for CortenNotificationApp {
                             item: item.clone(),
                             remaining_ms: timeout,
                             initial_ms: timeout.max(1),
-                            entrance: Transition::new(140),
+                            entrance: Transition::new(220),
                         });
                         if self.notifications.len() > self.config.max_visible {
                             self.notifications.remove(0);
@@ -412,6 +497,9 @@ impl Application for CortenNotificationApp {
 
                     // Keep in recent history ring-buffer (skip transient OSD items)
                     if item.sync_tag.is_none() {
+                        corten_services::acoustic::play(
+                            corten_services::acoustic::AcousticCue::Notification,
+                        );
                         self.notification_history.retain(|h| h.id != item.id);
                         self.notification_history.push(item);
                         if self.notification_history.len() > 20 {
@@ -447,16 +535,24 @@ impl Application for CortenNotificationApp {
                     info!("Notification: ReloadConfig received, reading from ~/.config/corten/notify.toml");
                     if let Ok(new_cfg) = ConfigManager::<NotifyConfig>::load_or_default("notify") {
                         self.config = new_cfg.get().clone();
-                        self._dnd_enabled.store(self.config.dnd, std::sync::atomic::Ordering::SeqCst);
+                        self._dnd_enabled
+                            .store(self.config.dnd, std::sync::atomic::Ordering::SeqCst);
                         info!("Notification config reloaded: {:?}", self.config);
                     }
-                    if let Ok(app_cfg) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
+                    if let Ok(app_cfg) =
+                        ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                    {
                         self.active_patina = PatinaVariant::from_code(&app_cfg.get().patina);
+                        self.theme_mode = match app_cfg.get().theme_mode {
+                            corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                            _ => ThemeMode::Dark,
+                        };
                     }
                 }
                 NotifyEvent::SetDnd(enabled) => {
                     self.config.dnd = enabled;
-                    self._dnd_enabled.store(enabled, std::sync::atomic::Ordering::SeqCst);
+                    self._dnd_enabled
+                        .store(enabled, std::sync::atomic::Ordering::SeqCst);
                     let _ = self.config_manager.update(self.config.clone());
                     info!("Notification: DND set to {}", enabled);
                 }
@@ -466,7 +562,9 @@ impl Application for CortenNotificationApp {
                 dbus::emit_notification_closed(id, 2);
             }
             Message::DismissApp(app) => {
-                let dismissed: Vec<u32> = self.notifications.iter()
+                let dismissed: Vec<u32> = self
+                    .notifications
+                    .iter()
                     .filter(|n| n.item.app_name == app)
                     .map(|n| n.item.id)
                     .collect();
@@ -489,6 +587,12 @@ impl Application for CortenNotificationApp {
                 self.notifications.retain(|n| n.item.id != id);
                 dbus::emit_action_invoked(id, &action_key);
                 dbus::emit_notification_closed(id, 2);
+            }
+            Message::AnimationTick => {
+                for notification in &mut self.notifications {
+                    notification.entrance.tick(16);
+                }
+                return Task::none();
             }
             Message::Tick => {
                 for notification in &mut self.notifications {
@@ -552,11 +656,17 @@ impl Application for CortenNotificationApp {
                 .padding([1, 6])
                 .style(move |_| container::Style {
                     background: Some(iced::Background::Color(iced::Color::from_rgba(
-                        palette.primary.r, palette.primary.g, palette.primary.b, 0.20,
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.20,
                     ))),
                     border: iced::Border {
                         color: iced::Color::from_rgba(
-                            palette.primary.r, palette.primary.g, palette.primary.b, 0.45,
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.45,
                         ),
                         width: 1.0,
                         radius: iced::border::Radius::from(corten_theme::Radius::FULL),
@@ -615,11 +725,9 @@ impl Application for CortenNotificationApp {
                         .filter(|h| h.app_name == item.app_name)
                         .count();
 
-                    let mut app_header = row![
-                        text(&item.app_name)
-                            .size(Typography::CAPTION)
-                            .color(palette.primary.to_iced()),
-                    ]
+                    let mut app_header = row![text(&item.app_name)
+                        .size(Typography::CAPTION)
+                        .color(palette.primary.to_iced()),]
                     .spacing(4)
                     .align_y(Alignment::Center);
 
@@ -633,11 +741,17 @@ impl Application for CortenNotificationApp {
                             .padding([1, 5])
                             .style(move |_| container::Style {
                                 background: Some(iced::Background::Color(iced::Color::from_rgba(
-                                    palette.primary.r, palette.primary.g, palette.primary.b, 0.16,
+                                    palette.primary.r,
+                                    palette.primary.g,
+                                    palette.primary.b,
+                                    0.16,
                                 ))),
                                 border: iced::Border {
                                     color: iced::Color::from_rgba(
-                                        palette.primary.r, palette.primary.g, palette.primary.b, 0.35,
+                                        palette.primary.r,
+                                        palette.primary.g,
+                                        palette.primary.b,
+                                        0.35,
                                     ),
                                     width: 1.0,
                                     radius: iced::border::Radius::from(corten_theme::Radius::FULL),
@@ -692,22 +806,7 @@ impl Application for CortenNotificationApp {
                     .width(Length::Fixed(self.config.card_width as f32 + 20.0)),
             )
             .padding(Spacing::MD)
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.09, 0.10, 0.13, 0.96,
-                ))),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.15),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(corten_theme::Radius::LG),
-                },
-                shadow: iced::Shadow {
-                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.50),
-                    offset: iced::Vector::new(0.0, 8.0),
-                    blur_radius: 24.0,
-                },
-                ..Default::default()
-            });
+            .style(move |_| acrylic_glass_style(palette, corten_theme::Radius::LG));
 
             return container(drawer_card).padding(Spacing::SM).into();
         }
@@ -726,7 +825,12 @@ impl Application for CortenNotificationApp {
 
             let border_color = match item.urgency {
                 Urgency::Critical => palette.danger.to_iced(),
-                Urgency::Normal => palette.border.to_iced(),
+                Urgency::Normal => iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.50,
+                ),
                 Urgency::Low => palette.border.to_iced(),
             };
 
@@ -781,9 +885,9 @@ impl Application for CortenNotificationApp {
 
             let elapsed_sec = (notif.initial_ms.saturating_sub(notif.remaining_ms)) / 1000;
             let time_tag = if elapsed_sec == 0 {
-                "now".to_string()
+                "şimdi".to_string()
             } else {
-                format!("{}s ago", elapsed_sec)
+                format!("{} sn önce", elapsed_sec)
             };
 
             let app_count = self
@@ -803,11 +907,17 @@ impl Application for CortenNotificationApp {
                     .padding([1, 5])
                     .style(move |_| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgba(
-                            palette.primary.r, palette.primary.g, palette.primary.b, 0.20,
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.20,
                         ))),
                         border: iced::Border {
                             color: iced::Color::from_rgba(
-                                palette.primary.r, palette.primary.g, palette.primary.b, 0.45,
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.45,
                             ),
                             width: 1.0,
                             radius: iced::border::Radius::from(corten_theme::Radius::FULL),
@@ -903,43 +1013,53 @@ impl Application for CortenNotificationApp {
 
             card_content = card_content.push(progress_bar);
 
+            let spring_p = notif.entrance.spring();
+            let exit_alpha = if item.urgency != Urgency::Critical && notif.remaining_ms <= 400 {
+                (notif.remaining_ms as f32 / 400.0).clamp(0.25, 1.0)
+            } else {
+                1.0
+            };
+            let slide_offset_right =
+                ((1.0 - spring_p).max(0.0) * 28.0 + (1.0 - exit_alpha) * 20.0).round();
+
             let card = container(card_content)
                 .padding(Spacing::MD)
                 .width(Length::Fixed(self.config.card_width as f32))
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(
-                        0.09,
-                        0.10,
-                        0.13,
-                        0.92 * (0.72 + 0.28 * notif.entrance.eased()),
-                    ))),
-                    border: iced::Border {
-                        color: border_color,
-                        width: if item.urgency == Urgency::Critical {
-                            2.0
-                        } else {
-                            1.0
-                        },
-                        radius: iced::border::Radius::from(corten_theme::Radius::MD),
-                    },
-                    shadow: iced::Shadow {
-                        color: if item.urgency == Urgency::Critical {
-                            iced::Color::from_rgba(
-                                palette.danger.r,
-                                palette.danger.g,
-                                palette.danger.b,
-                                0.40,
-                            )
-                        } else {
-                            iced::Color::from_rgba(0.0, 0.0, 0.0, 0.40)
-                        },
-                        offset: iced::Vector::new(0.0, 4.0),
-                        blur_radius: 16.0,
-                    },
-                    ..Default::default()
+                .style(move |_| {
+                    let mut style = acrylic_glass_style(palette, corten_theme::Radius::MD);
+                    if let Some(iced::Background::Color(c)) = style.background {
+                        style.background = Some(iced::Background::Color(iced::Color::from_rgba(
+                            c.r,
+                            c.g,
+                            c.b,
+                            c.a * (0.65 + 0.35 * notif.entrance.eased()) * exit_alpha,
+                        )));
+                    }
+                    style.border.color = border_color;
+                    style.border.width = if item.urgency == Urgency::Critical {
+                        2.0
+                    } else {
+                        1.0
+                    };
+                    if item.urgency == Urgency::Critical {
+                        style.shadow.color = iced::Color::from_rgba(
+                            palette.danger.r,
+                            palette.danger.g,
+                            palette.danger.b,
+                            0.40,
+                        );
+                    }
+                    style
                 });
 
-            cards = cards.push(card);
+            let animated_card = container(card).padding(iced::Padding {
+                top: 0.0,
+                right: slide_offset_right,
+                bottom: 0.0,
+                left: 0.0,
+            });
+
+            cards = cards.push(animated_card);
         }
 
         container(cards).padding(Spacing::SM).into()
@@ -1004,10 +1124,25 @@ mod tests {
         use super::resolve_notification_icon;
         use corten_theme::Icon;
 
-        assert_eq!(resolve_notification_icon("firefox", "Browser", ""), Icon::GLOBE);
-        assert_eq!(resolve_notification_icon("spotify", "Music Player", ""), Icon::MUSIC);
-        assert_eq!(resolve_notification_icon("terminal", "bash", ""), Icon::TERMINAL);
-        assert_eq!(resolve_notification_icon("", "corten-terminal", ""), Icon::TERMINAL);
-        assert_eq!(resolve_notification_icon("", "RandomApp", "Battery low"), Icon::BATTERY);
+        assert_eq!(
+            resolve_notification_icon("firefox", "Browser", ""),
+            Icon::GLOBE
+        );
+        assert_eq!(
+            resolve_notification_icon("spotify", "Music Player", ""),
+            Icon::MUSIC
+        );
+        assert_eq!(
+            resolve_notification_icon("terminal", "bash", ""),
+            Icon::TERMINAL
+        );
+        assert_eq!(
+            resolve_notification_icon("", "corten-terminal", ""),
+            Icon::TERMINAL
+        );
+        assert_eq!(
+            resolve_notification_icon("", "RandomApp", "Battery low"),
+            Icon::BATTERY
+        );
     }
 }

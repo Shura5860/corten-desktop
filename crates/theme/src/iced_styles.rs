@@ -36,21 +36,70 @@ pub fn popover_style(palette: Palette) -> container::Style {
     surface_style(palette, true)
 }
 
-/// High-end frosted glass acrylic style with specular top lighting highlight and deep ambient blur shadow
+/// High-end frosted glass acrylic style with patina border highlight and ambient shadow
 pub fn acrylic_glass_style(palette: Palette, radius: f32) -> container::Style {
+    let mut bg = palette.surface.to_iced();
+    bg.a = 0.95;
     container::Style {
         text_color: Some(palette.text_primary.to_iced()),
-        background: Some(Background::Color(iced::Color::from_rgba(0.08, 0.09, 0.12, 0.90))),
+        background: Some(Background::Color(bg)),
         border: Border {
-            color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.16),
+            color: iced::Color::from_rgba(
+                palette.primary.r,
+                palette.primary.g,
+                palette.primary.b,
+                0.32,
+            ),
             width: 1.0,
             radius: border::Radius::from(radius),
         },
         shadow: Shadow {
-            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.52),
-            offset: iced::Vector::new(0.0, 8.0),
-            blur_radius: 24.0,
+            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+            offset: iced::Vector::new(0.0, 6.0),
+            blur_radius: 16.0,
         },
+    }
+}
+
+/// Tactile Bento tile button style for Control Center quick toggles and launcher favorite tiles
+pub fn bento_tile_button_style(
+    palette: Palette,
+    is_active: bool,
+    status: button::Status,
+) -> button::Style {
+    let (bg, border_color, text_color) = if is_active {
+        let bg = match status {
+            button::Status::Hovered => palette.primary_hover.to_iced(),
+            _ => iced::Color::from_rgba(
+                palette.primary.r,
+                palette.primary.g,
+                palette.primary.b,
+                0.22,
+            ),
+        };
+        let fg = if matches!(status, button::Status::Hovered) {
+            palette.on_primary().to_iced()
+        } else {
+            palette.text_primary.to_iced()
+        };
+        (bg, palette.primary.to_iced(), fg)
+    } else {
+        let bg = match status {
+            button::Status::Hovered | button::Status::Pressed => palette.surface_hover.to_iced(),
+            _ => palette.surface.to_iced(),
+        };
+        (bg, palette.border.to_iced(), palette.text_primary.to_iced())
+    };
+
+    button::Style {
+        background: Some(Background::Color(bg)),
+        text_color,
+        border: Border {
+            color: border_color,
+            width: 1.0,
+            radius: border::Radius::from(Radius::MD),
+        },
+        shadow: Shadow::default(),
     }
 }
 
@@ -213,7 +262,7 @@ pub fn capsule_slider_style(palette: Palette) -> impl Fn(&iced::Theme, iced::wid
             rail: iced::widget::slider::Rail {
                 backgrounds: (
                     Background::Color(rail_active),
-                    Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12)),
+                    Background::Color(palette.surface_hover.to_iced()),
                 ),
                 width: 10.0,
                 border: Border {
@@ -226,8 +275,73 @@ pub fn capsule_slider_style(palette: Palette) -> impl Fn(&iced::Theme, iced::wid
                 shape: iced::widget::slider::HandleShape::Circle { radius: 8.0 },
                 background: Background::Color(handle_color),
                 border_width: 2.0,
-                border_color: iced::Color::from_rgba(0.08, 0.09, 0.12, 0.8),
+                border_color: palette.surface.to_iced(),
             },
         }
     }
+}
+
+/// Shared interactive pill switch widget usable across all Corten apps
+pub fn pill_switch<'a, Message: Clone + 'a>(
+    is_active: bool,
+    on_toggle: Message,
+    palette: Palette,
+) -> iced::Element<'a, Message> {
+    use iced::widget::{horizontal_space, row};
+    use iced::{Alignment, Length};
+
+    let (track_color, border_color) = if is_active {
+        (palette.primary.to_iced(), palette.primary.to_iced())
+    } else {
+        (palette.surface_hover.to_iced(), palette.border.to_iced())
+    };
+
+    let thumb_color = if is_active {
+        palette.on_primary().to_iced()
+    } else {
+        palette.text_muted.to_iced()
+    };
+
+    let thumb = container(row![])
+        .width(Length::Fixed(18.0))
+        .height(Length::Fixed(18.0))
+        .style(move |_| container::Style {
+            background: Some(Background::Color(thumb_color)),
+            border: Border {
+                radius: border::Radius::from(9.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+    let switch_content = if is_active {
+        row![horizontal_space().width(Length::Fill), thumb]
+    } else {
+        row![thumb, horizontal_space().width(Length::Fill)]
+    }
+    .align_y(Alignment::Center)
+    .width(Length::Fill);
+
+    button(
+        container(switch_content)
+            .width(Length::Fixed(44.0))
+            .height(Length::Fixed(24.0))
+            .padding(2.0)
+            .style(move |_| container::Style {
+                background: Some(Background::Color(track_color)),
+                border: Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: border::Radius::from(12.0),
+                },
+                ..Default::default()
+            }),
+    )
+    .padding(0)
+    .on_press(on_toggle)
+    .style(|_, _| button::Style {
+        background: None,
+        ..Default::default()
+    })
+    .into()
 }

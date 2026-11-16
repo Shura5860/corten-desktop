@@ -10,6 +10,7 @@ description = "Native Wayland screen region selection and snipping tool for Cort
 [dependencies]
 corten-config = { path = "../crates/config" }
 corten-theme = { path = "../crates/theme" }
+corten-services = { path = "../crates/services" }
 
 iced = { workspace = true, features = ["tiny-skia", "canvas", "image", "tokio"] }
 image_crate = { package = "image", version = "0.24", default-features = false, features = ["png"] }
