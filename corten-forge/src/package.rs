@@ -462,7 +462,41 @@ impl PackageManager {
                 license: Some("MIT".into()),
                 permissions: None,
             },
+            PackageItem {
+                id: "corten-aura-model".into(),
+                name: "Corten AURA Yerel Zeka Modeli (Qwen 2.5 Coder)".into(),
+                summary: "Çevrimdışı ve gizlilik odaklı saf Rust çalışan yerel LLM GGUF ağırlığı".into(),
+                description: "Corten AI asistanı için optimize edilmiş yerel Qwen 2.5 Coder GGUF modeli. Harici sunucu veya Python bağımlılığı gerektirmeden ~/.local/share/corten/models/ altına kurulur ve doğrudan yerel kompozitör yapay zeka çekirdeğiyle çalıştırılır.".into(),
+                version: "2.5-Q4_K_M".into(),
+                source: PackageSource::CortenCore,
+                state: PackageState::Available,
+                category: ProductCategory::Development,
+                icon_char: ICON_CODE,
+                download_size: Some("986 MB".into()),
+                installed_size: Some("986 MB".into()),
+                developer: Some("Corten & Qwen Open Team".into()),
+                license: Some("Apache-2.0".into()),
+                permissions: Some(SandboxPermissions {
+                    network: true,
+                    pulseaudio: false,
+                    wayland: false,
+                    x11_fallback: false,
+                    dri: true,
+                    filesystems: vec!["~/.local/share/corten/models:rw".into()],
+                    dbus_talk: vec![],
+                    safety_score: 100,
+                    safety_summary: "Sıfır Bulut / Tam İzolasyon: Model ağırlıkları tamamen yerel cihazınızda çalışır, hiçbir veri dışarıya gönderilmez.".into(),
+                }),
+            },
         ];
+
+        let model_installed = {
+            let model_dir = std::env::var("HOME")
+                .map(|h| std::path::PathBuf::from(h).join(".local/share/corten/models"))
+                .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+            model_dir.join("qwen2.5-coder-1.5b-instruct-q4_k_m.gguf").exists()
+                || model_dir.join("qwen2.5-coder-3b-instruct-q4_k_m.gguf").exists()
+        };
 
         // Cross-reference with live system status
         for item in &mut catalog {
@@ -478,7 +512,15 @@ impl PackageManager {
                     }
                 }
                 PackageSource::CortenCore => {
-                    item.state = PackageState::Installed;
+                    if item.id == "corten-aura-model" {
+                        item.state = if model_installed {
+                            PackageState::Installed
+                        } else {
+                            PackageState::Available
+                        };
+                    } else {
+                        item.state = PackageState::Installed;
+                    }
                 }
             }
         }
@@ -816,15 +858,51 @@ impl PackageManager {
                 }
             }
             PackageSource::CortenCore => {
-                let _ = tx.send("⚡ Corten Desktop OTA güncellemesi uygulanıyor...\n".into());
-                let info = corten_update::CortenUpdater::check_for_updates().await?;
-                let tx_clone = tx.clone();
-                corten_update::CortenUpdater::apply_update(&info, move |msg| {
-                    let _ = tx_clone.send(format!("  {}\n", msg));
-                })
-                .await?;
-                let _ = tx.send(format!("✅ Corten Desktop başarıyla {} sürümüne güncellendi!\n", info.latest_version));
-                Ok(())
+                if pkg.id == "corten-aura-model" {
+                    let _ = tx.send("📥 Corten AURA yerel yapay zeka modeli indiriliyor (~986 MB)...\n".into());
+                    let dest_dir = std::env::var("HOME")
+                        .map(|h| std::path::PathBuf::from(h).join(".local/share/corten/models"))
+                        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+                    let _ = tokio::fs::create_dir_all(&dest_dir).await;
+                    let dest_file = dest_dir.join("qwen2.5-coder-1.5b-instruct-q4_k_m.gguf");
+                    let dest_path_str = dest_file.to_string_lossy().to_string();
+
+                    let url = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
+                    let mut child = Command::new("curl")
+                        .args(["-L", "-o", &dest_path_str, url, "--progress-bar"])
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                        .map_err(|e| format!("İndirme başlatılamadı: {}", e))?;
+
+                    if let Some(stderr) = child.stderr.take() {
+                        let mut reader = BufReader::new(stderr).lines();
+                        let tx_out = tx.clone();
+                        tokio::spawn(async move {
+                            while let Ok(Some(line)) = reader.next_line().await {
+                                let _ = tx_out.send(format!("  {}\n", line));
+                            }
+                        });
+                    }
+
+                    let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
+                    if status.success() {
+                        let _ = tx.send(format!("✅ Corten AURA yerel modeli başarıyla kuruldu: `{}`!\n", dest_path_str));
+                        Ok(())
+                    } else {
+                        Err(format!("Model indirme başarısız oldu (Çıkış kodu: {:?})", status.code()))
+                    }
+                } else {
+                    let _ = tx.send("⚡ Corten Desktop OTA güncellemesi uygulanıyor...\n".into());
+                    let info = corten_update::CortenUpdater::check_for_updates().await?;
+                    let tx_clone = tx.clone();
+                    corten_update::CortenUpdater::apply_update(&info, move |msg| {
+                        let _ = tx_clone.send(format!("  {}\n", msg));
+                    })
+                    .await?;
+                    let _ = tx.send(format!("✅ Corten Desktop başarıyla {} sürümüne güncellendi!\n", info.latest_version));
+                    Ok(())
+                }
             }
         }
     }
@@ -887,7 +965,19 @@ impl PackageManager {
                 }
             }
             PackageSource::CortenCore => {
-                Err("Corten Desktop çekirdek sistem bileşeni kaldırılamaz.".into())
+                if pkg.id == "corten-aura-model" {
+                    let dest_dir = std::env::var("HOME")
+                        .map(|h| std::path::PathBuf::from(h).join(".local/share/corten/models"))
+                        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+                    let dest_file = dest_dir.join("qwen2.5-coder-1.5b-instruct-q4_k_m.gguf");
+                    if dest_file.exists() {
+                        let _ = tokio::fs::remove_file(&dest_file).await;
+                        let _ = tx.send(format!("✅ Model dosyası silindi: `{}`\n", dest_file.display()));
+                    }
+                    Ok(())
+                } else {
+                    Err("Corten Desktop çekirdek sistem bileşeni kaldırılamaz.".into())
+                }
             }
         }
     }

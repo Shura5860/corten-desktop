@@ -478,7 +478,7 @@ pub struct ToolSchema {
 pub struct AuraToolRegistry;
 
 impl AuraToolRegistry {
-    /// Returns all 20 registered tools matching `AIProject` (`builtin.py` + `devops.py` + `corten_desktop.py` + `memory`)
+    /// Returns all registered tools matching `AIProject` (`builtin.py` + `devops.py` + `corten_desktop.py` + `memory`)
     pub fn list_tools() -> Vec<ToolSchema> {
         vec![
             ToolSchema {
@@ -519,9 +519,30 @@ impl AuraToolRegistry {
             ToolSchema {
                 name: "write_file".into(),
                 category: "DevOps".into(),
-                description: "Dosyaya içerik yazar (HITL güvenlik denetimine tabidir).".into(),
+                description: "Dosyaya içerik yazar (otomatik .bak yedeği alınır, HITL güvenlik denetimine tabidir).".into(),
                 parameters: "path: str, content: str".into(),
                 requires_hitl: true,
+            },
+            ToolSchema {
+                name: "apply_diff".into(),
+                category: "DevOps".into(),
+                description: "Dosyayı baştan yazmak yerine sadece değişecek hedef bloğu cerrahi olarak değiştirir (Aider/Cursor stili).".into(),
+                parameters: "path: str, search_block: str, replace_block: str".into(),
+                requires_hitl: false,
+            },
+            ToolSchema {
+                name: "apply_multi_diff".into(),
+                category: "DevOps".into(),
+                description: "Birden fazla dosyayı tek bir atomik transaction içinde cerrahi olarak değiştirir (All-or-nothing).".into(),
+                parameters: "edits: JSON array [{\"path\": \"...\", \"search\": \"...\", \"replace\": \"...\"}]".into(),
+                requires_hitl: false,
+            },
+            ToolSchema {
+                name: "git_checkpoint".into(),
+                category: "DevOps".into(),
+                description: "Kod değişiklikleri öncesinde otomatik kurtarma noktası oluşturur veya başarısız denemede geri döner.".into(),
+                parameters: "action: create|rollback".into(),
+                requires_hitl: false,
             },
             ToolSchema {
                 name: "list_files".into(),
@@ -534,14 +555,14 @@ impl AuraToolRegistry {
                 name: "git_status".into(),
                 category: "DevOps".into(),
                 description: "Çalışma alanındaki Git dalını (branch) ve değişen dosyaları raporlar.".into(),
-                parameters: "repo_path: str".into(),
+                parameters: "none".into(),
                 requires_hitl: false,
             },
             ToolSchema {
                 name: "git_diff".into(),
                 category: "DevOps".into(),
                 description: "Git deposundaki son kod değişikliklerinin (`git diff --stat`) özetini döndürür.".into(),
-                parameters: "repo_path: str".into(),
+                parameters: "file_path: Optional[str]".into(),
                 requires_hitl: false,
             },
             ToolSchema {
@@ -554,7 +575,7 @@ impl AuraToolRegistry {
             ToolSchema {
                 name: "read_web_page".into(),
                 category: "Web".into(),
-                description: "Yerel veya HTTP uç noktasından metin içeriği okur.".into(),
+                description: "Halka açık teknik dokümantasyon, blog ve wiki sayfalarının içeriğini yerel istemciyle okur.".into(),
                 parameters: "url: str".into(),
                 requires_hitl: false,
             },
@@ -590,28 +611,28 @@ impl AuraToolRegistry {
                 name: "corten_switch_workspace".into(),
                 category: "CortenDesktop".into(),
                 description: "`cortenctl` ile 1-9 arasındaki Wayland çalışma alanına geçiş yapar.".into(),
-                parameters: "workspace: int (1-9)".into(),
+                parameters: "workspace_num: int (1-9)".into(),
                 requires_hitl: false,
             },
             ToolSchema {
                 name: "corten_window_action".into(),
                 category: "CortenDesktop".into(),
-                description: "Aktif pencereyi sola/sağa yaslar, tam ekran yapar veya kapatır.".into(),
-                parameters: "action: snap-left|snap-right|maximize|fullscreen|close".into(),
+                description: "Pencere yöneticisi eylemlerini yürütür (toggle-overview, toggle-desktop, reload, focus).".into(),
+                parameters: "action: str, target_id: Optional[str]".into(),
                 requires_hitl: false,
             },
             ToolSchema {
                 name: "corten_list_windows".into(),
                 category: "CortenDesktop".into(),
-                description: "Corten Wayland kompozitöründeki açık pencereleri listeler.".into(),
+                description: "Corten Wayland kompozitöründeki açık pencereleri JSON listesi olarak döndürür.".into(),
                 parameters: "none".into(),
                 requires_hitl: false,
             },
             ToolSchema {
-                name: "corten_send_notification".into(),
+                name: "corten_notify".into(),
                 category: "CortenDesktop".into(),
-                description: "Masaüstü bildirim sistemine (`corten-notify`) anlık bildirim gönderir.".into(),
-                parameters: "title: str, body: str".into(),
+                description: "Masaüstü bildirim servisine (`corten-notify` / `notify-send`) anlık bildirim gönderir.".into(),
+                parameters: "title: str, message: str".into(),
                 requires_hitl: false,
             },
             ToolSchema {
@@ -747,14 +768,22 @@ impl AuraToolRegistry {
             }
             "write_file" => {
                 if let Some((path, content)) = clean_arg.split_once('|') {
-                    match fs::write(path.trim(), content) {
-                        Ok(_) => format!("✅ `{}` dosyası başarıyla yazıldı ({} bayt).", path.trim(), content.len()),
+                    let p = path.trim();
+                    let bak_path = format!("{}.bak", p);
+                    if let Ok(orig) = fs::read_to_string(p) {
+                        let _ = fs::write(&bak_path, orig);
+                    }
+                    match fs::write(p, content) {
+                        Ok(_) => format!("✅ `{}` dosyası başarıyla yazıldı ({} bayt, otomatik yedek: `{}`).", p, content.len(), bak_path),
                         Err(e) => format!("⚠️ Dosya yazma hatası: {}", e),
                     }
                 } else {
                     "⚠️ Format: `dosya_yolu | içerik` şeklinde olmalıdır.".into()
                 }
             }
+            "apply_diff" => execute_apply_diff(clean_arg),
+            "apply_multi_diff" => execute_apply_multi_diff(clean_arg),
+            "git_checkpoint" => execute_git_checkpoint(clean_arg),
             "git_status" => {
                 let out = Command::new("git")
                     .args(["status", "-s", "-b"])
@@ -768,9 +797,12 @@ impl AuraToolRegistry {
                 }
             }
             "git_diff" => {
-                let out = Command::new("git")
-                    .args(["diff", "--stat"])
-                    .output();
+                let mut cmd = Command::new("git");
+                cmd.args(["diff", "--stat"]);
+                if !clean_arg.is_empty() && clean_arg != "." {
+                    cmd.arg(clean_arg);
+                }
+                let out = cmd.output();
                 match out {
                     Ok(o) => {
                         let txt = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -797,7 +829,8 @@ impl AuraToolRegistry {
                     Err(e) => format!("⚠️ Komut çalıştırılamadı: {}", e),
                 }
             }
-            "web_search" | "read_web_page" => {
+            "read_web_page" => execute_read_web_page(clean_arg),
+            "web_search" => {
                 let results = AuraWorkspaceRag::retrieve_rag_context(clean_arg, 3, None);
                 if results.is_empty() {
                     format!("🌐 `{}` için yerel bilgi tabanında eşleşme bulunamadı.", clean_arg)
@@ -849,12 +882,25 @@ impl AuraToolRegistry {
                 }
             }
             "corten_system_power" => {
-                if clean_arg == "lock" {
-                    let lock_bin = crate::actions::resolve_corten_bin("corten-lock");
-                    let _ = Command::new(lock_bin).spawn();
-                    "🔒 Corten oturumu kilitlendi (`corten-lock`).".into()
-                } else {
-                    format!("⚡ Güç eylemi (`{}`) hazır.", clean_arg)
+                match clean_arg {
+                    "lock" => {
+                        let lock_bin = crate::actions::resolve_corten_bin("corten-lock");
+                        let _ = Command::new(lock_bin).spawn();
+                        "🔒 Corten oturumu kilitlendi (`corten-lock`).".into()
+                    }
+                    "sleep" => {
+                        let _ = Command::new("systemctl").arg("suspend").status();
+                        "💤 Sistem uyku moduna alındı.".into()
+                    }
+                    "poweroff" => {
+                        let _ = Command::new("systemctl").arg("poweroff").status();
+                        "⚡ Sistem kapatılıyor.".into()
+                    }
+                    "reboot" => {
+                        let _ = Command::new("systemctl").arg("reboot").status();
+                        "🔄 Sistem yeniden başlatılıyor.".into()
+                    }
+                    _ => format!("⚡ Güç eylemi (`{}`) hazır (Desteklenenler: lock, sleep, poweroff, reboot).", clean_arg),
                 }
             }
             "corten_switch_workspace" => {
@@ -867,10 +913,18 @@ impl AuraToolRegistry {
             }
             "corten_window_action" => {
                 let ctl = crate::actions::resolve_corten_bin("cortenctl");
-                let _ = Command::new(ctl)
-                    .args(["action", clean_arg])
-                    .status();
-                format!("🪟 Pencere eylemi yürütüldü: `{}`", clean_arg)
+                let parts: Vec<&str> = clean_arg.split_whitespace().collect();
+                if parts.is_empty() {
+                    "⚠️ Pencere eylemi belirtilmedi (Desteklenenler: toggle-overview, toggle-desktop, reload, focus [id]).".into()
+                } else {
+                    let mut cmd = Command::new(ctl);
+                    cmd.arg("action");
+                    for p in parts {
+                        cmd.arg(p);
+                    }
+                    let _ = cmd.status();
+                    format!("🪟 Pencere eylemi yürütüldü: `{}`", clean_arg)
+                }
             }
             "corten_list_windows" => {
                 let ctl = crate::actions::resolve_corten_bin("cortenctl");
@@ -882,7 +936,7 @@ impl AuraToolRegistry {
                 }
                 "🪟 Kompozitör pencere listesi sorgulandı (`cortenctl action windows`).".into()
             }
-            "corten_send_notification" => {
+            "corten_notify" | "corten_send_notification" => {
                 let (title, body) = clean_arg
                     .split_once('|')
                     .unwrap_or(("Corten AI Bildirimi", clean_arg));
@@ -900,6 +954,84 @@ impl AuraToolRegistry {
             }
             _ => format!("⚠️ Bilinmeyen araç: `{}`", name),
         }
+    }
+
+    /// Dynamic Semantic Tool Pruning: selects top-K most relevant tools based on query intent
+    pub fn get_relevant_tools(query: &str, top_k: usize) -> Vec<ToolSchema> {
+        let all = Self::list_tools();
+        if query.trim().is_empty() {
+            return all.into_iter().take(top_k).collect();
+        }
+
+        let q_lower = query.to_lowercase();
+        let q_words: Vec<&str> = q_lower.split_whitespace().collect();
+
+        let pinned_core = ["read_file", "run_terminal_command"];
+        let coding_keywords = ["kod", "yaz", "düzenle", "refactor", "yama", "fonksiyon", "hata", "fix", "rust", "python", "file", "dosya", "diff", "apply"];
+        let git_keywords = ["git", "commit", "branch", "diff", "status", "checkpoint", "değişiklik", "stash", "rollback"];
+        let web_keywords = ["web", "ara", "google", "site", "internet", "url", "haber", "sayfa", "http"];
+        let math_keywords = ["hesapla", "topla", "böl", "çarp", "matematik", "sayı", "oran", "calc", "sqrt"];
+        let corten_keywords = ["ses", "parlaklık", "pencere", "ekran", "kilit", "masaüstü", "workspace", "bildirim", "ışık", "gece", "corten"];
+
+        let mut scored: Vec<(f32, ToolSchema)> = Vec::new();
+
+        for tool in all {
+            let mut score = 0.0f32;
+            let t_name = tool.name.to_lowercase();
+            let t_desc = tool.description.to_lowercase();
+
+            if pinned_core.contains(&tool.name.as_str()) {
+                score += 3.0;
+            }
+
+            if coding_keywords.iter().any(|k| q_lower.contains(k))
+                && matches!(tool.name.as_str(), "apply_diff" | "apply_multi_diff" | "write_file" | "list_files" | "read_file")
+            {
+                score += 4.0;
+            }
+
+            if git_keywords.iter().any(|k| q_lower.contains(k)) && t_name.contains("git") {
+                score += 5.0;
+            }
+
+            if web_keywords.iter().any(|k| q_lower.contains(k))
+                && (t_name.contains("web") || t_name.contains("search") || t_name.contains("page"))
+            {
+                score += 5.0;
+            }
+
+            if math_keywords.iter().any(|k| q_lower.contains(k)) && t_name.contains("calculator") {
+                score += 5.0;
+            }
+
+            if corten_keywords.iter().any(|k| q_lower.contains(k)) && t_name.contains("corten") {
+                score += 5.0;
+            }
+
+            // Word overlap score
+            let desc_words: Vec<&str> = t_desc.split_whitespace().collect();
+            let mut overlap = 0;
+            for qw in &q_words {
+                if desc_words.contains(qw) || t_name.contains(qw) {
+                    overlap += 1;
+                }
+            }
+            score += overlap as f32 * 1.5;
+
+            scored.push((score, tool));
+        }
+
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.into_iter().take(top_k).map(|(_, t)| t).collect()
+    }
+
+    /// Formats selected tools into structured schema block for LLM system prompt
+    pub fn format_tools_prompt(tools: &[ToolSchema]) -> String {
+        let mut lines = Vec::new();
+        for t in tools {
+            lines.push(format!("- {}: {} (Parametreler: {})", t.name, t.description, t.parameters));
+        }
+        lines.join("\n")
     }
 
     pub fn format_tools_catalog() -> String {
@@ -923,6 +1055,284 @@ impl AuraToolRegistry {
             lines.join("\n")
         )
     }
+}
+
+// Helper functions for DevOps and Web tools
+fn execute_apply_diff(raw_arg: &str) -> String {
+    let (path, search_block, replace_block) = if let Ok(val) = serde_json::from_str::<serde_json::Value>(raw_arg) {
+        let p = val.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let s = val.get("search_block").or_else(|| val.get("search")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let r = val.get("replace_block").or_else(|| val.get("replace")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        (p, s, r)
+    } else if let Some((p, rest)) = raw_arg.split_once("|||") {
+        let (s, r) = rest.split_once("|||").unwrap_or((rest, ""));
+        (p.trim().to_string(), s.to_string(), r.to_string())
+    } else if let Some((p, rest)) = raw_arg.split_once('|') {
+        let (s, r) = rest.split_once('|').unwrap_or((rest, ""));
+        (p.trim().to_string(), s.trim().to_string(), r.trim().to_string())
+    } else {
+        return "⚠️ Hata: 'apply_diff' için format JSON `{\"path\": \"...\", \"search_block\": \"...\", \"replace_block\": \"...\"}` veya `path | search | replace` olmalıdır.".into();
+    };
+
+    if path.is_empty() || search_block.is_empty() {
+        return "⚠️ Hata: 'path' ve 'search_block' alanları zorunludur.".into();
+    }
+
+    let target_path = Path::new(&path);
+    if !target_path.exists() {
+        return format!("⚠️ Hata: Dosya bulunamadı: '{}'", path);
+    }
+
+    let original = match fs::read_to_string(target_path) {
+        Ok(c) => c,
+        Err(e) => return format!("⚠️ Dosya okuma hatası: {}", e),
+    };
+
+    // 1. Exact match
+    let new_content = if original.contains(&search_block) {
+        let count = original.matches(&search_block).count();
+        if count > 1 {
+            return format!("⚠️ Hata: 'search_block' dosya içinde {} kez bulundu. Belirsizliği önlemek için etrafındaki bağlam satırlarını ekleyin.", count);
+        }
+        original.replacen(&search_block, &replace_block, 1)
+    } else {
+        // 2. Normalization (\r\n -> \n)
+        let norm_orig = original.replace("\r\n", "\n");
+        let norm_search = search_block.replace("\r\n", "\n");
+        let norm_replace = replace_block.replace("\r\n", "\n");
+
+        if norm_orig.contains(&norm_search) {
+            let count = norm_orig.matches(&norm_search).count();
+            if count > 1 {
+                return format!("⚠️ Hata: 'search_block' dosya içinde birden fazla bulundu ({} kez).", count);
+            }
+            norm_orig.replacen(&norm_search, &norm_replace, 1)
+        } else {
+            // 3. Line-by-line trimmed matching (tolerance for indentation/whitespace differences)
+            let search_lines: Vec<&str> = norm_search.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+            let orig_lines: Vec<&str> = norm_orig.lines().collect();
+            let window_size = norm_search.lines().count();
+
+            let mut matched_idx = None;
+            if window_size > 0 && orig_lines.len() >= window_size {
+                for i in 0..=(orig_lines.len() - window_size) {
+                    let slice = &orig_lines[i..(i + window_size)];
+                    let slice_clean: Vec<&str> = slice.iter().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+                    if slice_clean == search_lines {
+                        if matched_idx.is_some() {
+                            return "⚠️ Hata: Benzerlik eşleşmesinde birden fazla aday bulundu. Lütfen daha belirgin bağlam satırları ekleyin.".into();
+                        }
+                        matched_idx = Some((i, i + window_size));
+                    }
+                }
+            }
+
+            if let Some((start, end)) = matched_idx {
+                let matched_slice = orig_lines[start..end].join("\n");
+                norm_orig.replacen(&matched_slice, &norm_replace, 1)
+            } else {
+                return format!("⚠️ Hata: 'search_block' dosya içinde bulunamadı ('{}').", path);
+            }
+        }
+    };
+
+    let bak_path = format!("{}.bak", path);
+    let _ = fs::write(&bak_path, &original);
+
+    if let Err(e) = fs::write(target_path, new_content) {
+        return format!("⚠️ Dosya yazma hatası: {}", e);
+    }
+
+    let diff_lines = replace_block.lines().count() as isize - search_block.lines().count() as isize;
+    format!("✅ Yama başarıyla uygulandı: `{}` ({:+} satır, otomatik yedek: `{}`).", path, diff_lines, bak_path)
+}
+
+fn execute_apply_multi_diff(raw_arg: &str) -> String {
+    let edits_val: serde_json::Value = match serde_json::from_str(raw_arg) {
+        Ok(v) => v,
+        Err(e) => return format!("⚠️ Hata: 'apply_multi_diff' JSON dizisi bekler (`[{{\"path\": \"...\", \"search\": \"...\", \"replace\": \"...\"}}]`): {}", e),
+    };
+
+    let items = match edits_val.as_array() {
+        Some(arr) if !arr.is_empty() => arr,
+        _ => return "⚠️ Hata: 'edits' boş olmayan bir liste olmalıdır.".into(),
+    };
+
+    struct PlannedEdit {
+        path: String,
+        original: String,
+        new_content: String,
+        diff_lines: isize,
+    }
+
+    let mut plan = Vec::new();
+
+    for (idx, item) in items.iter().enumerate() {
+        let path = item.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let search_block = item.get("search").or_else(|| item.get("search_block")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let replace_block = item.get("replace").or_else(|| item.get("replace_block")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+        if path.is_empty() || search_block.is_empty() {
+            return format!("⚠️ Hata [Öğe {}]: 'path' ve 'search' alanları zorunludur.", idx);
+        }
+
+        let target_path = Path::new(&path);
+        if !target_path.exists() {
+            return format!("⚠️ Hata: Dosya bulunamadı: '{}' (Hiçbir dosya değiştirilmedi).", path);
+        }
+
+        let original = match fs::read_to_string(target_path) {
+            Ok(c) => c,
+            Err(e) => return format!("⚠️ Hata [{}]: Dosya okunamadı: {} (İşlem iptal edildi).", path, e),
+        };
+
+        let new_content = if original.contains(&search_block) {
+            let count = original.matches(&search_block).count();
+            if count > 1 {
+                return format!("⚠️ Hata [{}]: 'search_block' birden fazla bulundu ({}) (İşlem iptal edildi).", path, count);
+            }
+            original.replacen(&search_block, &replace_block, 1)
+        } else {
+            let norm_orig = original.replace("\r\n", "\n");
+            let norm_search = search_block.replace("\r\n", "\n");
+            let norm_replace = replace_block.replace("\r\n", "\n");
+            if !norm_orig.contains(&norm_search) {
+                return format!("⚠️ Hata [{}]: 'search_block' bulunamadı (İşlem iptal edildi).", path);
+            }
+            if norm_orig.matches(&norm_search).count() > 1 {
+                return format!("⚠️ Hata [{}]: 'search_block' birden fazla bulundu (İşlem iptal edildi).", path);
+            }
+            norm_orig.replacen(&norm_search, &norm_replace, 1)
+        };
+
+        let diff_lines = replace_block.lines().count() as isize - search_block.lines().count() as isize;
+        plan.push(PlannedEdit {
+            path,
+            original,
+            new_content,
+            diff_lines,
+        });
+    }
+
+    let mut applied_files = Vec::new();
+    for p in plan {
+        let bak = format!("{}.bak", p.path);
+        let _ = fs::write(&bak, &p.original);
+        if let Err(e) = fs::write(&p.path, p.new_content) {
+            return format!("⚠️ Kritik yazma hatası [{}]: {}", p.path, e);
+        }
+        applied_files.push(format!("• `{}` ({:+} satır)", p.path, p.diff_lines));
+    }
+
+    format!("✅ **Atomik Çoklu Yama Başarıyla Uygulandı ({} dosya):**\n{}", applied_files.len(), applied_files.join("\n"))
+}
+
+fn execute_git_checkpoint(action_arg: &str) -> String {
+    let act = action_arg.trim().to_lowercase();
+    let action = if act.is_empty() { "create" } else { act.as_str() };
+
+    match action {
+        "create" | "stash" | "snapshot" => {
+            let out = Command::new("git").args(["stash", "create"]).output();
+            match out {
+                Ok(o) => {
+                    let hash = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if !hash.is_empty() {
+                        let _ = Command::new("git")
+                            .args(["stash", "store", "-m", "AURA_AGENT_AUTO_CHECKPOINT", &hash])
+                            .status();
+                        let short_hash: String = hash.chars().take(8).collect();
+                        format!("🛡️ **Git Kurtarma Noktası Oluşturuldu:** `{}`", short_hash)
+                    } else {
+                        "🛡️ Git Kurtarma Noktası: Çalışma alanında kaydedilmemiş değişiklik yok (ağaç temiz).".into()
+                    }
+                }
+                Err(e) => format!("⚠️ Git çalıştırılamadı: {}", e),
+            }
+        }
+        "rollback" | "revert" | "restore" => {
+            let r1 = Command::new("git").args(["checkout", "."]).status();
+            let r2 = Command::new("git").args(["clean", "-fd"]).status();
+            if r1.is_ok() && r2.is_ok() {
+                "↩️ **Geri Alma Başarılı:** Çalışma alanı son temiz Git durumuna geri döndürüldü.".into()
+            } else {
+                "⚠️ Geri alma (rollback) sırasında Git hatası oluştu.".into()
+            }
+        }
+        _ => "⚠️ Desteklenen eylemler: 'create' (kurtarma noktası al) veya 'rollback' (geri dön).".into(),
+    }
+}
+
+fn execute_read_web_page(url_arg: &str) -> String {
+    let clean_url = url_arg.trim();
+    if clean_url.is_empty() {
+        return "⚠️ Okunacak web URL adresini belirtin.".into();
+    }
+    let target_url = if !clean_url.starts_with("http://") && !clean_url.starts_with("https://") {
+        format!("https://{}", clean_url)
+    } else {
+        clean_url.to_string()
+    };
+
+    let out = Command::new("curl")
+        .args(["-s", "-L", "--max-time", "12", "-A", "AURA-CORE-DocumentFetcher/1.0", &target_url])
+        .output();
+
+    match out {
+        Ok(o) => {
+            let raw_text = String::from_utf8_lossy(&o.stdout).to_string();
+            if raw_text.is_empty() {
+                return format!("⚠️ Web sayfası boş döndü veya erişilemedi: `{}`", target_url);
+            }
+            let cleaned = strip_html_tags(&raw_text);
+            let snippet: String = cleaned.chars().take(3000).collect();
+            format!("🌐 **Web Sayfası İçeriği (`{}`):**\n```\n{}\n```", target_url, snippet.trim())
+        }
+        Err(e) => format!("⚠️ Sayfa okuma hatası: {}", e),
+    }
+}
+
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    let mut in_script = false;
+    let chars: Vec<char> = html.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if !in_tag && chars[i] == '<' {
+            let rest: String = chars[i..].iter().take(8).collect::<String>().to_lowercase();
+            if rest.starts_with("<script") || rest.starts_with("<style") {
+                in_script = true;
+            } else if rest.starts_with("</script") || rest.starts_with("</style") {
+                in_script = false;
+            }
+            in_tag = true;
+        } else if in_tag && chars[i] == '>' {
+            in_tag = false;
+            if !in_script {
+                result.push(' ');
+            }
+        } else if !in_tag && !in_script {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+
+    let mut collapsed = String::new();
+    let mut prev_space = false;
+    for c in result.chars() {
+        if c.is_whitespace() {
+            if !prev_space {
+                collapsed.push(' ');
+                prev_space = true;
+            }
+        } else {
+            collapsed.push(c);
+            prev_space = false;
+        }
+    }
+    collapsed.trim().to_string()
 }
 
 // ============================================================================
@@ -974,6 +1384,13 @@ impl AuraReActAgent {
                     "git_diff",
                     ".".into(),
                     "Son kod değişikliklerinin (`git diff --stat`) istatistiklerini almalıyım.".into(),
+                ));
+            }
+            if lower.contains("checkpoint") || lower.contains("kurtarma") {
+                planned_calls.push((
+                    "git_checkpoint",
+                    "create".into(),
+                    "Değişiklikler öncesinde otomatik kurtarma noktası (git_checkpoint) almalıyım.".into(),
                 ));
             }
         }
@@ -1295,12 +1712,79 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_registry_has_all_20_tools() {
+    fn test_tool_registry_has_all_23_tools() {
         let tools = AuraToolRegistry::list_tools();
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 23);
         assert!(tools.iter().any(|t| t.name == "calculator"));
-        assert!(tools.iter().any(|t| t.name == "git_status"));
+        assert!(tools.iter().any(|t| t.name == "apply_diff"));
+        assert!(tools.iter().any(|t| t.name == "apply_multi_diff"));
+        assert!(tools.iter().any(|t| t.name == "git_checkpoint"));
         assert!(tools.iter().any(|t| t.name == "corten_switch_workspace"));
+        assert!(tools.iter().any(|t| t.name == "corten_notify"));
+    }
+
+    #[test]
+    fn test_semantic_tool_pruning_relevance() {
+        // Coding query should rank apply_diff, write_file, read_file high
+        let coding_tools = AuraToolRegistry::get_relevant_tools("kod dosyasındaki hatayı yama ile düzelt", 4);
+        assert!(coding_tools.iter().any(|t| t.name == "apply_diff" || t.name == "apply_multi_diff" || t.name == "read_file"));
+
+        // Git query should rank git tools high
+        let git_tools = AuraToolRegistry::get_relevant_tools("git commit öncesi checkpoint al ve diff kontrol et", 4);
+        assert!(git_tools.iter().any(|t| t.name == "git_checkpoint" || t.name == "git_diff" || t.name == "git_status"));
+
+        // Desktop query should rank corten_* tools high
+        let desktop_tools = AuraToolRegistry::get_relevant_tools("masaüstü ses seviyesini ve ekran parlaklığını ayarla", 4);
+        assert!(desktop_tools.iter().any(|t| t.name == "corten_set_volume" || t.name == "corten_set_brightness"));
+    }
+
+    #[test]
+    fn test_apply_diff_execution() {
+        let tmp_file = "/tmp/corten_test_diff.txt";
+        let _ = fs::write(tmp_file, "fn old_func() {\n    println!(\"old\");\n}\n");
+
+        let res = AuraToolRegistry::execute_tool(
+            "apply_diff",
+            &format!("{} | println!(\"old\"); | println!(\"new\");", tmp_file),
+        );
+        assert!(res.contains("Yama başarıyla uygulandı"));
+
+        let content = fs::read_to_string(tmp_file).unwrap();
+        assert!(content.contains("println!(\"new\");"));
+        let _ = fs::remove_file(tmp_file);
+        let _ = fs::remove_file(format!("{}.bak", tmp_file));
+    }
+
+    #[test]
+    fn test_apply_multi_diff_atomic_execution() {
+        let f1 = "/tmp/corten_atomic_1.txt";
+        let f2 = "/tmp/corten_atomic_2.txt";
+        let _ = fs::write(f1, "hello world 1\n");
+        let _ = fs::write(f2, "hello world 2\n");
+
+        let payload = serde_json::json!([
+            {"path": f1, "search": "world 1", "replace": "corten 1"},
+            {"path": f2, "search": "world 2", "replace": "corten 2"}
+        ]).to_string();
+
+        let res = AuraToolRegistry::execute_tool("apply_multi_diff", &payload);
+        assert!(res.contains("Atomik Çoklu Yama Başarıyla Uygulandı"));
+
+        let c1 = fs::read_to_string(f1).unwrap();
+        let c2 = fs::read_to_string(f2).unwrap();
+        assert!(c1.contains("corten 1"));
+        assert!(c2.contains("corten 2"));
+
+        let _ = fs::remove_file(f1);
+        let _ = fs::remove_file(f2);
+        let _ = fs::remove_file(format!("{}.bak", f1));
+        let _ = fs::remove_file(format!("{}.bak", f2));
+    }
+
+    #[test]
+    fn test_git_checkpoint_execution() {
+        let res = AuraToolRegistry::execute_tool("git_checkpoint", "create");
+        assert!(res.contains("Git Kurtarma Noktası"));
     }
 
     #[test]

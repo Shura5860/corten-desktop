@@ -536,6 +536,8 @@ impl AiEngine {
     ) {
         let path_buf = model_path.to_path_buf();
         let memory_ctx = AuraMemoryEngine::recall_context_for_prompt(prompt, 3);
+        let relevant_tools = AuraToolRegistry::get_relevant_tools(prompt, 6);
+        let tools_prompt = AuraToolRegistry::format_tools_prompt(&relevant_tools);
         let rag_hits = AuraWorkspaceRag::retrieve_rag_context(prompt, 2, None);
         let rag_ctx = if rag_hits.is_empty() {
             String::new()
@@ -554,8 +556,8 @@ impl AiEngine {
             format!("\n[YEREL BELGE BAĞLAMI (RAG)]:\n{}", docs)
         };
         let prompt_str = format!(
-            "<|im_start|>system\nSen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Türkçe, net ve doğrudan eylem odaklı yanıt ver.\n[KULLANICI HAFIZASI]:\n{}{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
-            memory_ctx, rag_ctx, prompt
+            "<|im_start|>system\nSen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Türkçe, net ve doğrudan eylem odaklı yanıt ver.\n[KULLANICI HAFIZASI]:\n{}\n[KULLANILABİLİR ARAÇLAR]:\n{}{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+            memory_ctx, tools_prompt, rag_ctx, prompt
         );
         let tx_clone = tx.clone();
 
@@ -685,10 +687,17 @@ impl AiEngine {
 
         // Build messages payload for /api/chat
         let mut messages = Vec::new();
-        // System prompt establishing Corten Desktop identity and action protocol
+        let memory_ctx = AuraMemoryEngine::recall_context_for_prompt(prompt, 3);
+        let relevant_tools = AuraToolRegistry::get_relevant_tools(prompt, 6);
+        let tools_prompt = AuraToolRegistry::format_tools_prompt(&relevant_tools);
+        // System prompt establishing Corten Desktop identity and action protocol with dynamic tool pruning
+        let sys_prompt = format!(
+            "Sen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Kısa, teknik ve Türkçe yanıt ver.\n[KULLANICI HAFIZASI]:\n{}\n[KULLANILABİLİR ARAÇLAR]:\n{}\nKullanıcı sistem işlemi istediğinde cevabının sonuna gerekiyorsa [ACTION: intent] ekle.",
+            memory_ctx, tools_prompt
+        );
         messages.push(serde_json::json!({
             "role": "system",
-            "content": "Sen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Kısa, teknik ve Türkçe yanıt ver. Kullanıcı sistem işlemi istediğinde cevabının sonuna gerekiyorsa [ACTION: intent] ekle."
+            "content": sys_prompt
         }));
 
         for h in history.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev() {
@@ -808,9 +817,16 @@ impl AiEngine {
         };
 
         let mut messages = Vec::new();
+        let memory_ctx = AuraMemoryEngine::recall_context_for_prompt(prompt, 3);
+        let relevant_tools = AuraToolRegistry::get_relevant_tools(prompt, 6);
+        let tools_prompt = AuraToolRegistry::format_tools_prompt(&relevant_tools);
+        let sys_prompt = format!(
+            "Sen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Türkçe, teknik ve doğrudan eylem odaklı yanıt ver.\n[KULLANICI HAFIZASI]:\n{}\n[KULLANILABİLİR ARAÇLAR]:\n{}",
+            memory_ctx, tools_prompt
+        );
         messages.push(serde_json::json!({
             "role": "system",
-            "content": "Sen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Türkçe, teknik ve doğrudan eylem odaklı yanıt ver."
+            "content": sys_prompt
         }));
 
         for h in history.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev() {
