@@ -9,7 +9,7 @@
 
 [![Language](https://img.shields.io/badge/Language-Rust%202021-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Display Protocol](https://img.shields.io/badge/Protocol-Wayland-blue.svg?style=flat-square&logo=wayland)](https://wayland.freedesktop.org/)
-[![Compositor Engine](https://img.shields.io/badge/Engine-Smithay%200.3-red.svg?style=flat-square)](https://github.com/Smithay/smithay)
+[![Compositor Engine](https://img.shields.io/badge/Engine-Smithay%200.7-red.svg?style=flat-square)](https://github.com/Smithay/smithay)
 [![UI Toolkit](https://img.shields.io/badge/Shell%20Toolkit-Iced%200.13%20(tiny--skia)-blueviolet.svg?style=flat-square)](https://github.com/iced-rs/iced)
 [![Unit Tests](https://img.shields.io/badge/Tests-185%20Passed-brightgreen.svg?style=flat-square)](#-verifying--building-from-source)
 [![License](https://img.shields.io/badge/License-GPL--3.0-green.svg?style=flat-square)](LICENSE)
@@ -108,7 +108,7 @@ Corten is designed around strict separation of concerns, process isolation, and 
 
 ### Architectural Principles
 
-* **No C Display Wrappers:** Built natively on `Smithay 0.3` using modern Rust primitives instead of binding to C `wlroots` libraries.
+* **No C Display Wrappers:** Built natively on `Smithay 0.7` using modern Rust primitives instead of binding to C `wlroots` libraries.
 * **Deterministic Low-VRAM Shell Rendering:** Shell clients render through `Iced 0.13` with the `tiny-skia` software rasterizer. By avoiding separate OpenGL/EGL contexts for background utilities, system VRAM remains fully dedicated to user workloads, games, and creative software.
 * **Direct Hardware Scanout:** Fullscreen applications and video surfaces automatically leverage `FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY` and `ALLOW_OVERLAY_PLANE_SCANOUT`, bypassing the compositor's rendering pass to minimize display latency.
 * **Explicit Synchronization:** Implements `linux-drm-syncobj-v1` with eventfd fences, synchronizing GPU buffers directly with DRM KMS display commits without CPU stalls.
