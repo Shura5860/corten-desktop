@@ -207,6 +207,7 @@ fn configured_drm_mode(
 
 fn spawn_first_terminal() -> std::io::Result<()> {
     let mut last_error = None;
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "corten-0".into());
     for program in [
         "corten-terminal",
         "/usr/local/bin/corten-terminal",
@@ -214,7 +215,7 @@ fn spawn_first_terminal() -> std::io::Result<()> {
         "target/debug/corten-terminal",
     ] {
         if Command::new(program)
-            .env("WAYLAND_DISPLAY", "corten-0")
+            .env("WAYLAND_DISPLAY", &wayland_display)
             .spawn()
             .is_ok()
         {
@@ -223,7 +224,7 @@ fn spawn_first_terminal() -> std::io::Result<()> {
     }
     if Command::new("konsole")
         .args(["--profile", "Corten"])
-        .env("WAYLAND_DISPLAY", "corten-0")
+        .env("WAYLAND_DISPLAY", &wayland_display)
         .spawn()
         .is_ok()
     {
@@ -231,7 +232,7 @@ fn spawn_first_terminal() -> std::io::Result<()> {
     }
     if Command::new("/var/lib/flatpak/exports/bin/org.kde.konsole")
         .args(["--profile", "Corten"])
-        .env("WAYLAND_DISPLAY", "corten-0")
+        .env("WAYLAND_DISPLAY", &wayland_display)
         .spawn()
         .is_ok()
     {
@@ -248,7 +249,7 @@ fn spawn_first_terminal() -> std::io::Result<()> {
         "weston-terminal",
     ] {
         match Command::new(program)
-            .env("WAYLAND_DISPLAY", "corten-0")
+            .env("WAYLAND_DISPLAY", &wayland_display)
             .spawn()
         {
             Ok(_) => return Ok(()),
@@ -314,6 +315,7 @@ fn build_secondary_scene(
 
     let mut elements = Vec::new();
     if state.session_locked {
+        state.recover_crashed_lock();
         for (lock_surface, lock_output) in &state.lock_surfaces {
             if !state.lock_surface_for_output(lock_output, output) {
                 continue;
@@ -367,12 +369,14 @@ fn build_secondary_scene(
             rect.size.to_physical_precise_round(fractional_scale),
         );
         let is_fs = state.layout_for_output(output).is_fullscreen(&window);
-        let titlebar_h = if is_fs { 0 } else { 36 };
+        let titlebar_h = crate::layout::window_titlebar_height(&window, is_fs);
+        let csd_offset = crate::layout::window_csd_offset(&window);
+        let client_logical_loc = rect.loc - csd_offset + smithay::utils::Point::from((0, titlebar_h));
 
         if let Some(surface) = crate::layout::window_wl_surface(&window) {
             // 1. Popups (frontmost)
             for (popup, popup_offset) in PopupManager::popups_for_surface(&surface) {
-                let popup_loc = (rect.loc + smithay::utils::Point::from((0, titlebar_h)) + popup_offset)
+                let popup_loc = (client_logical_loc + popup_offset)
                     .to_physical_precise_round(fractional_scale);
                 let surfaces: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                     render_elements_from_surface_tree(
@@ -387,8 +391,8 @@ fn build_secondary_scene(
             }
         }
 
-        // 2. Window Titlebar & Controls (rendered IN FRONT of client surface)
-        if !is_fs {
+        // 2. Window Titlebar & Controls (ONLY for Server-Side Decorated windows)
+        if titlebar_h > 0 {
             let is_max = state.layout_for_output(output).is_maximized(&window);
             let is_tiled = state.layout_for_output(output).is_window_tiled(&window);
             let win_id = crate::layout::window_stable_id(&window);
@@ -420,7 +424,7 @@ fn build_secondary_scene(
 
         // 3. Client Surface Content
         if let Some(surface) = crate::layout::window_wl_surface(&window) {
-            let client_loc = (rect.loc + smithay::utils::Point::from((0, titlebar_h)))
+            let client_loc = client_logical_loc
                 .to_physical_precise_round(fractional_scale);
             let win_alpha = state.layout_for_output(output).window_alpha(&window);
             let surfaces: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
@@ -432,7 +436,7 @@ fn build_secondary_scene(
                     win_alpha,
                     Kind::Unspecified,
                 );
-            if is_fs {
+            if is_fs || titlebar_h == 0 {
                 elements.extend(surfaces.into_iter().map(CustomRenderElement::from));
             } else {
                 let body = Rectangle::new(
@@ -575,16 +579,27 @@ fn find_surface_under_loc(
         }
         if rect.to_f64().contains(out_rel_loc) {
             let is_fs = state.layout_for_output(&target_output).is_fullscreen(&window);
-            let titlebar_h = if is_fs { 0.0 } else { 36.0 };
-            if (out_rel_loc.y - rect.loc.y as f64) < titlebar_h {
+            let titlebar_h = crate::layout::window_titlebar_height(&window, is_fs) as f64;
+            if titlebar_h > 0.0 && (out_rel_loc.y - rect.loc.y as f64) < titlebar_h {
                 // Inside server titlebar! DO NOT return client surface so buttons get clicks
                 return None;
             }
-            let rel_point = out_rel_loc - smithay::utils::Point::from((rect.loc.x as f64, rect.loc.y as f64 + titlebar_h));
+            let csd_offset = crate::layout::window_csd_offset(&window);
+            let origin = smithay::utils::Point::from((
+                (rect.loc.x - csd_offset.x) as f64,
+                (rect.loc.y - csd_offset.y) as f64 + titlebar_h,
+            ));
+            let rel_point = out_rel_loc - origin;
             if let Some((surface, sub_loc)) =
                 window.surface_under(rel_point, WindowSurfaceType::all())
             {
-                return Some((surface, out_loc + (smithay::utils::Point::from((rect.loc.x, rect.loc.y + titlebar_h as i32)) + sub_loc).to_f64()));
+                return Some((
+                    surface,
+                    out_loc + smithay::utils::Point::from((
+                        origin.x + sub_loc.x as f64,
+                        origin.y + sub_loc.y as f64,
+                    )),
+                ));
             }
         }
     }
@@ -895,7 +910,9 @@ pub fn run_drm(
             last_err
         )
     })?;
-    let primary_crtc = initialized_crtc.expect("initialized DRM output must have a CRTC");
+    let primary_crtc = initialized_crtc.ok_or_else(|| {
+        anyhow::anyhow!("Initialized DRM output did not yield a valid primary CRTC handle")
+    })?;
     try_enable_vrr(output_manager.device(), conn_handle, primary_crtc);
     let init_disp_config = ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default("displays")
         .map(|c| c.get().clone())
@@ -1022,14 +1039,17 @@ pub fn run_drm(
         info!("DRM syncobj eventfd unsupported; explicit sync disabled (implicit sync fallback)");
     }
 
-    // 7. Bind Wayland Listening Socket
-    let socket_name = "corten-0";
-    let listener = ListeningSocket::bind(socket_name)?;
+    // 7. Bind Wayland Listening Socket (auto-select corten-0..31 to avoid collisions)
+    let listener = ListeningSocket::bind_auto("corten", 0..32)?;
+    let socket_name = listener
+        .socket_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "corten-0".to_string());
     info!(
         "Corten Compositor (DRM mode) listening on socket: {}",
         socket_name
     );
-    std::env::set_var("WAYLAND_DISPLAY", socket_name);
+    std::env::set_var("WAYLAND_DISPLAY", &socket_name);
 
     // 8. Initialize Libinput Input Backend
     let mut libinput_ctx =
@@ -1692,8 +1712,8 @@ pub fn run_drm(
                                     keysyms::KEY_space | keysyms::KEY_d | keysyms::KEY_D
                                         if binding("launcher") => {
                                         info!("Compositor Hotkey: Super+Space/D (Launcher Toggle)");
-                                        let check = std::process::Command::new("killall")
-                                            .args(["-q", "corten-launcher"])
+                                        let check = std::process::Command::new("pkill")
+                                            .args(["-x", "corten-launcher"])
                                             .status();
                                         if let Ok(status) = check {
                                             if status.success() {
@@ -1715,8 +1735,8 @@ pub fn run_drm(
                                     keysyms::KEY_F1 | keysyms::KEY_slash | keysyms::KEY_question
                                         if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
                                         info!("Compositor Hotkey: Super+F1 / Super+? (Shortcuts Cheat Sheet)");
-                                        let check = std::process::Command::new("killall")
-                                            .args(["-q", "corten-launcher"])
+                                        let check = std::process::Command::new("pkill")
+                                            .args(["-x", "corten-launcher"])
                                             .status();
                                         if let Ok(status) = check {
                                             if status.success() {
@@ -2141,17 +2161,27 @@ pub fn run_drm(
                                         state.drag_split_target = None;
                                     }
                                 }
-                            } else if let Some((ref window, resize_start_cursor, initial_rect)) =
+                            } else if let Some((ref window, resize_start_cursor, initial_rect, resize_edge)) =
                                 state.resized_window.clone()
                             {
                                 // If currently resizing a window, update its floating size and notify the client
-                                let delta_w = (loc.x - resize_start_cursor.x).round() as i32;
-                                let delta_h = (loc.y - resize_start_cursor.y).round() as i32;
-                                let mut new_rect = initial_rect;
-                                let (min_w, min_h) = crate::layout::window_min_size(window);
-                                new_rect.size.w = (initial_rect.size.w + delta_w).max(min_w);
-                                new_rect.size.h = (initial_rect.size.h + delta_h).max(min_h + 36);
+                                let delta = smithay::utils::Point::from((
+                                    loc.x - resize_start_cursor.x,
+                                    loc.y - resize_start_cursor.y,
+                                ));
+                                let min_size = crate::layout::window_min_size(window);
+                                let max_size = crate::layout::window_max_size(window);
                                 let target_output = state.output_at(loc);
+                                let is_fs = state.layout_for_output(&target_output).is_fullscreen(window);
+                                let titlebar_h = crate::layout::window_titlebar_height(window, is_fs);
+                                let new_rect = crate::layout::compute_resized_rect(
+                                    initial_rect,
+                                    resize_edge,
+                                    delta,
+                                    min_size,
+                                    max_size,
+                                    titlebar_h,
+                                );
                                 let usable_area = {
                                     let mut map = layer_map_for_output(&target_output);
                                     map.arrange();
@@ -2465,7 +2495,6 @@ pub fn run_drm(
                                         let rel_win_y = out_rel_loc.y - rect.loc.y as f64;
 
                                         let w_f64 = rect.size.w as f64;
-                                        let h_f64 = rect.size.h as f64;
 
                                         if b.button() == 272 {
                                             if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
@@ -2489,8 +2518,12 @@ pub fn run_drm(
                                                 state.sync_ipc_snapshot();
                                                 continue;
                                             }
-                                            if (0.0..=36.0).contains(&rel_win_y) {
-                                                // Clicked inside the Window Titlebar!
+                                            let titlebar_h = crate::layout::window_titlebar_height(
+                                                &window,
+                                                state.layout_for_output(&target_output).is_fullscreen(&window),
+                                            ) as f64;
+                                            if titlebar_h > 0.0 && (0.0..=titlebar_h).contains(&rel_win_y) {
+                                                // Clicked inside the Server-Side Window Titlebar!
                                                 let win_id = crate::layout::window_stable_id(&window);
                                                 let tabs = state.layout_for_output(&target_output).window_tabs_metadata(win_id);
                                                 if let Some(tab_idx) = crate::layout::hit_test_titlebar_tab(
@@ -2589,18 +2622,16 @@ pub fn run_drm(
                                                     ));
                                                     continue;
                                                 }
-                                            } else if (rel_win_x >= (w_f64 - 16.0)
-                                                && rel_win_y >= (h_f64 - 16.0))
-                                                || rel_win_x >= (w_f64 - 8.0)
-                                                || rel_win_y >= (h_f64 - 8.0)
-                                            {
-                                                // Left click on bottom-right corner or right/bottom edges initiates resize!
-                                                info!("Window Edge / Corner Click: Initiating resize on {:?}", window);
-                                                state.resized_window = Some((
-                                                    window.clone(),
-                                                    state.cursor_location,
-                                                    rect,
-                                                ));
+                                            } else if titlebar_h > 0.0 {
+                                                if let Some(edge) = crate::layout::hit_test_resize_edge(rect, out_rel_loc, 8.0) {
+                                                    info!("Window Edge / Corner Click ({:?}): Initiating resize on {:?}", edge, window);
+                                                    state.resized_window = Some((
+                                                        window.clone(),
+                                                        state.cursor_location,
+                                                        rect,
+                                                        edge,
+                                                    ));
+                                                }
                                             }
                                         } else if logo_held && b.button() == 272 {
                                             // Super + Left button initiates window drag & move
@@ -2609,7 +2640,7 @@ pub fn run_drm(
                                         } else if logo_held && b.button() == 273 {
                                             // Super + Right button initiates window resize
                                             state.resized_window =
-                                                Some((window.clone(), state.cursor_location, rect));
+                                                Some((window.clone(), state.cursor_location, rect, crate::layout::ResizeEdge::BottomRight));
                                         }
                                     } else if !logo_held && b.button() == 272 {
                                         // Left click on empty desktop canvas: initiate rubberband selection marquee!
@@ -2618,9 +2649,8 @@ pub fn run_drm(
                                     } else if !logo_held && b.button() == 273 {
                                         // Right click on empty desktop canvas: trigger Desktop Context Menu at cursor
                                         info!("Desktop Canvas Right-Click: Spawning Corten Desktop Context Menu at cursor");
-                                        let _ = std::process::Command::new("killall")
-                                            .arg("-9")
-                                            .arg("corten-launcher")
+                                        let _ = std::process::Command::new("pkill")
+                                            .args(["-9", "-x", "corten-launcher"])
                                             .status();
                                         let cur_x = state.cursor_location.x.round() as i32;
                                         let cur_y = state.cursor_location.y.round() as i32;
@@ -3313,6 +3343,7 @@ pub fn run_drm(
 
         // ext-session-lock-v1 surfaces are rendered above every normal client
         // and layer-shell surface while the session is locked.
+        state.recover_crashed_lock();
         for (lock_surface, lock_output) in &state.lock_surfaces {
             if !state.lock_surface_for_output(lock_output, &state.output) {
                 continue;
@@ -3406,12 +3437,14 @@ pub fn run_drm(
                     .size
                     .to_physical_precise_round(fractional_scale),
             );
-            let titlebar_h = if is_fs { 0 } else { 36 };
+            let titlebar_h = crate::layout::window_titlebar_height(window, is_fs);
+            let csd_offset = crate::layout::window_csd_offset(window);
+            let client_logical_loc = shifted_rect.loc - csd_offset + smithay::utils::Point::from((0, titlebar_h));
 
             // 1. Popups for surface (menus, dropdowns) - topmost window elements
             if let Some(surface) = crate::layout::window_wl_surface(window) {
                 for (popup, popup_offset) in PopupManager::popups_for_surface(&surface) {
-                    let popup_loc = (shifted_rect.loc + smithay::utils::Point::from((0, titlebar_h)) + popup_offset)
+                    let popup_loc = (client_logical_loc + popup_offset)
                         .to_physical_precise_round(fractional_scale);
                     let popup_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                         render_elements_from_surface_tree(
@@ -3426,8 +3459,8 @@ pub fn run_drm(
                 }
             }
 
-            // 2. Render Corten Industrial Titlebar & Controls IN FRONT of client surface
-            if !is_fs {
+            // 2. Render Corten Industrial Titlebar & Controls ONLY for Server-Side Decorated windows
+            if titlebar_h > 0 {
                 let is_max = state.layout.is_maximized(window);
                 let is_tiled = state.layout.is_window_tiled(window);
                 let win_id = crate::layout::window_stable_id(window);
@@ -3453,7 +3486,7 @@ pub fn run_drm(
 
             // 3. Render client window surface content
             if let Some(surface) = crate::layout::window_wl_surface(window) {
-                let client_loc = (shifted_rect.loc + smithay::utils::Point::from((0, titlebar_h)))
+                let client_loc = client_logical_loc
                     .to_physical_precise_round(fractional_scale);
                 let win_alpha = state.layout.window_alpha(window);
                 let window_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
@@ -3465,7 +3498,7 @@ pub fn run_drm(
                         win_alpha,
                         Kind::Unspecified,
                     );
-                if is_fs {
+                if is_fs || titlebar_h == 0 {
                     elements.extend(window_elements.into_iter().map(CustomRenderElement::from));
                 } else {
                     let body = Rectangle::new(
@@ -3701,7 +3734,7 @@ pub fn run_drm(
                     let is_blur = crate::layout::is_window_blur_eligible(window, &state.window_rules)
                         || win_alpha < 0.99;
                     if is_blur {
-                        let titlebar_h = 36;
+                        let titlebar_h = crate::layout::window_titlebar_height(window, is_fs);
                         let body_rect = Rectangle::new(
                             geo.loc + Point::from((0, titlebar_h)),
                             Size::from((geo.size.w.max(10), (geo.size.h - titlebar_h).max(10))),

@@ -1093,30 +1093,37 @@ impl AiEngine {
         let _ = tx.send(StreamChunk::Done);
     }
 
-    /// Captures the full screen using corten-snipper or screencopy and encodes to base64
+    /// Captures the full screen using grim (or corten-snipper fallback) into a user-private runtime path and encodes to base64
     pub fn capture_screen_base64() -> Option<String> {
-        let tmp_path = "/tmp/corten_ai_screen.png";
-        let _ = std::fs::remove_file(tmp_path);
+        let base_dir = std::env::var("XDG_RUNTIME_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| crate::aura::aura_data_dir());
+        let tmp_path = base_dir.join(format!("corten_ai_screen_{}.png", std::process::id()));
+        let tmp_str = tmp_path.to_string_lossy().to_string();
+        let _ = std::fs::remove_file(&tmp_path);
 
-        // Try corten-snipper fullscreen capture
-        let snipper = crate::actions::resolve_corten_bin("corten-snipper");
-        if snipper.exists() {
-            let status = std::process::Command::new(snipper)
-                .args(["--fullscreen", "--output", tmp_path])
-                .status()
-                .ok()?;
+        // Try grim first (actual Wayland wlr-screencopy PNG capture)
+        if let Ok(status) = std::process::Command::new("grim").arg(&tmp_str).status() {
             if status.success() {
-                if let Ok(bytes) = std::fs::read(tmp_path) {
+                if let Ok(bytes) = std::fs::read(&tmp_path) {
+                    let _ = std::fs::remove_file(&tmp_path);
                     return Some(base64_encode(&bytes));
                 }
             }
         }
 
-        // Fallback: grim or slurp if available
-        if let Ok(status) = std::process::Command::new("grim").arg(tmp_path).status() {
-            if status.success() {
-                if let Ok(bytes) = std::fs::read(tmp_path) {
-                    return Some(base64_encode(&bytes));
+        // Try corten-snipper fullscreen capture if available
+        let snipper = crate::actions::resolve_corten_bin("corten-snipper");
+        if snipper.exists() {
+            if let Ok(status) = std::process::Command::new(snipper)
+                .args(["--fullscreen", "--output", &tmp_str])
+                .status()
+            {
+                if status.success() {
+                    if let Ok(bytes) = std::fs::read(&tmp_path) {
+                        let _ = std::fs::remove_file(&tmp_path);
+                        return Some(base64_encode(&bytes));
+                    }
                 }
             }
         }

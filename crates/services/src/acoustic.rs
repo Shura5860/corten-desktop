@@ -196,9 +196,14 @@ fn encode_pcm16_wav(samples: &[i16], sample_rate: u32) -> Vec<u8> {
     buf
 }
 
-/// Ensures the WAV file for `cue` is cached in `/tmp/corten-acoustics/` and returns its path.
+/// Ensures the WAV file for `cue` is cached in a user-private runtime/cache directory and returns its path.
 pub fn ensure_cached_wav(cue: AcousticCue) -> Option<PathBuf> {
-    let dir = std::env::temp_dir().join("corten-acoustics");
+    let dir = std::env::var("XDG_RUNTIME_DIR")
+        .map(|d| PathBuf::from(d).join("corten-acoustics"))
+        .unwrap_or_else(|_| {
+            let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
+            std::env::temp_dir().join(format!("corten-acoustics-{}", user))
+        });
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join(cue.filename());
     if !path.exists() {

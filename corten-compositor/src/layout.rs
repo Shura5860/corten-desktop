@@ -53,13 +53,203 @@ pub fn close_window(window: &Window) {
     }
 }
 
+/// Standard height of Corten's server-side titlebar in logical pixels.
+pub const TITLEBAR_HEIGHT: i32 = 36;
+
+/// Returns `true` if the compositor should draw a server-side titlebar (SSD) for this window.
+///
+/// - Wayland clients that explicitly negotiated `Mode::ServerSide` get SSD.
+/// - Wayland clients that requested `Mode::ClientSide`, OR never bound `zxdg_toplevel_decoration_v1`
+///   at all (e.g. GTK4/libadwaita, Electron, VS Code, Antigravity IDE, Brave/Chromium), draw their
+///   own Client-Side Decorations (CSD), so we return `false` to prevent double titlebars.
+/// - XWayland clients respect `_MOTIF_WM_HINTS` via `X11Surface::is_decorated()`.
+pub fn window_uses_ssd(window: &Window) -> bool {
+    if let Some(toplevel) = window.toplevel() {
+        use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
+        let pending_mode = toplevel.with_pending_state(|p| p.decoration_mode);
+        let mode = pending_mode.or_else(|| toplevel.current_state().decoration_mode);
+        return matches!(mode, Some(Mode::ServerSide));
+    }
+    if let Some(x11) = window.x11_surface() {
+        return x11.is_decorated();
+    }
+    false
+}
+
+/// Returns the server-side titlebar height for `window` (`36` for SSD, `0` for CSD or fullscreen).
+pub fn window_titlebar_height(window: &Window, is_fullscreen: bool) -> i32 {
+    if is_fullscreen || !window_uses_ssd(window) {
+        0
+    } else {
+        TITLEBAR_HEIGHT
+    }
+}
+
+/// Returns the CSD shadow/content offset (`window.geometry().loc`) for CSD windows so shadows
+/// do not push the visible window away from screen edges or offset pointer hit-testing.
+pub fn window_csd_offset(window: &Window) -> Point<i32, Logical> {
+    if window_uses_ssd(window) {
+        Point::from((0, 0))
+    } else {
+        window.geometry().loc
+    }
+}
+
+/// 8-directional window resize edge/corner identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResizeEdge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl ResizeEdge {
+    pub fn from_xdg(
+        edge: smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
+    ) -> Self {
+        use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge as XdgEdge;
+        match edge {
+            XdgEdge::Top => Self::Top,
+            XdgEdge::Bottom => Self::Bottom,
+            XdgEdge::Left => Self::Left,
+            XdgEdge::Right => Self::Right,
+            XdgEdge::TopLeft => Self::TopLeft,
+            XdgEdge::TopRight => Self::TopRight,
+            XdgEdge::BottomLeft => Self::BottomLeft,
+            XdgEdge::BottomRight | XdgEdge::None | _ => Self::BottomRight,
+        }
+    }
+
+    pub fn from_x11(edge: smithay::xwayland::xwm::ResizeEdge) -> Self {
+        use smithay::xwayland::xwm::ResizeEdge as X11Edge;
+        match edge {
+            X11Edge::Top => Self::Top,
+            X11Edge::Bottom => Self::Bottom,
+            X11Edge::Left => Self::Left,
+            X11Edge::Right => Self::Right,
+            X11Edge::TopLeft => Self::TopLeft,
+            X11Edge::TopRight => Self::TopRight,
+            X11Edge::BottomLeft => Self::BottomLeft,
+            X11Edge::BottomRight => Self::BottomRight,
+        }
+    }
+}
+
+/// Detects whether `cursor` lies on any of the 8 resize borders/corners of `rect`.
+pub fn hit_test_resize_edge(
+    rect: Rectangle<i32, Logical>,
+    cursor: Point<f64, Logical>,
+    border_px: f64,
+) -> Option<ResizeEdge> {
+    let rel_x = cursor.x - rect.loc.x as f64;
+    let rel_y = cursor.y - rect.loc.y as f64;
+    let w = rect.size.w as f64;
+    let h = rect.size.h as f64;
+    if rel_x < -2.0 || rel_y < -2.0 || rel_x > w + 2.0 || rel_y > h + 2.0 {
+        return None;
+    }
+
+    let corner = border_px * 2.0;
+    let left = rel_x <= border_px;
+    let right = rel_x >= w - border_px;
+    let top = rel_y <= border_px;
+    let bottom = rel_y >= h - border_px;
+
+    if (rel_x <= corner && rel_y <= corner) && (left || top) {
+        Some(ResizeEdge::TopLeft)
+    } else if (rel_x >= w - corner && rel_y <= corner) && (right || top) {
+        Some(ResizeEdge::TopRight)
+    } else if (rel_x <= corner && rel_y >= h - corner) && (left || bottom) {
+        Some(ResizeEdge::BottomLeft)
+    } else if (rel_x >= w - corner && rel_y >= h - corner) && (right || bottom) {
+        Some(ResizeEdge::BottomRight)
+    } else if left {
+        Some(ResizeEdge::Left)
+    } else if right {
+        Some(ResizeEdge::Right)
+    } else if top {
+        Some(ResizeEdge::Top)
+    } else if bottom {
+        Some(ResizeEdge::Bottom)
+    } else {
+        None
+    }
+}
+
+/// Computes the new window frame rectangle during an interactive 8-directional resize,
+/// properly moving `loc.x`/`loc.y` for left/top edges and honoring both `min_size` and `max_size`.
+pub fn compute_resized_rect(
+    initial_rect: Rectangle<i32, Logical>,
+    edge: ResizeEdge,
+    delta: Point<f64, Logical>,
+    min_size: (i32, i32),
+    max_size: (Option<i32>, Option<i32>),
+    titlebar_h: i32,
+) -> Rectangle<i32, Logical> {
+    let dx = delta.x.round() as i32;
+    let dy = delta.y.round() as i32;
+
+    let min_w = min_size.0.max(160);
+    let min_h = (min_size.1 + titlebar_h).max(100 + titlebar_h);
+    let max_w = max_size.0.map(|m| m.max(min_w));
+    let max_h = max_size.1.map(|m| (m + titlebar_h).max(min_h));
+
+    let clamp_w = |w: i32| {
+        let w = w.max(min_w);
+        if let Some(mw) = max_w { w.min(mw) } else { w }
+    };
+    let clamp_h = |h: i32| {
+        let h = h.max(min_h);
+        if let Some(mh) = max_h { h.min(mh) } else { h }
+    };
+
+    let mut x = initial_rect.loc.x;
+    let mut y = initial_rect.loc.y;
+    let mut w = initial_rect.size.w;
+    let mut h = initial_rect.size.h;
+
+    let right_edge = initial_rect.loc.x + initial_rect.size.w;
+    let bottom_edge = initial_rect.loc.y + initial_rect.size.h;
+
+    match edge {
+        ResizeEdge::Right | ResizeEdge::TopRight | ResizeEdge::BottomRight => {
+            w = clamp_w(initial_rect.size.w + dx);
+        }
+        ResizeEdge::Left | ResizeEdge::TopLeft | ResizeEdge::BottomLeft => {
+            w = clamp_w(initial_rect.size.w - dx);
+            x = right_edge - w;
+        }
+        _ => {}
+    }
+
+    match edge {
+        ResizeEdge::Bottom | ResizeEdge::BottomLeft | ResizeEdge::BottomRight => {
+            h = clamp_h(initial_rect.size.h + dy);
+        }
+        ResizeEdge::Top | ResizeEdge::TopLeft | ResizeEdge::TopRight => {
+            h = clamp_h(initial_rect.size.h - dy);
+            y = bottom_edge - h;
+        }
+        _ => {}
+    }
+
+    Rectangle::new(Point::from((x, y)), Size::from((w, h)))
+}
+
 /// Configures a window's logical geometry for either Wayland or XWayland surfaces.
 pub fn configure_window_geometry(window: &Window, rect: Rectangle<i32, Logical>) {
     if let Some(toplevel) = window.toplevel() {
+        let uses_ssd = window_uses_ssd(window);
         let needs_configure = toplevel.with_pending_state(|pending| {
             use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
             let is_fs = pending.states.contains(State::Fullscreen);
-            let client_h = if is_fs { rect.size.h.max(100) } else { (rect.size.h - 36).max(100) };
+            let titlebar_h = if is_fs || !uses_ssd { 0 } else { TITLEBAR_HEIGHT };
+            let client_h = (rect.size.h - titlebar_h).max(100);
             let new_size = Some((rect.size.w.max(160), client_h).into());
             let mut changed = false;
             if pending.size != new_size {
@@ -72,9 +262,10 @@ pub fn configure_window_geometry(window: &Window, rect: Rectangle<i32, Logical>)
             toplevel.send_configure();
         }
     } else if let Some(x11) = window.x11_surface() {
+        let titlebar_h = window_titlebar_height(window, x11.is_fullscreen());
         let x11_rect = Rectangle::new(
-            Point::from((rect.loc.x, rect.loc.y + 36)),
-            Size::from((rect.size.w, (rect.size.h - 36).max(100))),
+            Point::from((rect.loc.x, rect.loc.y + titlebar_h)),
+            Size::from((rect.size.w.max(160), (rect.size.h - titlebar_h).max(100))),
         );
         if x11.geometry() != x11_rect {
             let _ = x11.configure(x11_rect);
@@ -138,6 +329,34 @@ pub fn window_min_size(window: &Window) -> (i32, i32) {
         }
     }
     (200, 140)
+}
+
+/// Retrieves the requested maximum dimensions `(max_w, max_h)` of a window (`None` = unconstrained).
+pub fn window_max_size(window: &Window) -> (Option<i32>, Option<i32>) {
+    if let Some(x11) = window.x11_surface() {
+        if let Some(hints) = x11.size_hints() {
+            if let Some(max) = hints.max_size {
+                return (
+                    (max.0 > 0).then_some(max.0),
+                    (max.1 > 0).then_some(max.1),
+                );
+            }
+        }
+    }
+    if let Some(toplevel) = window.toplevel() {
+        let (max_w, max_h) = with_states(toplevel.wl_surface(), |states| {
+            let mut guard = states
+                .cached_state
+                .get::<smithay::wayland::shell::xdg::SurfaceCachedState>();
+            let cached = guard.current();
+            (cached.max_size.w, cached.max_size.h)
+        });
+        return (
+            (max_w > 0).then_some(max_w),
+            (max_h > 0).then_some(max_h),
+        );
+    }
+    (None, None)
 }
 
 /// Checks whether a Wayland `xdg_toplevel` or X11 window is a transient dialog, modal,
@@ -1268,21 +1487,12 @@ impl LayoutManager {
         maximized: bool,
     ) -> Rectangle<i32, Logical> {
         let wid = window_stable_id(window);
-        if maximized {
+        let target_rect = if maximized {
             if let Some(&current_geo) = self.floating_geometries.get(&wid) {
                 self.saved_unmaximized_geometries.insert(wid, current_geo);
             }
             self.maximized_windows.insert(wid);
             self.set_floating_geometry(window, usable_area);
-            configure_window_geometry(window, usable_area);
-            if let Some(toplevel) = window.toplevel() {
-                toplevel.with_pending_state(|tstate| {
-                    use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
-                    tstate.states.set(State::Maximized);
-                    tstate.states.unset(State::Fullscreen);
-                });
-                toplevel.send_configure();
-            }
             usable_area
         } else {
             self.maximized_windows.remove(&wid);
@@ -1296,16 +1506,31 @@ impl LayoutManager {
                 )
             });
             self.set_floating_geometry(window, restored);
-            configure_window_geometry(window, restored);
-            if let Some(toplevel) = window.toplevel() {
-                toplevel.with_pending_state(|tstate| {
-                    use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
-                    tstate.states.unset(State::Maximized);
-                });
-                toplevel.send_configure();
-            }
             restored
+        };
+
+        // Coalesce state + size into a single configure to avoid client flicker.
+        if let Some(toplevel) = window.toplevel() {
+            let uses_ssd = window_uses_ssd(window);
+            let titlebar_h = if !uses_ssd { 0 } else { TITLEBAR_HEIGHT };
+            let client_h = (target_rect.size.h - titlebar_h).max(100);
+            toplevel.with_pending_state(|tstate| {
+                use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
+                if maximized {
+                    tstate.states.set(State::Maximized);
+                    tstate.states.unset(State::Fullscreen);
+                } else {
+                    tstate.states.unset(State::Maximized);
+                }
+                tstate.size = Some((target_rect.size.w.max(160), client_h).into());
+            });
+            toplevel.send_configure();
+        } else if let Some(x11) = window.x11_surface() {
+            let _ = x11.set_maximized(maximized);
+            configure_window_geometry(window, target_rect);
         }
+
+        target_rect
     }
 
     /// Toggle maximize state for a window and return the new state.
@@ -2829,5 +3054,63 @@ mod tests {
         assert_eq!(manager.tab_group_for_window(101), Some(&[101, 303][..]));
         assert!(manager.detach_window_from_tab_group(303));
         assert_eq!(manager.tab_group_for_window(101), None);
+    }
+
+    #[test]
+    fn test_8_directional_resize_edge_hit_testing() {
+        let rect = Rectangle::new(Point::from((100, 100)), Size::from((800, 600)));
+        assert_eq!(hit_test_resize_edge(rect, Point::from((102.0, 102.0)), 8.0), Some(ResizeEdge::TopLeft));
+        assert_eq!(hit_test_resize_edge(rect, Point::from((898.0, 102.0)), 8.0), Some(ResizeEdge::TopRight));
+        assert_eq!(hit_test_resize_edge(rect, Point::from((102.0, 698.0)), 8.0), Some(ResizeEdge::BottomLeft));
+        assert_eq!(hit_test_resize_edge(rect, Point::from((898.0, 698.0)), 8.0), Some(ResizeEdge::BottomRight));
+        assert_eq!(hit_test_resize_edge(rect, Point::from((102.0, 400.0)), 8.0), Some(ResizeEdge::Left));
+        assert_eq!(hit_test_resize_edge(rect, Point::from((898.0, 400.0)), 8.0), Some(ResizeEdge::Right));
+        assert_eq!(hit_test_resize_edge(rect, Point::from((500.0, 102.0)), 8.0), Some(ResizeEdge::Top));
+        assert_eq!(hit_test_resize_edge(rect, Point::from((500.0, 698.0)), 8.0), Some(ResizeEdge::Bottom));
+        assert_eq!(hit_test_resize_edge(rect, Point::from((500.0, 400.0)), 8.0), None);
+    }
+
+    #[test]
+    fn test_compute_resized_rect_anchors_and_min_max_clamping() {
+        let initial = Rectangle::new(Point::from((200, 150)), Size::from((600, 400)));
+
+        // Left-edge drag left by 50px should grow width to 650 and move x to 150 (keeping right edge at 800)
+        let left_grown = compute_resized_rect(
+            initial,
+            ResizeEdge::Left,
+            Point::from((-50.0, 0.0)),
+            (200, 140),
+            (Some(700), Some(500)),
+            0,
+        );
+        assert_eq!(left_grown.loc.x, 150);
+        assert_eq!(left_grown.size.w, 650);
+        assert_eq!(left_grown.loc.x + left_grown.size.w, 800);
+
+        // TopLeft drag beyond max_size should clamp to max_size while keeping right/bottom anchor fixed
+        let clamped_max = compute_resized_rect(
+            initial,
+            ResizeEdge::TopLeft,
+            Point::from((-400.0, -400.0)),
+            (200, 140),
+            (Some(700), Some(500)),
+            36,
+        );
+        assert_eq!(clamped_max.size.w, 700);
+        assert_eq!(clamped_max.size.h, 536); // 500 client + 36 SSD titlebar
+        assert_eq!(clamped_max.loc.x, 100); // 800 - 700
+        assert_eq!(clamped_max.loc.y, 14);  // 550 - 536
+
+        // Dragging right edge inward past min_size clamps cleanly at min_size
+        let clamped_min = compute_resized_rect(
+            initial,
+            ResizeEdge::BottomRight,
+            Point::from((-500.0, -500.0)),
+            (250, 180),
+            (None, None),
+            0,
+        );
+        assert_eq!(clamped_min.size.w, 250);
+        assert_eq!(clamped_min.size.h, 180);
     }
 }

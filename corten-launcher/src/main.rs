@@ -5556,8 +5556,8 @@ impl CortenLauncherApp {
                 ));
             }
             DesktopAction::NextWallpaper => {
-                let _ = Command::new("killall")
-                    .args(["-USR1", "corten-wallpaper"])
+                let _ = Command::new("pkill")
+                    .args(["-USR1", "-x", "corten-wallpaper"])
                     .spawn();
             }
             DesktopAction::ToggleWidgets => {

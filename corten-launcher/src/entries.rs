@@ -19,11 +19,29 @@ pub struct AppEntry {
 }
 
 impl AppEntry {
-    /// Launches the application by parsing the Exec line with robust fallback
+    /// Launches the application by parsing the Exec line safely without invoking a shell.
     pub fn launch(&self) -> std::io::Result<()> {
         let args = parse_exec(&self.exec)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-        let (program, arguments) = args.split_first().ok_or_else(|| {
+
+        // Support leading `env KEY=VAL ...` or `KEY=VAL ...` assignments without invoking `sh -c`
+        let mut envs: Vec<(String, String)> = Vec::new();
+        let mut idx = 0;
+        if args.first().map(|s| s.as_str()) == Some("env") {
+            idx += 1;
+        }
+        while idx < args.len() {
+            if let Some((k, v)) = args[idx].split_once('=') {
+                if !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    envs.push((k.to_string(), v.to_string()));
+                    idx += 1;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        let (program, arguments) = args.get(idx..).and_then(|s| s.split_first()).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty Exec entry")
         })?;
 
@@ -37,29 +55,11 @@ impl AppEntry {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-
-        match cmd.spawn() {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                tracing::warn!("Direct launch failed for {}: {}. Attempting shell fallback...", program, e);
-                let sanitized = self.exec
-                    .replace("%u", "")
-                    .replace("%U", "")
-                    .replace("%f", "")
-                    .replace("%F", "")
-                    .replace("%i", "")
-                    .replace("%c", "")
-                    .replace("%k", "");
-                let mut shell_cmd = Command::new("sh");
-                shell_cmd.arg("-c")
-                    .arg(format!("{} &", sanitized.trim()))
-                    .env("WAYLAND_DISPLAY", &wayland_display)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null());
-                shell_cmd.spawn().map(|_| ())
-            }
+        for (k, v) in envs {
+            cmd.env(k, v);
         }
+
+        cmd.spawn().map(|_| ())
     }
 }
 
@@ -105,7 +105,9 @@ fn parse_exec(exec: &str) -> Result<Vec<String>, String> {
         if let Some(code) = arg.strip_prefix('%') {
             match code {
                 "%" => expanded.push("%".into()),
-                "f" | "F" | "u" | "U" | "i" | "c" | "k" => continue,
+                "f" | "F" | "u" | "U" | "d" | "D" | "n" | "N" | "i" | "c" | "k" | "v" | "m" => {
+                    continue
+                }
                 _ => return Err(format!("unsupported desktop-entry field code: %{code}")),
             }
         } else {
@@ -116,11 +118,20 @@ fn parse_exec(exec: &str) -> Result<Vec<String>, String> {
 }
 
 fn convert_svg_to_png(svg_path: &std::path::Path, out_size: u32) -> Option<PathBuf> {
-    let cache_dir = PathBuf::from("/tmp/corten_icon_cache");
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let cache_dir = directories::BaseDirs::new()
+        .map(|b| b.cache_dir().join("corten").join("icons"))
+        .or_else(|| std::env::var("XDG_RUNTIME_DIR").ok().map(|d| PathBuf::from(d).join("corten_icon_cache")))
+        .unwrap_or_else(|| PathBuf::from("/tmp/corten_icon_cache"));
     let _ = std::fs::create_dir_all(&cache_dir);
 
     let file_stem = svg_path.file_stem()?.to_string_lossy();
-    let out_file = cache_dir.join(format!("{}_{}x{}.png", file_stem, out_size, out_size));
+    let mut hasher = DefaultHasher::new();
+    svg_path.hash(&mut hasher);
+    let path_hash = hasher.finish();
+    let out_file = cache_dir.join(format!("{}_{:08x}_{}x{}.png", file_stem, path_hash as u32, out_size, out_size));
     if out_file.exists() {
         return Some(out_file);
     }

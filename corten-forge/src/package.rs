@@ -831,13 +831,56 @@ impl PackageManager {
                     Err(format!("Kurulum başarısız oldu (Çıkış kodu: {:?})", status.code()))
                 }
             }
-            PackageSource::ArchRepo | PackageSource::Aur => {
-                let mut child = Command::new("pkexec")
-                    .args(["pacman", "-S", "--noconfirm", &pkg.id])
+            PackageSource::Aur => {
+                // AUR packages cannot be installed with pacman directly; use paru or yay
+                let helper = if std::path::Path::new("/usr/bin/paru").exists() {
+                    "paru"
+                } else if std::path::Path::new("/usr/bin/yay").exists() {
+                    "yay"
+                } else {
+                    return Err("AUR paketlerini kurmak için 'paru' veya 'yay' kurulu olmalıdır.".into());
+                };
+                let mut child = Command::new(helper)
+                    .args(["-S", "--noconfirm", &pkg.id])
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()
-                    .map_err(|e| format!("Polkit pacman çalıştırılamadı: {}", e))?;
+                    .map_err(|e| format!("{} çalıştırılamadı: {}", helper, e))?;
+
+                if let Some(stdout) = child.stdout.take() {
+                    let mut reader = BufReader::new(stdout).lines();
+                    let tx_out = tx.clone();
+                    tokio::spawn(async move {
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            let _ = tx_out.send(format!("  {}\n", line));
+                        }
+                    });
+                }
+
+                let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
+                if status.success() {
+                    let _ = tx.send(format!("✅ {} (AUR) başarıyla kuruldu!\n", pkg.name));
+                    Ok(())
+                } else {
+                    Err(format!("AUR kurulumu başarısız oldu (Çıkış kodu: {:?})", status.code()))
+                }
+            }
+            PackageSource::ArchRepo => {
+                let (pm_args, pm_label): (Vec<&str>, &str) = if std::path::Path::new("/usr/bin/pacman").exists() {
+                    (vec!["pacman", "-S", "--noconfirm", &pkg.id], "pacman")
+                } else if std::path::Path::new("/usr/bin/apt-get").exists() {
+                    (vec!["apt-get", "install", "-y", &pkg.id], "apt-get")
+                } else if std::path::Path::new("/usr/bin/dnf").exists() {
+                    (vec!["dnf", "install", "-y", &pkg.id], "dnf")
+                } else {
+                    return Err("Desteklenen yerel paket yöneticisi (pacman/apt/dnf) bulunamadı.".into());
+                };
+                let mut child = Command::new("pkexec")
+                    .args(&pm_args)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .map_err(|e| format!("Polkit {} çalıştırılamadı: {}", pm_label, e))?;
 
                 if let Some(stdout) = child.stdout.take() {
                     let mut reader = BufReader::new(stdout).lines();

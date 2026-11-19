@@ -576,11 +576,22 @@ fn is_custom_command_safe(cmd: &str) -> bool {
 }
 
 fn convert_svg_to_png(svg_path: &std::path::Path, out_size: u32) -> Option<PathBuf> {
-    let cache_dir = PathBuf::from("/tmp/corten_icon_cache");
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let cache_dir = std::env::var("XDG_CACHE_HOME")
+        .ok()
+        .map(|d| PathBuf::from(d).join("corten").join("icons"))
+        .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".cache/corten/icons")))
+        .or_else(|| std::env::var("XDG_RUNTIME_DIR").ok().map(|d| PathBuf::from(d).join("corten_icon_cache")))
+        .unwrap_or_else(|| PathBuf::from("/tmp/corten_icon_cache"));
     let _ = std::fs::create_dir_all(&cache_dir);
 
     let file_stem = svg_path.file_stem()?.to_string_lossy();
-    let out_file = cache_dir.join(format!("{}_{}x{}.png", file_stem, out_size, out_size));
+    let mut hasher = DefaultHasher::new();
+    svg_path.hash(&mut hasher);
+    let path_hash = hasher.finish();
+    let out_file = cache_dir.join(format!("{}_{:08x}_{}x{}.png", file_stem, path_hash as u32, out_size, out_size));
     if out_file.exists() {
         return Some(out_file);
     }
@@ -1396,9 +1407,8 @@ impl Application for CortenPanelApp {
                                 .unwrap_or(false);
 
                             if is_running {
-                                let _ = std::process::Command::new("killall")
-                                    .arg("-TERM")
-                                    .arg("corten-launcher")
+                                let _ = std::process::Command::new("pkill")
+                                    .args(["-TERM", "-x", "corten-launcher"])
                                     .spawn();
                             } else {
                                 let bin = find_binary("corten-launcher");
@@ -2060,8 +2070,8 @@ impl Application for CortenPanelApp {
             }
             Message::OpenLauncher | Message::ToggleLauncherModal => {
                 if let Some(cmdline) = get_corten_launcher_cmdline() {
-                    let _ = std::process::Command::new("killall")
-                        .args(["-TERM", "corten-launcher"])
+                    let _ = std::process::Command::new("pkill")
+                        .args(["-TERM", "-x", "corten-launcher"])
                         .status();
                     if cmdline.contains("--dashboard") {
                         let bin = find_binary("corten-launcher");
@@ -2085,8 +2095,8 @@ impl Application for CortenPanelApp {
             }
             Message::OpenDashboard => {
                 if let Some(cmdline) = get_corten_launcher_cmdline() {
-                    let _ = std::process::Command::new("killall")
-                        .args(["-TERM", "corten-launcher"])
+                    let _ = std::process::Command::new("pkill")
+                        .args(["-TERM", "-x", "corten-launcher"])
                         .status();
                     if !cmdline.contains("--dashboard") {
                         let bin = find_binary("corten-launcher");
@@ -2166,8 +2176,8 @@ impl Application for CortenPanelApp {
                 return self.layer_config_task();
             }
             Message::TriggerWallpaperCycle => {
-                let _ = Command::new("killall")
-                    .args(["-USR1", "corten-wallpaper"])
+                let _ = Command::new("pkill")
+                    .args(["-USR1", "-x", "corten-wallpaper"])
                     .spawn();
             }
             Message::SelectAudioSink(sink_id) => {
@@ -6235,7 +6245,7 @@ impl Application for CortenPanelApp {
                     ..Default::default()
                 }
             })
-            .on_press(Message::LaunchCommand("killall -USR1 corten-widgets || true".into()));
+            .on_press(Message::LaunchCommand("pkill -USR1 -x corten-widgets || true".into()));
 
             let hub_card = container(column![header, wallpaper_row, tools_grid, widget_gallery_row, zen_toggle_row].spacing(10))
                 .padding([14, 18])

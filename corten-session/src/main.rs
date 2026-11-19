@@ -367,7 +367,9 @@ fn record_crash_report(status: std::process::ExitStatus) {
         .unwrap_or_else(|| PathBuf::from("/tmp/corten_crashes"));
     let _ = std::fs::create_dir_all(&crash_dir);
     let log_file = crash_dir.join(format!("crash_{}.log", chrono::Local::now().format("%Y%m%d_%H%M%S")));
-    let tmp_file = PathBuf::from("/tmp/corten-crash.log");
+    let runtime_crash_file = env::var("XDG_RUNTIME_DIR")
+        .map(|d| PathBuf::from(d).join("corten-crash.log"))
+        .unwrap_or_else(|_| crash_dir.join("latest-crash.log"));
 
     let mut report = format!(
         "=== CORTEN DESKTOP COMPOSITOR CRASH DUMP ===\nTimestamp: {}\nExit Status: {}\n",
@@ -382,13 +384,13 @@ fn record_crash_report(status: std::process::ExitStatus) {
     }
 
     let _ = std::fs::write(&log_file, &report);
-    let _ = std::fs::write(&tmp_file, &report);
+    let _ = std::fs::write(&runtime_crash_file, &report);
 
     eprintln!("\n\x1b[1;31m=======================================================================\x1b[0m");
     eprintln!("\x1b[1;31m⚠️  CORTEN COMPOSITOR KRİTİK ÇÖKME HATASI!\x1b[0m");
     eprintln!("Compositor üst üste 3 kez çöktü ve oturum güvenli şekilde durduruldu.");
     eprintln!("Ayrıntılı hata teşhis raporu kaydedildi:");
-    eprintln!("  ↳ \x1b[1m{}\x1b[0m", tmp_file.display());
+    eprintln!("  ↳ \x1b[1m{}\x1b[0m", runtime_crash_file.display());
     eprintln!("  ↳ \x1b[1m{}\x1b[0m", log_file.display());
     eprintln!("\nSorunu gidermek için terminalden şu komutu çalıştırabilirsiniz:");
     eprintln!("  \x1b[38;2;225;110;45mcortenctl doctor\x1b[0m");
@@ -435,19 +437,38 @@ fn main() -> Result<()> {
     let mut compositor_pid = compositor_child.id() as i32;
     info!("Corten Compositor started (PID: {})", compositor_pid);
 
-    // 2. Wait for corten-0 Wayland socket to be advertised
-    let socket_name = "corten-0";
-    if !wait_for_wayland_socket(socket_name, Duration::from_secs(5)) {
+    // 2. Dynamically detect the active corten-N Wayland socket (avoids colliding on stale corten-0)
+    let runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    let mut socket_name = "corten-0".to_string();
+    for idx in 0..8 {
+        let candidate = format!("corten-{}", idx);
+        let p = Path::new(&runtime_dir).join(&candidate);
+        if !p.exists() || std::os::unix::net::UnixStream::connect(&p).is_err() {
+            socket_name = candidate;
+            break;
+        }
+    }
+    if !wait_for_wayland_socket(&socket_name, Duration::from_secs(5)) {
+        // Fallback: check if compositor bound a different corten-N socket
+        for idx in 0..8 {
+            let candidate = format!("corten-{}", idx);
+            let p = Path::new(&runtime_dir).join(&candidate);
+            if p.exists() && std::os::unix::net::UnixStream::connect(&p).is_ok() {
+                socket_name = candidate;
+                break;
+            }
+        }
         warn!(
-            "Socket {:?} was not found in time, proceeding anyway...",
-            socket_name
+            "Socket {:?} wait timed out; continuing with {:?}",
+            "corten-0", socket_name
         );
     }
+    let socket_name: &str = &socket_name;
 
-    // Export WAYLAND_DISPLAY and graphic toolkit drivers for child processes
+    // Export WAYLAND_DISPLAY and toolkit backends with XWayland fallback so legacy apps never crash
     env::set_var("WAYLAND_DISPLAY", socket_name);
-    env::set_var("GDK_BACKEND", "wayland");
-    env::set_var("QT_QPA_PLATFORM", "wayland");
+    env::set_var("GDK_BACKEND", "wayland,x11,*");
+    env::set_var("QT_QPA_PLATFORM", "wayland;xcb");
     env::set_var("WINIT_UNIX_BACKEND", "wayland");
     let cursor_theme = if std::path::Path::new("/usr/share/icons/breeze_cursors").exists() {
         "breeze_cursors"
@@ -457,22 +478,29 @@ fn main() -> Result<()> {
         "default"
     };
 
-    env::set_var("GTK_THEME", "Adwaita:dark");
+    // Respect user's appearance.toml preference instead of forcing Adwaita:dark on Light mode users
+    let is_light = corten_config::ConfigManager::<corten_config::AppearanceConfig>::load_or_default("appearance")
+        .map(|c| matches!(c.get().theme_mode, corten_config::ThemeModeChoice::Light))
+        .unwrap_or(false);
+    let (gtk_theme, color_scheme) = if is_light {
+        ("Adwaita", "prefer-light")
+    } else {
+        ("Adwaita:dark", "prefer-dark")
+    };
+
+    env::set_var("GTK_THEME", gtk_theme);
     env::set_var("XCURSOR_THEME", cursor_theme);
     env::set_var("XCURSOR_SIZE", "24");
 
-    // Apply dark color scheme preference, modern cursor, and Corten orange accent to GTK / GNOME settings if gsettings exists
+    // Sync GTK / GNOME settings with user's configured theme
     let _ = Command::new("gsettings")
-        .args(["set", "org.gnome.desktop.interface", "color-scheme", "prefer-dark"])
+        .args(["set", "org.gnome.desktop.interface", "color-scheme", color_scheme])
         .status();
     let _ = Command::new("gsettings")
-        .args(["set", "org.gnome.desktop.interface", "gtk-theme", "Adwaita-dark"])
+        .args(["set", "org.gnome.desktop.interface", "gtk-theme", if is_light { "Adwaita" } else { "Adwaita-dark" }])
         .status();
     let _ = Command::new("gsettings")
         .args(["set", "org.gnome.desktop.interface", "cursor-theme", cursor_theme])
-        .status();
-    let _ = Command::new("gsettings")
-        .args(["set", "org.gnome.desktop.interface", "accent-color", "orange"])
         .status();
 
     // Synchronize WAYLAND_DISPLAY and XDG_CURRENT_DESKTOP with systemd/D-Bus user environment
@@ -490,11 +518,8 @@ fn main() -> Result<()> {
         ])
         .status();
 
-    // Respect the system's graphics stack. NVIDIA-specific overrides must be
-    // supplied by the administrator/environment, never forced on AMD/Intel.
-    if env::var_os("WGPU_BACKEND").is_none() {
-        env::set_var("WGPU_BACKEND", "vulkan");
-    }
+    // Allow wgpu to auto-select the best backend (Vulkan -> OpenGL -> Software)
+    // so VMs and older GPUs without Vulkan do not crash.
 
     // Setup POSIX signals (SIGINT, SIGTERM, SIGHUP) handler and optional interactive TTY stdin
     let running = Arc::new(AtomicBool::new(true));

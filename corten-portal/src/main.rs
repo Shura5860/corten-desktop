@@ -74,6 +74,21 @@ impl SettingsPortal {
     }
 }
 
+/// Percent-encodes a filesystem path into a valid RFC 3986 `file://` URI
+/// so spaces, `#`, `?`, `%`, and UTF-8 characters (e.g. Turkish letters) work in all portal clients.
+fn encode_file_uri(path: &str) -> String {
+    let mut out = String::from("file://");
+    for &b in path.as_bytes() {
+        let is_unreserved = b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'.' | b'_' | b'~');
+        if is_unreserved {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
+}
+
 /// XDG Desktop Portal FileChooser Implementation
 pub struct FileChooserPortal;
 
@@ -146,7 +161,7 @@ impl FileChooserPortal {
                     .split('|')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
-                    .map(|p| format!("file://{}", p))
+                    .map(|p| encode_file_uri(&p))
                     .collect();
 
                 if !selected_paths.is_empty() {
@@ -163,22 +178,28 @@ impl FileChooserPortal {
                 (1, results)
             }
             Err(e) => {
-                warn!("zenity failed: {:?}, falling back to corten-files", e);
-                let mut cmd = tokio::process::Command::new("corten-files");
-                cmd.arg(&initial_folder);
-                if let Ok(status) = cmd.status().await {
-                    if status.success() {
-                        let uri = format!("file://{}", initial_folder);
-                        if let Ok(owned) = OwnedValue::try_from(Value::from(vec![uri])) {
-                            results.insert("uris".to_string(), owned);
-                        }
-                        (0, results)
-                    } else {
-                        (1, results)
-                    }
+                warn!("zenity failed: {:?}, trying kdialog fallback", e);
+                let kdialog_mode = if directory {
+                    "--getexistingdirectory"
                 } else {
-                    (2, results)
+                    "--getopenfilename"
+                };
+                if let Ok(out) = tokio::process::Command::new("kdialog")
+                    .args([kdialog_mode, &initial_folder])
+                    .output()
+                    .await
+                {
+                    if out.status.success() {
+                        let chosen = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                        if !chosen.is_empty() {
+                            if let Ok(owned) = OwnedValue::try_from(Value::from(vec![encode_file_uri(&chosen)])) {
+                                results.insert("uris".to_string(), owned);
+                            }
+                            return (0, results);
+                        }
+                    }
                 }
+                (1, results)
             }
         }
     }
@@ -241,7 +262,7 @@ impl FileChooserPortal {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let path = stdout.trim();
                 if !path.is_empty() {
-                    let uri = format!("file://{}", path);
+                    let uri = encode_file_uri(path);
                     if let Ok(owned) = OwnedValue::try_from(Value::from(vec![uri])) {
                         results.insert("uris".to_string(), owned);
                     }
@@ -314,7 +335,7 @@ impl ScreenshotPortal {
                                 }
                             }
                             if let Some((path, _)) = latest_file {
-                                let uri = format!("file://{}", path.display());
+                                let uri = encode_file_uri(&path.to_string_lossy());
                                 let mut results = HashMap::new();
                                 if let Ok(owned) = OwnedValue::try_from(Value::from(uri)) {
                                     results.insert("uri".to_string(), owned);

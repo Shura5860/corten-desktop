@@ -63,15 +63,16 @@ impl XwmHandler for CortenCompositor {
             .layout
             .evaluate_window_on_commit(&smithay_window, &self.window_rules);
         if should_float {
+            let usable = self.usable_area();
             let geo = window.geometry();
-            let rect = Rectangle::new(
-                (
-                    geo.loc.x.max(40),
-                    geo.loc.y.max((self.panel_height + 24).max(40)),
-                )
-                    .into(),
-                (geo.size.w.clamp(120, 1600), geo.size.h.clamp(80, 1000)).into(),
-            );
+            let titlebar_h = crate::layout::window_titlebar_height(&smithay_window, false);
+            let max_w = (usable.size.w - 32).max(200);
+            let max_h = (usable.size.h - 32).max(160);
+            let w = geo.size.w.clamp(160, max_w);
+            let h = (geo.size.h + titlebar_h).clamp(100 + titlebar_h, max_h);
+            let x = geo.loc.x.clamp(usable.loc.x + 16, (usable.loc.x + usable.size.w - w).max(usable.loc.x));
+            let y = geo.loc.y.clamp(usable.loc.y + 16, (usable.loc.y + usable.size.h - h).max(usable.loc.y));
+            let rect = Rectangle::new((x, y).into(), (w, h).into());
             self.layout.set_floating_geometry(&smithay_window, rect);
             configure_window_geometry(&smithay_window, rect);
         } else {
@@ -156,9 +157,17 @@ impl XwmHandler for CortenCompositor {
 
         if window.is_override_redirect() || is_floating.is_some() || !window.is_mapped() {
             if let Some(win) = is_floating {
-                self.layout.set_floating_geometry(&win, geo);
+                let titlebar_h = crate::layout::window_titlebar_height(&win, window.is_fullscreen());
+                // Convert client geometry into outer frame geometry (avoiding 36px drift)
+                let frame_geo = Rectangle::new(
+                    (geo.loc.x, (geo.loc.y - titlebar_h).max(0)).into(),
+                    (geo.size.w.max(160), (geo.size.h + titlebar_h).max(100 + titlebar_h)).into(),
+                );
+                self.layout.set_floating_geometry(&win, frame_geo);
+                configure_window_geometry(&win, frame_geo);
+            } else {
+                let _ = window.configure(geo);
             }
-            let _ = window.configure(geo);
         } else {
             let _ = window.configure(None);
         }
@@ -179,21 +188,55 @@ impl XwmHandler for CortenCompositor {
             .find(|win| window_stable_id(win) == wid)
             .cloned()
         {
-            self.layout.set_floating_geometry(&win, geometry);
+            let titlebar_h = crate::layout::window_titlebar_height(&win, window.is_fullscreen());
+            // Reconstruct outer frame geometry so X11 client y+titlebar_h does not drift downwards!
+            let frame_geo = Rectangle::new(
+                (geometry.loc.x, (geometry.loc.y - titlebar_h).max(0)).into(),
+                (geometry.size.w.max(160), (geometry.size.h + titlebar_h).max(100 + titlebar_h)).into(),
+            );
+            self.layout.set_floating_geometry(&win, frame_geo);
         }
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let _ = window.set_maximized(true);
-        let area = self.usable_area();
-        let _ = window.configure(area);
+        let wid = (1u64 << 32) | u64::from(window.window_id());
+        let target = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| window_stable_id(w) == wid)
+            .cloned();
+        if let Some(win) = target {
+            let area = self.usable_area_for_window(&win);
+            self.layout.set_maximized(&win, area, true);
+            self.sync_ipc_snapshot();
+        } else {
+            let _ = window.set_maximized(true);
+            let area = self.usable_area();
+            let _ = window.configure(area);
+        }
     }
 
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let _ = window.set_maximized(false);
-        let usable = self.usable_area();
-        for (w, rect) in self.layout.arrange(usable) {
-            configure_window_geometry(&w, rect);
+        let wid = (1u64 << 32) | u64::from(window.window_id());
+        let target = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| window_stable_id(w) == wid)
+            .cloned();
+        if let Some(win) = target {
+            let area = self.usable_area_for_window(&win);
+            self.layout.set_maximized(&win, area, false);
+            self.sync_ipc_snapshot();
+        } else {
+            let _ = window.set_maximized(false);
+            let usable = self.usable_area();
+            for (w, rect) in self.layout.arrange(usable) {
+                configure_window_geometry(&w, rect);
+            }
         }
     }
 
@@ -201,7 +244,18 @@ impl XwmHandler for CortenCompositor {
         let _ = window.set_fullscreen(true);
         let smithay_win = Window::new_x11_window(window.clone());
         self.layout.set_fullscreen(&smithay_win, true);
-        let full = Rectangle::from_size(self.output_size);
+        let target_output = self.output_for_window(&smithay_win);
+        let scale = target_output.current_scale().fractional_scale().max(0.5);
+        let full_size = target_output
+            .current_mode()
+            .map(|m| {
+                smithay::utils::Size::from((
+                    (m.size.w as f64 / scale).round() as i32,
+                    (m.size.h as f64 / scale).round() as i32,
+                ))
+            })
+            .unwrap_or(self.output_size);
+        let full = Rectangle::from_size(full_size);
         let _ = window.configure(full);
     }
 
@@ -209,28 +263,87 @@ impl XwmHandler for CortenCompositor {
         let _ = window.set_fullscreen(false);
         let smithay_win = Window::new_x11_window(window);
         self.layout.set_fullscreen(&smithay_win, false);
-        let usable = self.usable_area();
-        for (w, rect) in self.layout.arrange(usable) {
-            configure_window_geometry(&w, rect);
+        let usable = self.usable_area_for_window(&smithay_win);
+        if let Some(geo) = self.layout.floating_geometry(&smithay_win) {
+            configure_window_geometry(&smithay_win, geo);
+        } else {
+            for (w, rect) in self.layout.arrange(usable) {
+                configure_window_geometry(&w, rect);
+            }
         }
     }
 
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        self.remove_x11_window(&window);
+        let wid = (1u64 << 32) | u64::from(window.window_id());
+        if let Some(win) = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| window_stable_id(w) == wid)
+            .cloned()
+        {
+            self.minimize_window(&win);
+        }
     }
 
-    fn unminimize_request(&mut self, _xwm: XwmId, _window: X11Surface) {}
+    fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let wid = (1u64 << 32) | u64::from(window.window_id());
+        let _ = self.focus_window_by_id(wid);
+    }
 
     fn resize_request(
         &mut self,
         _xwm: XwmId,
-        _window: X11Surface,
+        window: X11Surface,
         _button: u32,
-        _resize_edge: X11ResizeEdge,
+        resize_edge: X11ResizeEdge,
     ) {
+        let wid = (1u64 << 32) | u64::from(window.window_id());
+        let target = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| window_stable_id(w) == wid)
+            .cloned();
+        if let Some(win) = target {
+            let rect = self.layout.floating_geometry(&win).unwrap_or_else(|| {
+                let usable = self.usable_area_for_window(&win);
+                self.layout
+                    .arrange(usable)
+                    .into_iter()
+                    .find(|(w, _)| w == &win)
+                    .map(|(_, r)| r)
+                    .unwrap_or_else(|| window.geometry())
+            });
+            let edge = crate::layout::ResizeEdge::from_x11(resize_edge);
+            self.resized_window = Some((win, self.cursor_location, rect, edge));
+        }
     }
 
-    fn move_request(&mut self, _xwm: XwmId, _window: X11Surface, _button: u32) {}
+    fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
+        let wid = (1u64 << 32) | u64::from(window.window_id());
+        let target = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| window_stable_id(w) == wid)
+            .cloned();
+        if let Some(win) = target {
+            let rect = self.layout.floating_geometry(&win).unwrap_or_else(|| {
+                let usable = self.usable_area_for_window(&win);
+                self.layout
+                    .arrange(usable)
+                    .into_iter()
+                    .find(|(w, _)| w == &win)
+                    .map(|(_, r)| r)
+                    .unwrap_or_else(|| window.geometry())
+            });
+            self.dragged_window = Some((win, self.cursor_location, rect));
+        }
+    }
 
     fn allow_selection_access(&mut self, _xwm: XwmId, _selection: SelectionTarget) -> bool {
         true
@@ -303,6 +416,22 @@ impl XwmHandler for CortenCompositor {
 impl CortenCompositor {
     pub fn remove_x11_window(&mut self, x11: &X11Surface) {
         let wid = (1u64 << 32) | u64::from(x11.window_id());
+        if self
+            .dragged_window
+            .as_ref()
+            .is_some_and(|(w, _, _)| window_stable_id(w) == wid)
+        {
+            self.dragged_window = None;
+            self.snap_preview = None;
+            self.drag_split_target = None;
+        }
+        if self
+            .resized_window
+            .as_ref()
+            .is_some_and(|(w, _, _, _)| window_stable_id(w) == wid)
+        {
+            self.resized_window = None;
+        }
         let mut removed = self.layout.remove_x11_surface(wid);
         for layout in self.output_layouts.values_mut() {
             if layout.remove_x11_surface(wid) {

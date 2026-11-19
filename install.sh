@@ -75,6 +75,13 @@ sudo install -d /usr/share/backgrounds/corten
 if [[ -d assets/wallpapers ]]; then
     sudo install -m 644 assets/wallpapers/* /usr/share/backgrounds/corten/
 fi
+if [[ -d assets/icons/hicolor ]]; then
+    sudo install -d "${SHARE_DIR}/icons/hicolor"
+    sudo cp -r assets/icons/hicolor/* "${SHARE_DIR}/icons/hicolor/"
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        sudo gtk-update-icon-cache -f -t "${SHARE_DIR}/icons/hicolor" || true
+    fi
+fi
 sudo install -d /usr/share/pixmaps
 if [[ -f assets/logo.png ]]; then
     sudo install -m 644 assets/logo.png /usr/share/pixmaps/corten.png
@@ -83,7 +90,7 @@ if [[ -f assets/logos/ai_concept1_aura_core.png ]]; then
     sudo install -m 644 assets/logos/ai_concept1_aura_core.png /usr/share/pixmaps/corten-ai.png
 fi
 
-echo "==> Installing XDG Desktop Portal configuration..."
+echo "==> Installing XDG Desktop Portal configuration & D-Bus service..."
 sudo install -d /usr/share/xdg-desktop-portal/portals
 sudo tee /usr/share/xdg-desktop-portal/portals/corten.portal > /dev/null << 'EOF'
 [portal]
@@ -91,8 +98,22 @@ DBusName=org.freedesktop.impl.portal.desktop.corten
 Interfaces=org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.Screenshot;org.freedesktop.impl.portal.FileChooser;org.freedesktop.impl.portal.Settings;
 UseIn=Corten;corten;
 EOF
+sudo install -d /usr/share/dbus-1/services
+sudo tee /usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.corten.service > /dev/null << EOF
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.corten
+Exec=${BIN_DIR}/corten-portal
+EOF
 if [[ -f corten-portal/corten-portals.conf ]]; then
     sudo install -m 644 corten-portal/corten-portals.conf /usr/share/xdg-desktop-portal/corten-portals.conf
+fi
+
+echo "==> Installing PAM profile for corten-lock..."
+if [[ -d /etc/pam.d && ! -f /etc/pam.d/corten-lock ]]; then
+    sudo tee /etc/pam.d/corten-lock > /dev/null << 'EOF'
+#%PAM-1.0
+auth include login
+EOF
 fi
 
 echo "==> Installing optional systemd user service..."

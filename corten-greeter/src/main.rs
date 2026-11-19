@@ -7,7 +7,10 @@ use std::time::Duration;
 use chrono::Local;
 use corten_auth::AuthController;
 use corten_config::{AppearanceConfig, ConfigManager};
-use corten_theme::{Icon, Palette, PatinaVariant, Radius, ThemeMode, LUCIDE_FONT, LUCIDE_FONT_BYTES};
+use corten_theme::{
+    Icon, Palette, PatinaVariant, Radius, ThemeMode, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS,
+    NOTO_SANS_BYTES,
+};
 use iced::widget::{button, container, row, text, text_input};
 use iced::{Alignment, Element, Length, Subscription, Task};
 use ipc::GreetdClient;
@@ -27,11 +30,13 @@ pub fn main() -> iced::Result {
     .subscription(CortenGreeterApp::subscription)
     .theme(|_| iced::Theme::Dark)
     .font(LUCIDE_FONT_BYTES)
+    .font(NOTO_SANS_BYTES)
+    .default_font(NOTO_SANS)
     .window(iced::window::Settings {
-        size: iced::Size::new(960.0, 720.0),
+        size: iced::Size::new(1280.0, 800.0),
         min_size: Some(iced::Size::new(800.0, 600.0)),
         resizable: true,
-        decorations: true,
+        decorations: false,
         ..Default::default()
     })
     .antialiasing(true)
@@ -74,11 +79,11 @@ impl CortenGreeterApp {
                 if new_time != self.current_time {
                     self.current_time = new_time;
                     self.current_date = now.format("%A, %d %B").to_string();
-                }
-                if let Ok(c) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
-                    let pat = PatinaVariant::from_code(&c.get().patina);
-                    if pat != self.active_patina {
-                        self.active_patina = pat;
+                    if let Ok(c) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
+                        let pat = PatinaVariant::from_code(&c.get().patina);
+                        if pat != self.active_patina {
+                            self.active_patina = pat;
+                        }
                     }
                 }
             }

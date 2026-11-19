@@ -301,10 +301,13 @@ impl XdgShellHandler for CortenCompositor {
                 let existing = self.layout.floating_windows();
                 let count = existing.len();
                 let (min_w, min_h) = crate::layout::window_min_size(&window);
-                let w = 960.min(usable_area.size.w - 48).max(min_w);
-                let h = 640.min(usable_area.size.h - 48).max(min_h + 36);
-                let max_cascade_x = (usable_area.size.w.saturating_sub(w) - 64).max(0);
-                let max_cascade_y = (usable_area.size.h.saturating_sub(h) - 64).max(0);
+                let titlebar_h = crate::layout::window_titlebar_height(&window, false);
+                let avail_w = (usable_area.size.w - 48).max(min_w);
+                let avail_h = (usable_area.size.h - 48).max(min_h + titlebar_h);
+                let w = 960.min(avail_w).max(min_w);
+                let h = 640.min(avail_h).max(min_h + titlebar_h);
+                let max_cascade_x = (usable_area.size.w - w - 64).max(0);
+                let max_cascade_y = (usable_area.size.h - h - 64).max(0);
                 let cascade_x = if max_cascade_x > 0 { (count.saturating_sub(1) as i32 * 52) % max_cascade_x } else { 0 };
                 let cascade_y = if max_cascade_y > 0 { (count.saturating_sub(1) as i32 * 44) % max_cascade_y } else { 0 };
 
@@ -316,12 +319,18 @@ impl XdgShellHandler for CortenCompositor {
                     if other != &window {
                         if let Some(other_geo) = self.layout.floating_geometry(other) {
                             if (candidate_x - other_geo.loc.x).abs() < 40 && (candidate_y - other_geo.loc.y).abs() < 40 {
-                                candidate_x = (candidate_x + 52).min(usable_area.loc.x + max_cascade_x);
-                                candidate_y = (candidate_y + 44).min(usable_area.loc.y + max_cascade_y);
+                                candidate_x = (candidate_x + 52).min(usable_area.loc.x + 36 + max_cascade_x);
+                                candidate_y = (candidate_y + 44).min(usable_area.loc.y + 36 + max_cascade_y);
                             }
                         }
                     }
                 }
+
+                // Clamp within usable area bounds
+                let max_x = (usable_area.loc.x + usable_area.size.w - w).max(usable_area.loc.x);
+                let max_y = (usable_area.loc.y + usable_area.size.h - h).max(usable_area.loc.y);
+                candidate_x = candidate_x.clamp(usable_area.loc.x, max_x);
+                candidate_y = candidate_y.clamp(usable_area.loc.y, max_y);
 
                 Rectangle::new(
                     Point::from((candidate_x, candidate_y)),
@@ -344,11 +353,11 @@ impl XdgShellHandler for CortenCompositor {
                 .unwrap_or_else(|| Rectangle::new(usable_area.loc, usable_area.size))
         };
 
+        let titlebar_h = crate::layout::window_titlebar_height(&window, false);
         surface.with_pending_state(|state| {
-            let client_h = (initial_rect.size.h - 36).max(100);
+            let client_h = (initial_rect.size.h - titlebar_h).max(100);
             state.size = Some((initial_rect.size.w.max(160), client_h).into());
             state.states.set(xdg_toplevel::State::Activated);
-            state.decoration_mode = Some(wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode::ServerSide);
         });
         surface.send_configure();
     }
@@ -364,6 +373,7 @@ impl XdgShellHandler for CortenCompositor {
             .cloned();
 
         if let Some(window) = to_remove {
+            self.clear_window_grabs(&window);
             self.remove_window_from_all_outputs(&window);
             if let Some(new_active) = self.layout.active_window().cloned() {
                 if let Some(surface) = crate::layout::window_wl_surface(&new_active) {
@@ -376,7 +386,19 @@ impl XdgShellHandler for CortenCompositor {
         }
     }
 
-    fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
+    fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
+        let mut geo = positioner.get_geometry();
+        let usable = self.usable_area();
+        // Clamp popup geometry so menus stay visible inside the screen bounds
+        if geo.size.w > 0 && geo.size.h > 0 {
+            let max_w = usable.size.w.max(100);
+            let max_h = usable.size.h.max(100);
+            geo.size.w = geo.size.w.min(max_w);
+            geo.size.h = geo.size.h.min(max_h);
+        }
+        surface.with_pending_state(|state| {
+            state.geometry = geo;
+        });
         if let Err(err) = self
             .popup_manager
             .track_popup(PopupKind::Xdg(surface.clone()))
@@ -390,10 +412,16 @@ impl XdgShellHandler for CortenCompositor {
 
     fn reposition_request(
         &mut self,
-        _surface: PopupSurface,
-        _positioner: PositionerState,
-        _token: u32,
+        surface: PopupSurface,
+        positioner: PositionerState,
+        token: u32,
     ) {
+        let geo = positioner.get_geometry();
+        surface.with_pending_state(|state| {
+            state.geometry = geo;
+        });
+        surface.send_repositioned(token);
+        let _ = surface.send_configure();
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
@@ -406,13 +434,8 @@ impl XdgShellHandler for CortenCompositor {
             .find(|w| w.toplevel().map(|t| t == &surface).unwrap_or(false))
             .cloned();
 
-        let usable_area = {
-            let mut map = layer_map_for_output(&self.output);
-            map.arrange();
-            map.non_exclusive_zone()
-        };
-
         if let Some(win) = to_max {
+            let usable_area = self.usable_area_for_window(&win);
             self.layout.set_maximized(&win, usable_area, true);
             self.sync_ipc_snapshot();
         } else {
@@ -433,13 +456,8 @@ impl XdgShellHandler for CortenCompositor {
             .find(|w| w.toplevel().map(|t| t == &surface).unwrap_or(false))
             .cloned();
 
-        let usable_area = {
-            let mut map = layer_map_for_output(&self.output);
-            map.arrange();
-            map.non_exclusive_zone()
-        };
-
         if let Some(win) = to_unmax {
+            let usable_area = self.usable_area_for_window(&win);
             self.layout.set_maximized(&win, usable_area, false);
             self.sync_ipc_snapshot();
         } else {
@@ -450,11 +468,34 @@ impl XdgShellHandler for CortenCompositor {
         }
     }
 
-    fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
         info!("Compositor: Fullscreen requested for toplevel");
-        let win = Window::new_wayland_window(surface.clone());
+        let win = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| w.toplevel().map(|t| t == &surface).unwrap_or(false))
+            .cloned()
+            .unwrap_or_else(|| Window::new_wayland_window(surface.clone()));
+
         self.layout.set_fullscreen(&win, true);
-        let full_size = self.output_size;
+
+        let target_output = output
+            .as_ref()
+            .and_then(smithay::output::Output::from_resource)
+            .unwrap_or_else(|| self.output_for_window(&win));
+        let scale = target_output.current_scale().fractional_scale().max(0.5);
+        let full_size = target_output
+            .current_mode()
+            .map(|m| {
+                Size::from((
+                    (m.size.w as f64 / scale).round() as i32,
+                    (m.size.h as f64 / scale).round() as i32,
+                ))
+            })
+            .unwrap_or(self.output_size);
+
         surface.with_pending_state(|state| {
             state.states.set(xdg_toplevel::State::Fullscreen);
             state.size = Some(full_size);
@@ -464,10 +505,35 @@ impl XdgShellHandler for CortenCompositor {
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         info!("Compositor: Unfullscreen requested for toplevel");
-        let win = Window::new_wayland_window(surface.clone());
+        let win = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| w.toplevel().map(|t| t == &surface).unwrap_or(false))
+            .cloned()
+            .unwrap_or_else(|| Window::new_wayland_window(surface.clone()));
+
         self.layout.set_fullscreen(&win, false);
+
+        let usable_area = self.usable_area_for_window(&win);
+        let restored_rect = if let Some(geo) = self.layout.floating_geometry(&win) {
+            geo
+        } else {
+            self.layout
+                .arrange(usable_area)
+                .into_iter()
+                .find(|(w, _)| w == &win)
+                .map(|(_, r)| r)
+                .unwrap_or(usable_area)
+        };
+        let titlebar_h = crate::layout::window_titlebar_height(&win, false);
         surface.with_pending_state(|state| {
             state.states.unset(xdg_toplevel::State::Fullscreen);
+            state.size = Some((
+                restored_rect.size.w.max(160),
+                (restored_rect.size.h - titlebar_h).max(100),
+            ).into());
         });
         surface.send_configure();
     }
@@ -479,7 +545,15 @@ impl XdgShellHandler for CortenCompositor {
             .cloned();
         if let Some(window) = win {
             let rect = self.layout.floating_geometry(&window)
-                .unwrap_or_else(|| window.geometry());
+                .unwrap_or_else(|| {
+                    let usable = self.usable_area_for_window(&window);
+                    self.layout
+                        .arrange(usable)
+                        .into_iter()
+                        .find(|(w, _)| w == &window)
+                        .map(|(_, r)| r)
+                        .unwrap_or_else(|| window.geometry())
+                });
             self.dragged_window = Some((window, self.cursor_location, rect));
         }
     }
@@ -489,16 +563,25 @@ impl XdgShellHandler for CortenCompositor {
         surface: ToplevelSurface,
         _seat: WlSeat,
         _serial: Serial,
-        _edges: xdg_toplevel::ResizeEdge,
+        edges: xdg_toplevel::ResizeEdge,
     ) {
-        info!("Compositor: Resize requested for toplevel via XDG Shell");
+        info!("Compositor: Resize requested for toplevel via XDG Shell ({:?})", edges);
         let win = self.layout.windows().iter().chain(self.layout.floating_windows().iter())
             .find(|w| w.toplevel().map(|t| t == &surface).unwrap_or(false))
             .cloned();
         if let Some(window) = win {
             let rect = self.layout.floating_geometry(&window)
-                .unwrap_or_else(|| window.geometry());
-            self.resized_window = Some((window, self.cursor_location, rect));
+                .unwrap_or_else(|| {
+                    let usable = self.usable_area_for_window(&window);
+                    self.layout
+                        .arrange(usable)
+                        .into_iter()
+                        .find(|(w, _)| w == &window)
+                        .map(|(_, r)| r)
+                        .unwrap_or_else(|| window.geometry())
+                });
+            let resize_edge = crate::layout::ResizeEdge::from_xdg(edges);
+            self.resized_window = Some((window, self.cursor_location, rect, resize_edge));
         }
     }
 
@@ -790,26 +873,72 @@ impl smithay::wayland::dmabuf::DmabufHandler for CortenCompositor {
     }
 }
 
-// 9. XDG Decoration Handler (Advertises Client/Server decoration so windows render close/minimize/maximize buttons)
+// 9. XDG Decoration Handler (Honors CSD requests from apps like VS Code/Brave/Antigravity/GTK4; defaults to SSD when negotiated)
 impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for CortenCompositor {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
         use wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
         toplevel.with_pending_state(|state| {
             state.decoration_mode = Some(Mode::ServerSide);
         });
-        toplevel.send_configure();
+        if let Some(win) = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| w.toplevel().map(|t| t == &toplevel).unwrap_or(false))
+            .cloned()
+        {
+            let usable = self.usable_area_for_window(&win);
+            let rect = self
+                .layout
+                .floating_geometry(&win)
+                .or_else(|| {
+                    self.layout
+                        .arrange(usable)
+                        .into_iter()
+                        .find(|(w, _)| w == &win)
+                        .map(|(_, r)| r)
+                })
+                .unwrap_or(usable);
+            crate::layout::configure_window_geometry(&win, rect);
+        } else {
+            toplevel.send_configure();
+        }
     }
 
     fn request_mode(
         &mut self,
         toplevel: ToplevelSurface,
-        _mode: wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode,
+        mode: wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode,
     ) {
-        use wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
+        info!("Compositor: Client requested XDG decoration mode: {:?}", mode);
         toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(Mode::ServerSide);
+            state.decoration_mode = Some(mode);
         });
-        let _ = toplevel.send_configure();
+        if let Some(win) = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| w.toplevel().map(|t| t == &toplevel).unwrap_or(false))
+            .cloned()
+        {
+            let usable = self.usable_area_for_window(&win);
+            let rect = self
+                .layout
+                .floating_geometry(&win)
+                .or_else(|| {
+                    self.layout
+                        .arrange(usable)
+                        .into_iter()
+                        .find(|(w, _)| w == &win)
+                        .map(|(_, r)| r)
+                })
+                .unwrap_or(usable);
+            crate::layout::configure_window_geometry(&win, rect);
+        } else {
+            let _ = toplevel.send_configure();
+        }
     }
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {

@@ -1185,14 +1185,17 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to add keyboard: {:?}", e))?;
     let pointer = state.seat.add_pointer();
 
-    // Create Wayland listening socket
-    let socket_name = "corten-0";
-    let listener = ListeningSocket::bind(socket_name)?;
+    // Create Wayland listening socket (auto-select corten-0..31 to avoid collisions)
+    let listener = ListeningSocket::bind_auto("corten", 0..32)?;
+    let socket_name = listener
+        .socket_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "corten-0".to_string());
     info!(
         "Corten Compositor listening on Wayland socket: {}",
         socket_name
     );
-    std::env::set_var("WAYLAND_DISPLAY", socket_name);
+    std::env::set_var("WAYLAND_DISPLAY", &socket_name);
 
     let mut clients = Vec::new();
     let start_time = Instant::now();
@@ -1551,8 +1554,8 @@ fn main() -> anyhow::Result<()> {
                                             modifiers.shift,
                                         ) => {
                                         info!("Compositor Hotkey: Super+Space/D triggered (Launch Spotlight Launcher Toggle)");
-                                        let check = std::process::Command::new("killall")
-                                            .args(["-q", "corten-launcher"])
+                                        let check = std::process::Command::new("pkill")
+                                            .args(["-x", "corten-launcher"])
                                             .status();
                                         if let Ok(status) = check {
                                             if status.success() {
@@ -1585,8 +1588,8 @@ fn main() -> anyhow::Result<()> {
                                     keysyms::KEY_F1 | keysyms::KEY_slash | keysyms::KEY_question
                                         if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
                                         info!("Compositor Hotkey: Super+F1 / Super+? triggered (Launch Shortcuts Cheat Sheet)");
-                                        let check = std::process::Command::new("killall")
-                                            .args(["-q", "corten-launcher"])
+                                        let check = std::process::Command::new("pkill")
+                                            .args(["-x", "corten-launcher"])
                                             .status();
                                         if let Ok(status) = check {
                                             if status.success() {
@@ -2006,20 +2009,28 @@ fn main() -> anyhow::Result<()> {
                             }
                             if rect.to_f64().contains(loc) {
                                 let is_fs = state.layout.is_fullscreen(&window);
-                                let titlebar_h = if is_fs { 0.0 } else { 36.0 };
-                                if (loc.y - rect.loc.y as f64) < titlebar_h {
+                                let titlebar_h = layout::window_titlebar_height(&window, is_fs) as f64;
+                                if titlebar_h > 0.0 && (loc.y - rect.loc.y as f64) < titlebar_h {
                                     // Pointer is over the server-side titlebar header!
                                     // DO NOT route motion to client surface.
                                     focused_surface = None;
                                     break;
                                 }
-                                let rel_point = loc - Point::from((rect.loc.x as f64, rect.loc.y as f64 + titlebar_h));
+                                let csd_offset = layout::window_csd_offset(&window);
+                                let origin = Point::from((
+                                    (rect.loc.x - csd_offset.x) as f64,
+                                    (rect.loc.y - csd_offset.y) as f64 + titlebar_h,
+                                ));
+                                let rel_point = loc - origin;
                                 if let Some((surface, sub_loc)) = window.surface_under(rel_point, WindowSurfaceType::all()) {
-                                    let surface_origin = (Point::from((rect.loc.x, rect.loc.y + titlebar_h as i32)) + sub_loc).to_f64();
+                                    let surface_origin = Point::from((
+                                        origin.x + sub_loc.x as f64,
+                                        origin.y + sub_loc.y as f64,
+                                    ));
                                     focused_surface = Some((surface, surface_origin));
                                     break;
                                 } else if let Some(surface) = layout::window_wl_surface(&window) {
-                                    focused_surface = Some((surface, (rect.loc.x as f64, rect.loc.y as f64 + titlebar_h).into()));
+                                    focused_surface = Some((surface, origin));
                                     break;
                                 }
                             }
@@ -2163,21 +2174,27 @@ fn main() -> anyhow::Result<()> {
                                 state.drag_split_target = None;
                             }
                         }
-                    } else if let Some((ref window, resize_start_cursor, initial_rect)) = state.resized_window.clone() {
-                        let delta_w = (loc.x - resize_start_cursor.x).round() as i32;
-                        let delta_h = (loc.y - resize_start_cursor.y).round() as i32;
-                        let mut new_rect = initial_rect;
-                        let (min_w, min_h) = layout::window_min_size(window);
-                        new_rect.size.w = (initial_rect.size.w + delta_w).max(min_w);
-                        new_rect.size.h = (initial_rect.size.h + delta_h).max(min_h + 36);
-                        let usable_area = {
-                            let mut map = layer_map_for_output(&state.output);
-                            map.arrange();
-                            map.non_exclusive_zone()
-                        };
+                    } else if let Some((ref window, resize_start_cursor, initial_rect, resize_edge)) = state.resized_window.clone() {
+                        let delta = Point::from((
+                            loc.x - resize_start_cursor.x,
+                            loc.y - resize_start_cursor.y,
+                        ));
+                        let min_size = layout::window_min_size(window);
+                        let max_size = layout::window_max_size(window);
+                        let titlebar_h = layout::window_titlebar_height(window, state.layout.is_fullscreen(window));
+                        let new_rect = layout::compute_resized_rect(
+                            initial_rect,
+                            resize_edge,
+                            delta,
+                            min_size,
+                            max_size,
+                            titlebar_h,
+                        );
+                        let usable_area = state.usable_area_for_window(window);
                         let screen_bounds = {
-                            let scale = state.output.current_scale().fractional_scale();
-                            let size = state.output
+                            let target_out = state.output_for_window(window);
+                            let scale = target_out.current_scale().fractional_scale();
+                            let size = target_out
                                 .current_mode()
                                 .map(|m| smithay::utils::Size::from(((m.size.w as f64 / scale).round() as i32, (m.size.h as f64 / scale).round() as i32)))
                                 .unwrap_or(usable_area.size);
@@ -2373,7 +2390,6 @@ fn main() -> anyhow::Result<()> {
                                 let rel_win_x = state.cursor_location.x - rect.loc.x as f64;
                                 let rel_win_y = state.cursor_location.y - rect.loc.y as f64;
                                 let w_f64 = rect.size.w as f64;
-                                let h_f64 = rect.size.h as f64;
 
                                 if button_code == 1 || button_code == 272 {
                                     if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, state.cursor_location) {
@@ -2395,8 +2411,12 @@ fn main() -> anyhow::Result<()> {
                                         state.sync_ipc_snapshot();
                                         return;
                                     }
-                                    if (0.0..=36.0).contains(&rel_win_y) {
-                                        // Clicked inside the Window Titlebar!
+                                    let titlebar_h = layout::window_titlebar_height(
+                                        &window,
+                                        state.layout.is_fullscreen(&window),
+                                    ) as f64;
+                                    if titlebar_h > 0.0 && (0.0..=titlebar_h).contains(&rel_win_y) {
+                                        // Clicked inside the Server-Side Window Titlebar!
                                         let win_id = crate::layout::window_stable_id(&window);
                                         let tabs = state.layout.window_tabs_metadata(win_id);
                                         if let Some(tab_idx) = crate::layout::hit_test_titlebar_tab(
@@ -2424,11 +2444,7 @@ fn main() -> anyhow::Result<()> {
                                             return;
                                         } else if rel_win_x >= (w_f64 - 58.0) && rel_win_x < (w_f64 - 32.0) {
                                             // Maximize / Restore toggle clicked
-                                            let usable_area = {
-                                                let mut map = layer_map_for_output(&state.output);
-                                                map.arrange();
-                                                map.non_exclusive_zone()
-                                            };
+                                            let usable_area = state.usable_area_for_window(&window);
                                             info!("Window Titlebar: Maximize toggle clicked on {:?}", window);
                                             state.layout.toggle_maximize(&window, usable_area);
                                             state.sync_ipc_snapshot();
@@ -2443,11 +2459,7 @@ fn main() -> anyhow::Result<()> {
                                             // Check double click to maximize / restore
                                             if let Some((prev_win, prev_instant)) = state.last_titlebar_click.take() {
                                                 if prev_win == window && prev_instant.elapsed().as_millis() < 320 {
-                                                    let usable_area = {
-                                                        let mut map = layer_map_for_output(&state.output);
-                                                        map.arrange();
-                                                        map.non_exclusive_zone()
-                                                    };
+                                                    let usable_area = state.usable_area_for_window(&window);
                                                     info!("Window Titlebar: Double-click maximize toggle on {:?}", window);
                                                     state.layout.toggle_maximize(&window, usable_area);
                                                     state.sync_ipc_snapshot();
@@ -2460,11 +2472,7 @@ fn main() -> anyhow::Result<()> {
                                             info!("Window Titlebar: Initiating drag on {:?}", window);
                                             let mut drag_rect = rect;
                                             if state.layout.is_maximized(&window) {
-                                                let usable_area = {
-                                                    let mut map = layer_map_for_output(&state.output);
-                                                    map.arrange();
-                                                    map.non_exclusive_zone()
-                                                };
+                                                let usable_area = state.usable_area_for_window(&window);
                                                 let restored = state.layout.set_maximized(&window, usable_area, false);
                                                 let new_x = (state.cursor_location.x - (restored.size.w as f64 * 0.5)).round() as i32;
                                                 let new_y = state.cursor_location.y.round() as i32 - 12;
@@ -2475,27 +2483,25 @@ fn main() -> anyhow::Result<()> {
                                             state.dragged_window = Some((window.clone(), state.cursor_location, drag_rect));
                                             return;
                                         }
-                                    } else if (rel_win_x >= (w_f64 - 16.0) && rel_win_y >= (h_f64 - 16.0))
-                                        || rel_win_x >= (w_f64 - 8.0)
-                                        || rel_win_y >= (h_f64 - 8.0)
-                                    {
-                                        info!("Main: Edge/Corner click initiating resize on {:?}", window);
-                                        state.resized_window = Some((window.clone(), state.cursor_location, rect));
+                                    } else if titlebar_h > 0.0 {
+                                        if let Some(edge) = layout::hit_test_resize_edge(rect, state.cursor_location, 8.0) {
+                                            info!("Main: Edge/Corner click ({:?}) initiating resize on {:?}", edge, window);
+                                            state.resized_window = Some((window.clone(), state.cursor_location, rect, edge));
+                                        }
                                     }
                                 } else if logo_held && (button_code == 1 || button_code == 272) {
                                     state.dragged_window =
                                         Some((window.clone(), state.cursor_location, rect));
                                 } else if logo_held && (button_code == 3 || button_code == 273) {
                                     state.resized_window =
-                                        Some((window.clone(), state.cursor_location, rect));
+                                        Some((window.clone(), state.cursor_location, rect, layout::ResizeEdge::BottomRight));
                                 }
                             } else if (button_code == 1 || button_code == 272) && !logo_held {
                                 state.selection_box = Some((state.cursor_location, state.cursor_location));
                             } else if (button_code == 2 || button_code == 3 || button_code == 273) && !logo_held {
                                 info!("Right-clicked on empty desktop: Spawning Corten Desktop Context Menu at cursor");
-                                let _ = std::process::Command::new("killall")
-                                    .arg("-9")
-                                    .arg("corten-launcher")
+                                let _ = std::process::Command::new("pkill")
+                                    .args(["-9", "-x", "corten-launcher"])
                                     .status();
                                 let cur_x = state.cursor_location.x.round() as i32;
                                 let cur_y = state.cursor_location.y.round() as i32;
@@ -2676,7 +2682,7 @@ fn main() -> anyhow::Result<()> {
                     let is_blur = crate::layout::is_window_blur_eligible(window, &state.window_rules)
                         || win_alpha < 0.99;
                     if is_blur {
-                        let titlebar_h = 36;
+                        let titlebar_h = layout::window_titlebar_height(window, state.layout.is_fullscreen(window));
                         let body_rect = Rectangle::new(
                             geo.loc + Point::from((0, titlebar_h)),
                             Size::from((geo.size.w.max(10), (geo.size.h - titlebar_h).max(10))),
@@ -2822,11 +2828,13 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     let is_fs = state.layout.is_fullscreen(window);
-                    let titlebar_h = if is_fs { 0 } else { 36 };
+                    let titlebar_h = layout::window_titlebar_height(window, is_fs);
+                    let csd_offset = layout::window_csd_offset(window);
 
                     // Render window surface content (both Wayland toplevels and XWayland surfaces)
                     if let Some(surface) = layout::window_wl_surface(window) {
-                        let client_phys_loc = (shifted_rect.loc + Point::from((0, titlebar_h)))
+                        let client_logical_loc = shifted_rect.loc - csd_offset + Point::from((0, titlebar_h));
+                        let client_phys_loc = client_logical_loc
                             .to_physical_precise_round(fractional_scale);
                         let win_alpha = state.layout.window_alpha(window);
                         let window_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
@@ -2838,7 +2846,7 @@ fn main() -> anyhow::Result<()> {
                                 win_alpha,
                                 Kind::Unspecified,
                             );
-                        if is_fs {
+                        if is_fs || titlebar_h == 0 {
                             elements.extend(window_elements.into_iter().map(CustomRenderElement::from));
                         } else {
                             let body = Rectangle::new(
@@ -2851,7 +2859,7 @@ fn main() -> anyhow::Result<()> {
 
                         // Render any popups (context menus, dropdowns)
                         for (popup, popup_offset) in PopupManager::popups_for_surface(&surface) {
-                            let popup_loc = (shifted_rect.loc + Point::from((0, titlebar_h)) + popup_offset)
+                            let popup_loc = (client_logical_loc + popup_offset)
                                 .to_physical_precise_round(fractional_scale);
                             let popup_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                                 render_elements_from_surface_tree(
@@ -2867,8 +2875,8 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
 
-                    // Render clean Corten titlebar & controls IN DEDICATED HEADER STRIP (Never covered by client)
-                    if !is_fs {
+                    // Render clean Corten titlebar & controls ONLY for Server-Side Decorated (SSD) windows
+                    if titlebar_h > 0 {
                         let is_max = state.layout.is_maximized(window);
                         let is_tiled = state.layout.is_window_tiled(window);
                         let win_id = layout::window_stable_id(window);
@@ -3120,6 +3128,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             // ext-session-lock surfaces are always the final visual layer.
+            state.recover_crashed_lock();
             for (lock_surface, lock_output) in &state.lock_surfaces {
                 if !state.lock_surface_for_output(lock_output, &state.output) {
                     continue;
@@ -3896,19 +3905,29 @@ fn resolve_app_icon_png(app_id: &str, title: &str) -> Option<PathBuf> {
         ("corten-editor", &["corten-editor", "code", "nvim", "rust", "text", "kate", "gedit", "editor"]),
     ];
 
-    let prefixes = [
-        "",
-        "/home/shura/Projects/WaylandDesktopProject/",
+    let mut icon_roots: Vec<PathBuf> = vec![
+        PathBuf::from("assets/icons/hicolor"),
+        PathBuf::from("/usr/local/share/icons/hicolor"),
+        PathBuf::from("/usr/share/icons/hicolor"),
     ];
+    if let Ok(home) = std::env::var("HOME") {
+        icon_roots.push(PathBuf::from(&home).join(".local/share/icons/hicolor"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            icon_roots.push(dir.join("assets/icons/hicolor"));
+            icon_roots.push(dir.join("../../assets/icons/hicolor"));
+        }
+    }
 
     for (target_app, keywords) in corten_candidates {
         if keywords.iter().any(|&kw| combined.contains(kw)) {
-            for prefix in &prefixes {
-                let p48 = PathBuf::from(format!("{}assets/icons/hicolor/48x48/apps/{}.png", prefix, target_app));
+            for root in &icon_roots {
+                let p48 = root.join(format!("48x48/apps/{}.png", target_app));
                 if p48.exists() {
                     return Some(p48);
                 }
-                let p64 = PathBuf::from(format!("{}assets/icons/hicolor/64x64/apps/{}.png", prefix, target_app));
+                let p64 = root.join(format!("64x64/apps/{}.png", target_app));
                 if p64.exists() {
                     return Some(p64);
                 }
@@ -3916,12 +3935,12 @@ fn resolve_app_icon_png(app_id: &str, title: &str) -> Option<PathBuf> {
         }
     }
 
-    for prefix in &prefixes {
-        let p48 = PathBuf::from(format!("{}assets/icons/hicolor/48x48/apps/{}.png", prefix, clean_id));
+    for root in &icon_roots {
+        let p48 = root.join(format!("48x48/apps/{}.png", clean_id));
         if p48.exists() {
             return Some(p48);
         }
-        let p64 = PathBuf::from(format!("{}assets/icons/hicolor/64x64/apps/{}.png", prefix, clean_id));
+        let p64 = root.join(format!("64x64/apps/{}.png", clean_id));
         if p64.exists() {
             return Some(p64);
         }

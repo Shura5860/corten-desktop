@@ -146,6 +146,41 @@ fn secure_wipe(s: &mut String) {
     s.clear();
 }
 
+/// Authenticates using the system SUID-root `polkit-agent-helper-1` binary so `polkitd`
+/// accepts `AuthenticationAgentResponse` (which requires UID 0).
+/// Returns `Some(true)` on success, `Some(false)` on wrong password, or `None` if helper not found.
+fn authenticate_via_polkit_helper(user: &str, cookie: &str, password: &str) -> Option<bool> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let helper_paths = [
+        "/usr/lib/polkit-1/polkit-agent-helper-1",
+        "/usr/libexec/polkit-agent-helper-1",
+        "/usr/lib/policykit-1/polkit-agent-helper-1",
+    ];
+    let helper = helper_paths
+        .iter()
+        .find(|p| std::path::Path::new(p).exists())?;
+
+    let mut child = Command::new(helper)
+        .arg(user)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = writeln!(stdin, "{}", cookie);
+        let _ = writeln!(stdin, "{}", password);
+        let _ = stdin.flush();
+    }
+
+    let output = child.wait_with_output().ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Some(output.status.success() && stdout.contains("SUCCESS"))
+}
+
 fn get_process_start_time() -> u64 {
     if let Ok(stat) = std::fs::read_to_string("/proc/self/stat") {
         if let Some(idx) = stat.rfind(')') {
@@ -243,17 +278,17 @@ impl Application for CortenPolkitApp {
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         match message {
             Message::CheckPending => {
-                if let Ok(app_cfg) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
-                    self.active_patina = PatinaVariant::from_code(&app_cfg.get().patina);
-                    self.theme_mode = match app_cfg.get().theme_mode {
-                        corten_config::ThemeModeChoice::Light => ThemeMode::Light,
-                        corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
-                    };
-                }
-
                 if let Ok(guard) = self.shared.active_request.try_lock() {
                     if let Some(req) = guard.as_ref() {
                         if self.current_request.as_ref().map(|r| &r.cookie) != Some(&req.cookie) {
+                            // Reload appearance config ONLY when a new auth dialog appears (not 5x/sec!)
+                            if let Ok(app_cfg) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
+                                self.active_patina = PatinaVariant::from_code(&app_cfg.get().patina);
+                                self.theme_mode = match app_cfg.get().theme_mode {
+                                    corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                                    corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
+                                };
+                            }
                             self.current_request = Some(req.clone());
                             secure_wipe(&mut self.password_input);
                             self.error_message = None;
@@ -292,24 +327,32 @@ impl Application for CortenPolkitApp {
             Message::SubmitAuth => {
                 if let Some(req) = self.current_request.clone() {
                     let user = req.target_user.clone();
-                    let pass = self.password_input.clone();
+                    let mut pass = self.password_input.clone();
                     let cookie = req.cookie.clone();
                     let uid = req.target_uid;
 
-                    let authenticated = match pam::Client::with_password("polkit-1") {
-                        Ok(mut client) => {
-                            client.conversation_mut().set_credentials(&user, &pass);
-                            client.authenticate().is_ok()
-                        }
-                        Err(_) => {
-                            if let Ok(mut client) = pam::Client::with_password("login") {
-                                client.conversation_mut().set_credentials(&user, &pass);
-                                client.authenticate().is_ok()
-                            } else {
-                                false
-                            }
-                        }
-                    };
+                    // Prefer SUID-root polkit-agent-helper-1 (which submits AuthenticationAgentResponse as root)
+                    let (authenticated, helper_handled_response) =
+                        if let Some(ok) = authenticate_via_polkit_helper(&user, &cookie, &pass) {
+                            (ok, true)
+                        } else {
+                            let ok = match pam::Client::with_password("polkit-1") {
+                                Ok(mut client) => {
+                                    client.conversation_mut().set_credentials(&user, &pass);
+                                    client.authenticate().is_ok()
+                                }
+                                Err(_) => {
+                                    if let Ok(mut client) = pam::Client::with_password("login") {
+                                        client.conversation_mut().set_credentials(&user, &pass);
+                                        client.authenticate().is_ok()
+                                    } else {
+                                        false
+                                    }
+                                }
+                            };
+                            (ok, false)
+                        };
+                    secure_wipe(&mut pass);
 
                     if authenticated {
                         info!("Polkit authentication successful for user '{}' (UID {})", user, uid);
@@ -319,30 +362,32 @@ impl Application for CortenPolkitApp {
                         self.current_request = None;
                         secure_wipe(&mut self.password_input);
 
-                        // Notify PolicyKit Authority via AuthenticationAgentResponse
-                        let dbus_conn = self.shared.dbus_connection.clone();
-                        std::thread::spawn(move || {
-                            futures_lite::future::block_on(async move {
-                                let guard = dbus_conn.lock().await;
-                                if let Some(conn) = guard.as_ref() {
-                                    if let Ok(proxy) = zbus::Proxy::new(
-                                        conn,
-                                        "org.freedesktop.PolicyKit1",
-                                        "/org/freedesktop/PolicyKit1/Authority",
-                                        "org.freedesktop.PolicyKit1.Authority",
-                                    ).await {
-                                        let mut id_map: HashMap<&str, Value> = HashMap::new();
-                                        id_map.insert("uid", Value::U32(uid));
-                                        let identity = ("unix-user", id_map);
-                                        let res: zbus::Result<()> = proxy.call(
-                                            "AuthenticationAgentResponse",
-                                            &(cookie.as_str(), identity),
-                                        ).await;
-                                        info!("PolicyKit Authority AuthenticationAgentResponse result: {:?}", res);
+                        // Only send direct D-Bus response if polkit-agent-helper-1 was not available
+                        if !helper_handled_response {
+                            let dbus_conn = self.shared.dbus_connection.clone();
+                            std::thread::spawn(move || {
+                                futures_lite::future::block_on(async move {
+                                    let guard = dbus_conn.lock().await;
+                                    if let Some(conn) = guard.as_ref() {
+                                        if let Ok(proxy) = zbus::Proxy::new(
+                                            conn,
+                                            "org.freedesktop.PolicyKit1",
+                                            "/org/freedesktop/PolicyKit1/Authority",
+                                            "org.freedesktop.PolicyKit1.Authority",
+                                        ).await {
+                                            let mut id_map: HashMap<&str, Value> = HashMap::new();
+                                            id_map.insert("uid", Value::U32(uid));
+                                            let identity = ("unix-user", id_map);
+                                            let res: zbus::Result<()> = proxy.call(
+                                                "AuthenticationAgentResponse",
+                                                &(cookie.as_str(), identity),
+                                            ).await;
+                                            info!("PolicyKit Authority AuthenticationAgentResponse result: {:?}", res);
+                                        }
                                     }
-                                }
+                                });
                             });
-                        });
+                        }
 
                         return Task::batch(vec![
                             Task::done(Message::LayerAction(LayershellCustomActions::AnchorChange(

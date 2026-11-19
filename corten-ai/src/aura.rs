@@ -752,6 +752,9 @@ impl AuraToolRegistry {
                 if clean_arg.is_empty() {
                     return "⚠️ Okunacak dosya yolunu belirtin.".into();
                 }
+                if let Err(msg) = validate_safe_path(clean_arg, false) {
+                    return msg;
+                }
                 match fs::read_to_string(clean_arg) {
                     Ok(content) => {
                         let snippet: String = content
@@ -769,6 +772,9 @@ impl AuraToolRegistry {
             "write_file" => {
                 if let Some((path, content)) = clean_arg.split_once('|') {
                     let p = path.trim();
+                    if let Err(msg) = validate_safe_path(p, true) {
+                        return msg;
+                    }
                     let bak_path = format!("{}.bak", p);
                     if let Ok(orig) = fs::read_to_string(p) {
                         let _ = fs::write(&bak_path, orig);
@@ -872,13 +878,30 @@ impl AuraToolRegistry {
                 format!("💡 Corten ekran parlaklığı **%{}** olarak ayarlandı.", lvl)
             }
             "corten_take_screenshot" => {
-                let snipper = crate::actions::resolve_corten_bin("corten-snipper");
                 if clean_arg == "selection" {
+                    let snipper = crate::actions::resolve_corten_bin("corten-snipper");
                     let _ = Command::new(snipper).spawn();
                     "📸 Bölgesel ekran yakalama aracı (`corten-snipper`) başlatıldı.".into()
                 } else {
-                    let _ = Command::new(snipper).arg("--fullscreen").spawn();
-                    "📸 Tam ekran görüntüsü alındı.".into()
+                    let out_dir = directories::UserDirs::new()
+                        .and_then(|u| u.picture_dir().map(|p| p.join("Screenshots")))
+                        .unwrap_or_else(|| aura_data_dir().join("screenshots"));
+                    let _ = fs::create_dir_all(&out_dir);
+                    let out_file = out_dir.join(format!("corten_shot_{}.png", current_timestamp_secs()));
+                    let out_str = out_file.to_string_lossy().to_string();
+
+                    let captured = Command::new("grim")
+                        .arg(&out_str)
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false);
+                    if captured {
+                        format!("📸 Tam ekran görüntüsü kaydedildi: `{}`", out_str)
+                    } else {
+                        let ctl = crate::actions::resolve_corten_bin("cortenctl");
+                        let _ = Command::new(ctl).args(["action", "screenshot"]).status();
+                        "📸 Tam ekran görüntüsü kompozitör (`cortenctl`) üzerinden tetiklendi.".into()
+                    }
                 }
             }
             "corten_system_power" => {
@@ -1057,6 +1080,56 @@ impl AuraToolRegistry {
     }
 }
 
+/// Blocks AI file tools from reading/modifying sensitive system or credential paths.
+fn validate_safe_path(raw: &str, is_write: bool) -> Result<(), String> {
+    let p = Path::new(raw);
+    let canonical_or_raw = fs::canonicalize(p)
+        .unwrap_or_else(|_| p.to_path_buf())
+        .to_string_lossy()
+        .to_lowercase();
+
+    let blocked_read_or_write = [
+        "/etc/shadow",
+        "/etc/gshadow",
+        "/etc/sudoers",
+        "/.ssh",
+        "/.gnupg",
+        "/.aws",
+        "/root/",
+        "/proc/kcore",
+        "/dev/",
+    ];
+    for pattern in blocked_read_or_write {
+        if canonical_or_raw.contains(pattern) {
+            HitlSecurityGate::log_decision(
+                if is_write { "file_write" } else { "file_read" },
+                raw,
+                "BLOCKED_SENSITIVE_PATH",
+                pattern,
+            );
+            return Err(format!(
+                "🛑 **Güvenlik Engeli:** `{}` hassas sistem/kimlik bilgisi dizini kapsamındadır ve erişim engellendi.",
+                raw
+            ));
+        }
+    }
+
+    if is_write {
+        let blocked_write = ["/etc/", "/usr/", "/bin/", "/sbin/", "/boot/", "/sys/", "/.bashrc", "/.zshrc", "/.profile"];
+        for pattern in blocked_write {
+            if canonical_or_raw.contains(pattern) {
+                HitlSecurityGate::log_decision("file_write", raw, "BLOCKED_SENSITIVE_WRITE", pattern);
+                return Err(format!(
+                    "🛑 **Güvenlik Engeli:** `{}` üzerine doğrudan yazma işlemi güvenlik politikası gereği engellendi.",
+                    raw
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 // Helper functions for DevOps and Web tools
 fn execute_apply_diff(raw_arg: &str) -> String {
     let (path, search_block, replace_block) = if let Ok(val) = serde_json::from_str::<serde_json::Value>(raw_arg) {
@@ -1076,6 +1149,9 @@ fn execute_apply_diff(raw_arg: &str) -> String {
 
     if path.is_empty() || search_block.is_empty() {
         return "⚠️ Hata: 'path' ve 'search_block' alanları zorunludur.".into();
+    }
+    if let Err(msg) = validate_safe_path(&path, true) {
+        return msg;
     }
 
     let target_path = Path::new(&path);
@@ -1174,6 +1250,9 @@ fn execute_apply_multi_diff(raw_arg: &str) -> String {
 
         if path.is_empty() || search_block.is_empty() {
             return format!("⚠️ Hata [Öğe {}]: 'path' ve 'search' alanları zorunludur.", idx);
+        }
+        if let Err(msg) = validate_safe_path(&path, true) {
+            return msg;
         }
 
         let target_path = Path::new(&path);

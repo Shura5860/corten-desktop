@@ -150,6 +150,7 @@ pub struct CortenCompositor {
         smithay::desktop::Window,
         Point<f64, smithay::utils::Logical>,
         Rectangle<i32, smithay::utils::Logical>,
+        crate::layout::ResizeEdge,
     )>,
     pub split_drag: Option<(Point<f64, smithay::utils::Logical>, f32)>,
     pub snap_preview: Option<Rectangle<i32, smithay::utils::Logical>>,
@@ -165,6 +166,7 @@ pub struct CortenCompositor {
     pub lock_surfaces: Vec<(LockSurface, WlOutput)>,
     pub pending_lock: Option<SessionLocker>,
     pub session_locked: bool,
+    pub last_lock_respawn: Option<Instant>,
     pub last_input: Instant,
     pub screen_sleep_after: Option<Duration>,
     pub suspend_after: Option<Duration>,
@@ -577,16 +579,90 @@ impl CortenCompositor {
     }
 
     pub fn usable_area(&self) -> Rectangle<i32, smithay::utils::Logical> {
-        let size = self
-            .output
+        self.usable_area_for_output(&self.output)
+    }
+
+    /// Resolves the output that currently owns `window`, falling back to the primary output.
+    pub fn output_for_window(&self, window: &Window) -> Output {
+        for out in &self.additional_outputs {
+            if let Some(layout) = self.output_layouts.get(&out.name()) {
+                if layout
+                    .windows()
+                    .iter()
+                    .chain(layout.floating_windows().iter())
+                    .any(|w| w == window)
+                {
+                    return out.clone();
+                }
+            }
+        }
+        self.output.clone()
+    }
+
+    /// Computes the non-exclusive usable work area for a specific output.
+    pub fn usable_area_for_output(&self, output: &Output) -> Rectangle<i32, smithay::utils::Logical> {
+        let mut map = smithay::desktop::layer_map_for_output(output);
+        map.arrange();
+        let zone = map.non_exclusive_zone();
+        if zone.size.w > 0 && zone.size.h > 0 {
+            return zone;
+        }
+        let scale = output.current_scale().fractional_scale().max(0.5);
+        let size = output
             .current_mode()
-            .map(|m| Size::from((m.size.w, m.size.h)))
+            .map(|m| {
+                Size::from((
+                    (m.size.w as f64 / scale).round() as i32,
+                    (m.size.h as f64 / scale).round() as i32,
+                ))
+            })
             .unwrap_or(self.output_size);
         let top_offset = self.panel_height.max(0);
         Rectangle::new(
             Point::from((0, top_offset)),
             Size::from((size.w.max(100), (size.h - top_offset).max(100))),
         )
+    }
+
+    /// Computes the usable work area on the output where `window` currently lives.
+    pub fn usable_area_for_window(&self, window: &Window) -> Rectangle<i32, smithay::utils::Logical> {
+        let out = self.output_for_window(window);
+        self.usable_area_for_output(&out)
+    }
+
+    /// Clears any active interactive drag/resize grab referencing `window` (e.g. on destroy).
+    pub fn clear_window_grabs(&mut self, window: &Window) {
+        if self.dragged_window.as_ref().is_some_and(|(w, _, _)| w == window) {
+            self.dragged_window = None;
+            self.snap_preview = None;
+            self.drag_split_target = None;
+        }
+        if self.resized_window.as_ref().is_some_and(|(w, _, _, _)| w == window) {
+            self.resized_window = None;
+        }
+    }
+
+    /// Prunes dead lock surfaces and respawns `corten-lock` (rate-limited to once every 2s)
+    /// if the locker crashed while the session is locked, preventing the user from being stranded.
+    pub fn recover_crashed_lock(&mut self) {
+        if !self.session_locked {
+            return;
+        }
+        self.lock_surfaces.retain(|(s, _)| s.alive());
+        if self.lock_surfaces.is_empty() && self.pending_lock.is_none() {
+            let should_respawn = self
+                .last_lock_respawn
+                .is_none_or(|t| t.elapsed() >= Duration::from_secs(2));
+            if should_respawn {
+                self.last_lock_respawn = Some(Instant::now());
+                let lock_bin = resolve_corten_bin("corten-lock");
+                tracing::warn!(
+                    "Compositor: ext-session-lock surface died while locked; respawning {:?}",
+                    lock_bin
+                );
+                let _ = std::process::Command::new(lock_bin).spawn();
+            }
+        }
     }
 
     /// Resolves the fractional scale of the output a surface lives on (windows and layer
@@ -1075,6 +1151,7 @@ impl CortenCompositor {
             lock_surfaces: Vec::new(),
             pending_lock: None,
             session_locked: false,
+            last_lock_respawn: None,
             last_input: Instant::now(),
             screen_sleep_after: None,
             suspend_after: None,
