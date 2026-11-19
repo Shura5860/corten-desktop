@@ -391,8 +391,10 @@ pub enum Message {
     ToggleClipboardModal,
     ClipboardSearchChanged(String),
     CopyClipboardItem(String),
+    TogglePinClipboardItem(String),
     DeleteClipboardItem(usize),
     ClearClipboardHistory,
+    PickScreenColor,
     ShowOsd(OsdKind, u8),
     OsdTick,
     ClickTrayItem(String),
@@ -403,6 +405,7 @@ pub enum Message {
     MprisPrevious(String),
     SetAppStreamVolume(u32, u8),
     ToggleAppStreamMute(u32),
+    RouteAppStreamToNextSink(u32),
     ConfirmSystemAction,
     CancelSystemAction,
     WeatherUpdated(WeatherReport),
@@ -493,6 +496,7 @@ pub struct CortenPanelApp {
     custom_script_outputs: Vec<CustomAppletState>,
     show_clipboard_modal: bool,
     clipboard_history: Vec<String>,
+    pinned_clipboard: Vec<String>,
     clipboard_search: String,
     osd_state: Option<(OsdKind, u8, u8)>,
     show_notification_center: bool,
@@ -596,7 +600,7 @@ fn convert_svg_to_png(svg_path: &std::path::Path, out_size: u32) -> Option<PathB
         return Some(out_file);
     }
 
-    let status = std::process::Command::new("rsvg-convert")
+    if let Ok(status) = std::process::Command::new("rsvg-convert")
         .args([
             "-w", &out_size.to_string(),
             "-h", &out_size.to_string(),
@@ -604,12 +608,119 @@ fn convert_svg_to_png(svg_path: &std::path::Path, out_size: u32) -> Option<PathB
             "-o", out_file.to_str()?,
         ])
         .status()
-        .ok()?;
+    {
+        if status.success() && out_file.exists() {
+            return Some(out_file);
+        }
+    }
 
-    if status.success() && out_file.exists() {
+    if rasterize_svg_pure_rust(svg_path, &out_file, out_size) {
         Some(out_file)
     } else {
         None
+    }
+}
+
+fn rasterize_svg_pure_rust(svg_path: &std::path::Path, out_file: &std::path::Path, out_size: u32) -> bool {
+    let Ok(svg_text) = std::fs::read_to_string(svg_path) else {
+        return false;
+    };
+    let mut accent = (217u8, 107u8, 67u8);
+    for chunk in svg_text.split('#').skip(1) {
+        let hex: String = chunk.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+        if hex.len() == 6 {
+            if let (Ok(r), Ok(g), Ok(b)) = (
+                u8::from_str_radix(&hex[0..2], 16),
+                u8::from_str_radix(&hex[2..4], 16),
+                u8::from_str_radix(&hex[4..6], 16),
+            ) {
+                if (r as u16 + g as u16 + b as u16) > 45 {
+                    accent = (r, g, b);
+                    break;
+                }
+            }
+        }
+    }
+    let size = out_size.clamp(16, 128);
+    let mut raw_scanlines = Vec::with_capacity(((size * 4 + 1) * size) as usize);
+    let center = (size as f32 - 1.0) * 0.5;
+    let radius = center * 0.85;
+    for y in 0..size {
+        raw_scanlines.push(0u8);
+        for x in 0..size {
+            let dx = (x as f32 - center).abs();
+            let dy = (y as f32 - center).abs();
+            if (dx * dx + dy * dy).sqrt() <= radius {
+                raw_scanlines.extend_from_slice(&[accent.0, accent.1, accent.2, 240]);
+            } else {
+                raw_scanlines.extend_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+    }
+
+    let write_chunk = |out: &mut Vec<u8>, tag: &[u8; 4], data: &[u8]| {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        out.extend_from_slice(tag);
+        out.extend_from_slice(data);
+        let mut crc = 0xFFFF_FFFFu32;
+        for &b in tag.iter().chain(data.iter()) {
+            crc ^= b as u32;
+            for _ in 0..8 {
+                crc = if (crc & 1) != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            }
+        }
+        out.extend_from_slice(&(!crc).to_be_bytes());
+    };
+
+    let mut png = Vec::new();
+    png.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&size.to_be_bytes());
+    ihdr.extend_from_slice(&size.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    write_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut zlib = vec![0x78, 0x01];
+    let chunks: Vec<&[u8]> = raw_scanlines.chunks(65535).collect();
+    for (i, chunk) in chunks.iter().enumerate() {
+        zlib.push(if i + 1 == chunks.len() { 0x01 } else { 0x00 });
+        let len = chunk.len() as u16;
+        zlib.extend_from_slice(&len.to_le_bytes());
+        zlib.extend_from_slice(&(!len).to_le_bytes());
+        zlib.extend_from_slice(chunk);
+    }
+    let mut a: u32 = 1;
+    let mut b: u32 = 0;
+    for &byte in &raw_scanlines {
+        a = (a + byte as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    zlib.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    write_chunk(&mut png, b"IDAT", &zlib);
+    write_chunk(&mut png, b"IEND", &[]);
+    std::fs::write(out_file, png).is_ok()
+}
+
+fn pinned_clipboard_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home).join(".config/corten/pinned_clipboard.json")
+}
+
+fn load_pinned_clipboard() -> Vec<String> {
+    let path = pinned_clipboard_path();
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_pinned_clipboard(items: &[String]) {
+    let path = pinned_clipboard_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(items) {
+        let _ = std::fs::write(path, json);
     }
 }
 
@@ -1086,7 +1197,8 @@ impl Application for CortenPanelApp {
                 output_name: flags.output_name,
                 custom_script_outputs: Vec::new(),
                 show_clipboard_modal: false,
-                clipboard_history: Vec::new(),
+                clipboard_history: load_pinned_clipboard(),
+                pinned_clipboard: load_pinned_clipboard(),
                 clipboard_search: String::new(),
                 osd_state: None,
                 show_notification_center: false,
@@ -2367,6 +2479,40 @@ impl Application for CortenPanelApp {
                     s.is_muted = !s.is_muted;
                 }
             }
+            Message::RouteAppStreamToNextSink(id) => {
+                if self.audio_sinks.is_empty() {
+                    self.audio_sinks = pipewire::list_sinks();
+                }
+                if !self.audio_sinks.is_empty() {
+                    let current_sink_id = self
+                        .app_streams
+                        .iter()
+                        .find(|s| s.id == id)
+                        .and_then(|s| s.target_sink_id)
+                        .or_else(|| self.audio_sinks.iter().find(|k| k.is_default).map(|k| k.id));
+                    let next_sink = if let Some(cur_id) = current_sink_id {
+                        let pos = self
+                            .audio_sinks
+                            .iter()
+                            .position(|k| k.id == cur_id)
+                            .unwrap_or(0);
+                        &self.audio_sinks[(pos + 1) % self.audio_sinks.len()]
+                    } else {
+                        &self.audio_sinks[0]
+                    };
+                    let sink_id = next_sink.id;
+                    let sink_name = next_sink.name.clone();
+                    let _ = corten_services::pipewire::move_stream_to_sink(id, sink_id);
+                    if let Some(s) = self.app_streams.iter_mut().find(|s| s.id == id) {
+                        s.target_sink_id = Some(sink_id);
+                    }
+                    self.osd_state = Some((
+                        OsdKind::Toast(format!("🔊 Çıkış Yönlendirildi: {}", sink_name)),
+                        100,
+                        3,
+                    ));
+                }
+            }
             Message::TogglePowerMenu => {
                 self.show_power_menu = !self.show_power_menu;
                 if self.show_power_menu {
@@ -2578,13 +2724,39 @@ impl Application for CortenPanelApp {
                 self.show_clipboard_modal = false;
                 return self.layer_config_task();
             }
+            Message::TogglePinClipboardItem(txt) => {
+                if let Some(pos) = self.pinned_clipboard.iter().position(|p| p == &txt) {
+                    self.pinned_clipboard.remove(pos);
+                } else {
+                    self.pinned_clipboard.insert(0, txt);
+                }
+                save_pinned_clipboard(&self.pinned_clipboard);
+            }
             Message::DeleteClipboardItem(idx) => {
                 if idx < self.clipboard_history.len() {
-                    self.clipboard_history.remove(idx);
+                    let removed = self.clipboard_history.remove(idx);
+                    self.pinned_clipboard.retain(|p| p != &removed);
+                    save_pinned_clipboard(&self.pinned_clipboard);
                 }
             }
             Message::ClearClipboardHistory => {
-                self.clipboard_history.clear();
+                self.clipboard_history = self.pinned_clipboard.clone();
+            }
+            Message::PickScreenColor => {
+                self.show_control_center = false;
+                let _ = Command::new("busctl")
+                    .args([
+                        "--user",
+                        "call",
+                        "org.corten.Compositor",
+                        "/org/corten/Compositor",
+                        "org.corten.Compositor",
+                        "DispatchAction",
+                        "s",
+                        "color-picker",
+                    ])
+                    .spawn();
+                return self.layer_config_task();
             }
             Message::ShowOsd(kind, level) => {
                 self.osd_state = Some((kind, level, 3));
@@ -4003,7 +4175,27 @@ impl Application for CortenPanelApp {
             })
             .on_press(Message::ToggleRecording);
 
-            let quick_tools_row = row![screenshot_btn, recording_btn]
+            let color_picker_btn = button(
+                row![
+                    text(Icon::DROPLET)
+                        .font(LUCIDE_FONT)
+                        .size(13.0)
+                        .color(palette.primary.to_iced()),
+                    text("Renk Seçici")
+                        .size(11.0)
+                        .color(palette.text_primary.to_iced()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([6, 10])
+            .width(Length::FillPortion(1))
+            .style(move |_, status| {
+                corten_theme::iced_styles::bento_tile_button_style(palette, false, status)
+            })
+            .on_press(Message::PickScreenColor);
+
+            let quick_tools_row = row![screenshot_btn, recording_btn, color_picker_btn]
                 .spacing(8)
                 .width(Length::Fill)
                 .align_y(Alignment::Center);
@@ -4310,6 +4502,10 @@ impl Application for CortenPanelApp {
                         slider(0..=100, vol, move |v| Message::SetAppStreamVolume(id, v))
                             .width(Length::Fill)
                             .style(corten_theme::iced_styles::capsule_slider_style(palette)),
+                        button(text("🔀").size(10.0).color(palette.primary.to_iced()))
+                            .padding([2, 5])
+                            .style(|_, _| button::Style::default())
+                            .on_press(Message::RouteAppStreamToNextSink(id)),
                         button(text(if is_muted { "✕" } else { "🔉" }).size(11.0).color(palette.text_muted.to_iced()))
                             .padding([2, 5])
                             .style(|_, _| button::Style::default())
@@ -4967,7 +5163,7 @@ impl Application for CortenPanelApp {
                 .size(12.0);
 
             let mut items_col = iced::widget::column![].spacing(6);
-            let filtered_items: Vec<(usize, &String)> = self
+            let mut filtered_items: Vec<(usize, &String, bool)> = self
                 .clipboard_history
                 .iter()
                 .enumerate()
@@ -4975,7 +5171,9 @@ impl Application for CortenPanelApp {
                     self.clipboard_search.is_empty()
                         || text.to_lowercase().contains(&self.clipboard_search.to_lowercase())
                 })
+                .map(|(idx, text)| (idx, text, self.pinned_clipboard.contains(text)))
                 .collect();
+            filtered_items.sort_by_key(|(_, _, is_pinned)| !*is_pinned);
 
             if filtered_items.is_empty() {
                 items_col = items_col.push(
@@ -4984,14 +5182,28 @@ impl Application for CortenPanelApp {
                         .center_x(Length::Fill),
                 );
             } else {
-                for (idx, text_entry) in filtered_items {
-                    let display_text = if text_entry.chars().count() > 50 {
-                        format!("{}...", text_entry.chars().take(50).collect::<String>())
+                for (idx, text_entry, is_pinned) in filtered_items {
+                    let display_text = if text_entry.chars().count() > 46 {
+                        format!("{}...", text_entry.chars().take(46).collect::<String>())
                     } else {
                         text_entry.clone()
                     };
                     let copy_val = text_entry.clone();
+                    let pin_val = text_entry.clone();
+                    let pin_color = if is_pinned {
+                        palette.primary.to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    };
                     let item_row = row![
+                        button(
+                            text(if is_pinned { "📌" } else { "📍" })
+                                .size(11.0)
+                                .color(pin_color)
+                        )
+                        .padding([4, 6])
+                        .style(|_, _| button::Style::default())
+                        .on_press(Message::TogglePinClipboardItem(pin_val)),
                         button(
                             text(display_text)
                                 .size(12.0)
@@ -4999,16 +5211,22 @@ impl Application for CortenPanelApp {
                         )
                         .width(Length::Fill)
                         .padding([5, 8])
-                        .style(|_, status| {
+                        .style(move |_, status| {
                             let bg = match status {
                                 button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+                                _ if is_pinned => iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14),
                                 _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
                             };
                             button::Style {
                                 background: Some(iced::Background::Color(bg)),
                                 border: iced::Border {
+                                    color: if is_pinned {
+                                        iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35)
+                                    } else {
+                                        iced::Color::TRANSPARENT
+                                    },
+                                    width: if is_pinned { 1.0 } else { 0.0 },
                                     radius: iced::border::Radius::from(6.0),
-                                    ..Default::default()
                                 },
                                 ..Default::default()
                             }

@@ -25,6 +25,9 @@ pub struct NotifyConfig {
     /// Whether Do-Not-Disturb is enabled
     #[serde(default)]
     pub dnd: bool,
+    /// Per-application muted notification list
+    #[serde(default)]
+    pub muted_apps: Vec<String>,
 }
 
 impl Default for NotifyConfig {
@@ -36,6 +39,7 @@ impl Default for NotifyConfig {
             card_width: 360,
             margin: 16,
             dnd: false,
+            muted_apps: Vec::new(),
         }
     }
 }

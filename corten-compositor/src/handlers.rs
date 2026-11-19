@@ -170,6 +170,7 @@ impl CompositorHandler for CortenCompositor {
             });
         });
         if metadata_changed {
+            self.sync_foreign_toplevels();
             self.sync_ipc_snapshot();
         }
 
@@ -1081,7 +1082,57 @@ impl DrmSyncobjHandler for CortenCompositor {
     }
 }
 
+impl smithay::wayland::idle_notify::IdleNotifierHandler for CortenCompositor {
+    fn idle_notifier_state(&mut self) -> &mut smithay::wayland::idle_notify::IdleNotifierState<Self> {
+        &mut self.idle_notifier_state
+    }
+}
+
+impl smithay::wayland::xdg_foreign::XdgForeignHandler for CortenCompositor {
+    fn xdg_foreign_state(&mut self) -> &mut smithay::wayland::xdg_foreign::XdgForeignState {
+        &mut self.xdg_foreign_state
+    }
+}
+
+impl smithay::wayland::foreign_toplevel_list::ForeignToplevelListHandler for CortenCompositor {
+    fn foreign_toplevel_list_state(
+        &mut self,
+    ) -> &mut smithay::wayland::foreign_toplevel_list::ForeignToplevelListState {
+        &mut self.foreign_toplevel_list_state
+    }
+}
+
+impl smithay::wayland::input_method::InputMethodHandler for CortenCompositor {
+    fn new_popup(&mut self, surface: smithay::wayland::input_method::PopupSurface) {
+        let _ = self.popup_manager.track_popup(PopupKind::from(surface));
+    }
+
+    fn popup_repositioned(&mut self, _surface: smithay::wayland::input_method::PopupSurface) {}
+
+    fn dismiss_popup(&mut self, surface: smithay::wayland::input_method::PopupSurface) {
+        if let Some(parent) = surface.get_parent().map(|parent| parent.surface.clone()) {
+            let _ = smithay::desktop::PopupManager::dismiss_popup(&parent, &PopupKind::from(surface));
+        }
+    }
+
+    fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, smithay::utils::Logical> {
+        for win in self.layout.windows().iter().chain(self.layout.floating_windows().iter()) {
+            if crate::layout::window_wl_surface(win).as_ref() == Some(parent) {
+                if let Some(geo) = self.layout.floating_geometry(win) {
+                    return geo;
+                }
+            }
+        }
+        Rectangle::new(Point::from((0, 0)), self.output_size)
+    }
+}
+
 smithay::delegate_drm_syncobj!(CortenCompositor);
+smithay::delegate_idle_notify!(CortenCompositor);
+smithay::delegate_xdg_foreign!(CortenCompositor);
+smithay::delegate_foreign_toplevel_list!(CortenCompositor);
+smithay::delegate_virtual_keyboard_manager!(CortenCompositor);
+smithay::delegate_input_method_manager!(CortenCompositor);
 smithay::delegate_viewporter!(CortenCompositor);
 smithay::delegate_fractional_scale!(CortenCompositor);
 smithay::delegate_relative_pointer!(CortenCompositor);

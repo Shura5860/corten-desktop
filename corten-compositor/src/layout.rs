@@ -440,13 +440,16 @@ pub fn should_auto_float(window: &Window) -> bool {
     false
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct WindowRuleMatch {
     pub floating: Option<bool>,
     pub workspace: Option<usize>,
     pub fullscreen: Option<bool>,
     pub opacity: Option<f32>,
     pub blur: Option<bool>,
+    pub sticky: Option<bool>,
+    pub scratchpad: Option<bool>,
+    pub decoration_mode: Option<String>,
 }
 
 /// Evaluates user-configured `window_rules` against a window's `(app_id, title)`
@@ -483,6 +486,15 @@ pub fn evaluate_window_rules_full(
             }
             if let Some(b) = rule.blur {
                 m.blur = Some(b);
+            }
+            if let Some(st) = rule.sticky {
+                m.sticky = Some(st);
+            }
+            if let Some(sp) = rule.scratchpad {
+                m.scratchpad = Some(sp);
+            }
+            if let Some(ref dm) = rule.decoration_mode {
+                m.decoration_mode = Some(dm.clone());
             }
         }
     }
@@ -756,6 +768,18 @@ pub struct LayoutManager {
     workspace_slide_offset: f32,
     /// Tabbed window groups (each group contains >= 2 stable window IDs sharing one frame)
     tab_groups: Vec<Vec<u64>>,
+    /// Per-workspace layout mode overrides (e.g. WS 1 Floating, WS 2 BSP, WS 3 Scrollable)
+    workspace_modes: HashMap<usize, LayoutMode>,
+    /// Sticky / Pinned window IDs (e.g. Picture-in-Picture) that follow across all workspaces
+    sticky_windows: HashSet<u64>,
+    /// Hidden drop-down scratchpad window pool
+    scratchpad_windows: Vec<Window>,
+    /// Horizontal scroll offset (in logical px) for `LayoutMode::Scrollable` (Niri strip)
+    scroll_offset_x: f64,
+    /// Column width fraction (0.25..=1.0) for `LayoutMode::Scrollable`
+    scroll_column_fraction: f32,
+    /// One-shot session restore queue loaded once at startup (consumed as each saved window spawns)
+    pending_session_entries: Vec<crate::state::SavedWindowEntry>,
 }
 
 impl Default for LayoutManager {
@@ -787,6 +811,12 @@ impl LayoutManager {
             active_floating: None,
             workspace_slide_offset: 0.0,
             tab_groups: Vec::new(),
+            workspace_modes: HashMap::new(),
+            sticky_windows: HashSet::new(),
+            scratchpad_windows: Vec::new(),
+            scroll_offset_x: 0.0,
+            scroll_column_fraction: 0.58,
+            pending_session_entries: crate::state::load_window_session_from_disk(),
             bsp_tree: None,
             split_direction: SplitDirection::Horizontal,
         }
@@ -814,16 +844,116 @@ impl LayoutManager {
 
     #[allow(dead_code)]
     pub fn mode(&self) -> LayoutMode {
-        self.mode
+        self.workspace_modes
+            .get(&self.workspace)
+            .copied()
+            .unwrap_or(self.mode)
     }
 
     pub fn set_mode(&mut self, mode: LayoutMode) {
         self.mode = mode;
+        self.workspace_modes.insert(self.workspace, mode);
+    }
+
+    pub fn set_workspace_mode(&mut self, ws: usize, mode: LayoutMode) {
+        let ws = ws.clamp(1, 9);
+        self.workspace_modes.insert(ws, mode);
+        if ws == self.workspace {
+            self.mode = mode;
+        }
     }
 
     pub fn cycle_mode(&mut self) -> LayoutMode {
-        self.mode = self.mode.next();
-        self.mode
+        let next = self.mode().next();
+        self.set_mode(next);
+        next
+    }
+
+    /// Toggles sticky/pinned mode (PiP window follows across all workspaces).
+    pub fn toggle_sticky(&mut self, window: &Window) -> bool {
+        let wid = window_stable_id(window);
+        if self.sticky_windows.contains(&wid) {
+            self.sticky_windows.remove(&wid);
+            false
+        } else {
+            self.sticky_windows.insert(wid);
+            true
+        }
+    }
+
+    /// Returns true if `window` is pinned across all workspaces.
+    #[allow(dead_code)]
+    pub fn is_sticky(&self, window: &Window) -> bool {
+        self.sticky_windows.contains(&window_stable_id(window))
+    }
+
+    /// Moves a window into the hidden drop-down scratchpad pool.
+    pub fn move_to_scratchpad(&mut self, window: &Window) {
+        self.remove_window(window);
+        if !self.scratchpad_windows.iter().any(|w| w == window) {
+            self.scratchpad_windows.push(window.clone());
+        }
+    }
+
+    /// Toggles the drop-down scratchpad window: if a scratchpad window is currently active/visible
+    /// in floating windows, hides it back into the pool; otherwise pops the top scratchpad window
+    /// centered at 72% x 68% of `usable_area`.
+    pub fn toggle_scratchpad(
+        &mut self,
+        usable_area: Rectangle<i32, Logical>,
+    ) -> Option<Window> {
+        // If we have a scratchpad window waiting, bring it up centered as floating
+        if let Some(win) = self.scratchpad_windows.pop() {
+            let w = ((usable_area.size.w as f32) * 0.72).round() as i32;
+            let h = ((usable_area.size.h as f32) * 0.68).round() as i32;
+            let x = usable_area.loc.x + (usable_area.size.w - w) / 2;
+            let y = usable_area.loc.y + (usable_area.size.h - h) / 2;
+            let rect = Rectangle::new(Point::from((x, y)), Size::from((w.max(320), h.max(240))));
+            self.floating_windows.push(win.clone());
+            self.floating_geometries.insert(window_stable_id(&win), rect);
+            self.active_floating = Some(win.clone());
+            configure_window_geometry(&win, rect);
+            return Some(win);
+        }
+        // Otherwise hide the currently active window into the scratchpad pool
+        if let Some(active) = self.active_window().cloned() {
+            self.move_to_scratchpad(&active);
+        }
+        None
+    }
+
+    /// Scrolls the Niri-style horizontal strip by `delta_px`.
+    #[allow(dead_code)]
+    pub fn scroll_strip(&mut self, delta_px: f64) {
+        self.scroll_offset_x = (self.scroll_offset_x + delta_px).max(0.0);
+    }
+
+    /// Steps the Niri-style horizontal strip left (`dir = -1`) or right (`dir = 1`) by one column.
+    pub fn scroll_column_step(&mut self, dir: i32, usable_area: Rectangle<i32, Logical>) {
+        let col_w = ((usable_area.size.w as f64) * self.scroll_column_fraction as f64).max(320.0);
+        let step = col_w + self.gap as f64;
+        let max_scroll = (self.windows.len().saturating_sub(1) as f64 * step).max(0.0);
+        self.scroll_offset_x = (self.scroll_offset_x + (dir as f64) * step).clamp(0.0, max_scroll);
+    }
+
+    /// Dynamic workspace count (GNOME/Niri style): returns `highest_occupied_ws + 1` clamped to `1..=9`.
+    #[allow(dead_code)]
+    pub fn dynamic_workspace_count(&self) -> usize {
+        let mut highest = self.workspace;
+        for (&ws, wins) in &self.workspace_windows {
+            if !wins.is_empty() {
+                highest = highest.max(ws);
+            }
+        }
+        for (&ws, wins) in &self.workspace_floating {
+            if !wins.is_empty() {
+                highest = highest.max(ws);
+            }
+        }
+        if !self.windows.is_empty() || !self.floating_windows.is_empty() {
+            highest = highest.max(self.workspace);
+        }
+        (highest + 1).clamp(1, 9)
     }
 
     /// Set margin gap in pixels
@@ -1058,7 +1188,27 @@ impl LayoutManager {
         }
         self.evaluated_windows.insert(wid);
 
-        let rule_match = evaluate_window_rules_full(window, rules);
+        let mut rule_match = evaluate_window_rules_full(window, rules);
+        let mut session_geo: Option<Rectangle<i32, Logical>> = None;
+        if !app_id.is_empty() {
+            if let Some(pos) = self
+                .pending_session_entries
+                .iter()
+                .position(|e| e.app_id == app_id)
+            {
+                let saved = self.pending_session_entries.remove(pos);
+                if rule_match.workspace.is_none() && (1..=9).contains(&saved.workspace) {
+                    rule_match.workspace = Some(saved.workspace);
+                }
+                if rule_match.floating.is_none() && saved.is_floating {
+                    rule_match.floating = Some(true);
+                    session_geo = Some(Rectangle::new(
+                        Point::from((saved.x, saved.y)),
+                        Size::from((saved.width.max(160), saved.height.max(120))),
+                    ));
+                }
+            }
+        }
         let target_float = rule_match.floating.unwrap_or(auto_float);
         let mut changed = false;
 
@@ -1072,6 +1222,29 @@ impl LayoutManager {
             changed = true;
         }
 
+        if let Some(sticky) = rule_match.sticky {
+            if sticky {
+                self.sticky_windows.insert(wid);
+            } else {
+                self.sticky_windows.remove(&wid);
+            }
+            changed = true;
+        }
+
+        if let Some(ref dec_mode) = rule_match.decoration_mode {
+            if let Some(toplevel) = window.toplevel() {
+                toplevel.with_pending_state(|tstate| {
+                    use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
+                    tstate.decoration_mode = Some(if dec_mode.eq_ignore_ascii_case("csd") {
+                        Mode::ClientSide
+                    } else {
+                        Mode::ServerSide
+                    });
+                });
+                toplevel.send_configure();
+            }
+        }
+
         if target_float && !self.is_floating(window) {
             if let Some(pos) = self.windows.iter().position(|w| w == window) {
                 let win = self.windows.remove(pos);
@@ -1083,6 +1256,17 @@ impl LayoutManager {
                 self.active_floating = Some(win);
                 changed = true;
             }
+        }
+
+        if let Some(geo) = session_geo {
+            self.set_floating_geometry(window, geo);
+            configure_window_geometry(window, geo);
+            changed = true;
+        }
+
+        if rule_match.scratchpad == Some(true) {
+            self.move_to_scratchpad(window);
+            return true;
         }
 
         if let Some(target_ws) = rule_match.workspace {
@@ -1119,8 +1303,29 @@ impl LayoutManager {
             return;
         }
         let old = self.workspace;
-        let current = std::mem::take(&mut self.windows);
-        let floating = std::mem::take(&mut self.floating_windows);
+        let mut current = std::mem::take(&mut self.windows);
+        let mut floating = std::mem::take(&mut self.floating_windows);
+
+        // Extract sticky (pinned PiP) windows so they follow the user to the new workspace
+        let mut sticky_tiled = Vec::new();
+        current.retain(|w| {
+            if self.sticky_windows.contains(&window_stable_id(w)) {
+                sticky_tiled.push(w.clone());
+                false
+            } else {
+                true
+            }
+        });
+        let mut sticky_float = Vec::new();
+        floating.retain(|w| {
+            if self.sticky_windows.contains(&window_stable_id(w)) {
+                sticky_float.push(w.clone());
+                false
+            } else {
+                true
+            }
+        });
+
         self.workspace_windows.insert(old, current);
         self.workspace_floating.insert(old, floating);
         self.windows = self
@@ -1131,6 +1336,18 @@ impl LayoutManager {
             .workspace_floating
             .remove(&workspace)
             .unwrap_or_default();
+
+        for w in sticky_tiled {
+            if !self.windows.iter().any(|existing| existing == &w) {
+                self.windows.push(w);
+            }
+        }
+        for w in sticky_float {
+            if !self.floating_windows.iter().any(|existing| existing == &w) {
+                self.floating_windows.push(w);
+            }
+        }
+
         self.workspace = workspace;
         self.active_index = self.active_index.min(self.windows.len().saturating_sub(1));
         self.active_floating = None;
@@ -1963,14 +2180,15 @@ impl LayoutManager {
         if count == 1 {
             let win = &self.windows[0];
             let win_id = window_stable_id(win);
-            let rect = match self.mode {
+            let rect = match self.mode() {
                 LayoutMode::Floating => {
                     if let Some(&saved) = self.floating_geometries.get(&win_id) {
                         saved
                     } else {
                         let win_geo = win.geometry();
+                        let titlebar_h = window_titlebar_height(win, false);
                         let (w, h) = if win_geo.size.w > 0 && win_geo.size.h > 0 {
-                            (win_geo.size.w, win_geo.size.h + 36)
+                            (win_geo.size.w, win_geo.size.h + titlebar_h)
                         } else {
                             (960.min(total_w - 40), 640.min(total_h - 40))
                         };
@@ -1984,6 +2202,13 @@ impl LayoutManager {
                     Point::from((usable_area.loc.x, usable_area.loc.y)),
                     Size::from((usable_area.size.w, usable_area.size.h)),
                 ),
+                LayoutMode::Scrollable => {
+                    let col_w = ((total_w as f32) * self.scroll_column_fraction.clamp(0.25, 1.0))
+                        .round()
+                        .max(320.0) as i32;
+                    let center_x = total_x + (total_w - col_w).max(0) / 2;
+                    Rectangle::new(Point::from((center_x, total_y)), Size::from((col_w, total_h)))
+                }
                 LayoutMode::MasterStack | LayoutMode::Dwindle | LayoutMode::Bsp => Rectangle::new(
                     Point::from((total_x, total_y)),
                     Size::from((total_w, total_h)),
@@ -1993,7 +2218,26 @@ impl LayoutManager {
             return results;
         }
 
-        match self.mode {
+        match self.mode() {
+            LayoutMode::Scrollable => {
+                // Niri-style infinite horizontal strip of columns
+                let col_w = ((total_w as f32) * self.scroll_column_fraction.clamp(0.25, 1.0))
+                    .round()
+                    .max(320.0) as i32;
+                let step = col_w + self.gap;
+                let max_scroll = (count.saturating_sub(1) as f64 * step as f64).max(0.0);
+                let scroll_x = self.scroll_offset_x.clamp(0.0, max_scroll).round() as i32;
+
+                for (idx, window) in self.windows.iter().enumerate() {
+                    let x = total_x + (idx as i32 * step) - scroll_x;
+                    let rect = Rectangle::new(
+                        Point::from((x, total_y)),
+                        Size::from((col_w, total_h)),
+                    );
+                    results.push((window.clone(), rect));
+                }
+                results
+            }
             LayoutMode::Floating => {
                 for (i, window) in self.windows.iter().enumerate() {
                     let win_id = window_stable_id(window);
@@ -2822,8 +3066,24 @@ mod tests {
         assert_eq!(manager.cycle_mode(), LayoutMode::MasterStack);
         assert_eq!(manager.cycle_mode(), LayoutMode::Dwindle);
         assert_eq!(manager.cycle_mode(), LayoutMode::Bsp);
+        assert_eq!(manager.cycle_mode(), LayoutMode::Scrollable);
         assert_eq!(manager.cycle_mode(), LayoutMode::Monocle);
         assert_eq!(manager.cycle_mode(), LayoutMode::Floating);
+    }
+
+    #[test]
+    fn test_per_workspace_modes_and_dynamic_workspaces() {
+        let mut manager = LayoutManager::new();
+        manager.set_workspace_mode(1, LayoutMode::Floating);
+        manager.set_workspace_mode(2, LayoutMode::Bsp);
+        manager.set_workspace_mode(3, LayoutMode::Scrollable);
+
+        assert_eq!(manager.mode(), LayoutMode::Floating);
+        manager.switch_workspace(2);
+        assert_eq!(manager.mode(), LayoutMode::Bsp);
+        manager.switch_workspace(3);
+        assert_eq!(manager.mode(), LayoutMode::Scrollable);
+        assert_eq!(manager.dynamic_workspace_count(), 4);
     }
 
     #[test]
@@ -2951,21 +3211,17 @@ mod tests {
         let rules = [
             WindowRuleConfig {
                 app_id: Some("alacritty".to_string()),
-                title: None,
                 floating: Some(false),
                 workspace: Some(1),
-                fullscreen: None,
                 opacity_percent: Some(85),
                 blur: Some(true),
+                ..Default::default()
             },
             WindowRuleConfig {
                 app_id: Some("custom-app".to_string()),
-                title: None,
-                floating: None,
-                workspace: None,
-                fullscreen: None,
                 opacity_percent: Some(90),
                 blur: Some(false),
+                ..Default::default()
             },
         ];
 

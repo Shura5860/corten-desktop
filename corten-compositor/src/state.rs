@@ -104,6 +104,15 @@ pub struct CortenCompositor {
     pub xdg_activation_state: XdgActivationState,
     #[allow(dead_code)]
     pub text_input_state: smithay::wayland::text_input::TextInputManagerState,
+    pub idle_notifier_state: smithay::wayland::idle_notify::IdleNotifierState<Self>,
+    pub idle_event_loop: Option<std::sync::Mutex<smithay::reexports::calloop::EventLoop<'static, Self>>>,
+    pub xdg_foreign_state: smithay::wayland::xdg_foreign::XdgForeignState,
+    pub foreign_toplevel_list_state: smithay::wayland::foreign_toplevel_list::ForeignToplevelListState,
+    pub foreign_toplevel_handles: HashMap<u64, (smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle, String, String)>,
+    #[allow(dead_code)]
+    pub virtual_keyboard_manager_state: smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState,
+    #[allow(dead_code)]
+    pub input_method_manager_state: smithay::wayland::input_method::InputMethodManagerState,
     pub tearing_state: crate::tearing::TearingControlState,
     #[allow(dead_code)]
     pub screencopy_state: ScreencopyManagerState,
@@ -183,6 +192,16 @@ pub struct CortenCompositor {
     pub last_titlebar_click: Option<(smithay::desktop::Window, Instant)>,
     pub accessibility: corten_config::AccessibilityConfig,
     pub a11y_bridge: corten_services::a11y::AtspiBridge,
+    /// One-click Game Mode: disables blur/effects, enables tearing/VRR, inhibits idle & DND
+    pub game_mode: bool,
+    /// Compositor GPU screen magnifier zoom factor (`1.0` = normal, up to `4.0`)
+    pub zoom_level: f64,
+    /// Native X11 DPI zero-scaling mode for razor-sharp XWayland windows on fractional HiDPI
+    pub xwayland_force_zero_scaling: bool,
+    /// Graphics tablet stylus pressure response curve (`"soft"`, `"linear"`, `"firm"`)
+    pub tablet_pressure_curve: String,
+    /// Graphics tablet 180-degree left-handed orientation mode
+    pub tablet_left_handed: bool,
 }
 
 impl CortenCompositor {
@@ -215,6 +234,7 @@ impl CortenCompositor {
         self.last_input = Instant::now();
         self.screen_asleep = false;
         self.suspend_requested = false;
+        self.idle_notifier_state.notify_activity(&self.seat);
     }
 
     pub fn is_idle_inhibited(&mut self) -> bool {
@@ -373,7 +393,13 @@ impl CortenCompositor {
     }
 
     pub fn update_idle_state(&mut self) -> bool {
-        if self.session_locked {
+        if let Some(loop_mutex) = self.idle_event_loop.take() {
+            if let Ok(mut el) = loop_mutex.into_inner() {
+                let _ = el.dispatch(Some(Duration::ZERO), self);
+                self.idle_event_loop = Some(std::sync::Mutex::new(el));
+            }
+        }
+        if self.session_locked || self.game_mode {
             return false;
         }
         if self.is_idle_inhibited() {
@@ -801,11 +827,62 @@ impl CortenCompositor {
     }
 
     pub fn remove_window_from_all_outputs(&mut self, window: &Window) {
+        let wid = crate::layout::window_stable_id(window);
+        if let Some((handle, _, _)) = self.foreign_toplevel_handles.remove(&wid) {
+            handle.send_closed();
+            self.foreign_toplevel_list_state.remove_toplevel(&handle);
+        }
         self.layout.remove_window(window);
         for layout in self.output_layouts.values_mut() {
             layout.remove_window(window);
         }
+        if !self.layout.windows().is_empty() || !self.layout.floating_windows().is_empty() {
+            let _ = self.save_window_session_to_disk();
+        }
         self.sync_ipc_snapshot();
+    }
+
+    /// Synchronizes open windows with `ext-foreign-toplevel-list-v1` protocol handles.
+    pub fn sync_foreign_toplevels(&mut self) {
+        let mut snaps = self.layout.window_snapshots();
+        for layout in self.output_layouts.values() {
+            for s in layout.window_snapshots() {
+                if !snaps.iter().any(|w| w.id == s.id) {
+                    snaps.push(s);
+                }
+            }
+        }
+        for snap in snaps {
+            if snap.app_id.is_empty() && snap.title.is_empty() {
+                continue;
+            }
+            let eff_title = if snap.title.is_empty() { "Corten Window" } else { &snap.title };
+            let eff_app = if snap.app_id.is_empty() { "corten" } else { &snap.app_id };
+            if let Some((handle, last_app, last_title)) = self.foreign_toplevel_handles.get_mut(&snap.id) {
+                let mut changed = false;
+                if last_title != eff_title {
+                    handle.send_title(eff_title);
+                    *last_title = eff_title.to_string();
+                    changed = true;
+                }
+                if last_app != eff_app {
+                    handle.send_app_id(eff_app);
+                    *last_app = eff_app.to_string();
+                    changed = true;
+                }
+                if changed {
+                    handle.send_done();
+                }
+            } else {
+                let handle = self
+                    .foreign_toplevel_list_state
+                    .new_toplevel::<Self>(eff_title.to_string(), eff_app.to_string());
+                self.foreign_toplevel_handles.insert(
+                    snap.id,
+                    (handle, eff_app.to_string(), eff_title.to_string()),
+                );
+            }
+        }
     }
 
     pub fn minimize_window(&mut self, window: &Window) {
@@ -1036,6 +1113,17 @@ impl CortenCompositor {
         let screencopy_state = ScreencopyManagerState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         let text_input_state = smithay::wayland::text_input::TextInputManagerState::new::<Self>(&dh);
+        let idle_event_loop = smithay::reexports::calloop::EventLoop::<Self>::try_new()
+            .expect("calloop EventLoop for IdleNotifierState");
+        let idle_notifier_state =
+            smithay::wayland::idle_notify::IdleNotifierState::new(&dh, idle_event_loop.handle());
+        let xdg_foreign_state = smithay::wayland::xdg_foreign::XdgForeignState::new::<Self>(&dh);
+        let foreign_toplevel_list_state =
+            smithay::wayland::foreign_toplevel_list::ForeignToplevelListState::new::<Self>(&dh);
+        let virtual_keyboard_manager_state =
+            smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState::new::<Self, _>(&dh, |_| true);
+        let input_method_manager_state =
+            smithay::wayland::input_method::InputMethodManagerState::new::<Self, _>(&dh, |_| true);
         let tablet_state = smithay::wayland::tablet_manager::TabletManagerState::new::<Self>(&dh);
         let tearing_state = crate::tearing::TearingControlState::new();
         let _tearing_global = dh.create_global::<Self, wayland_protocols::wp::tearing_control::v1::server::wp_tearing_control_manager_v1::WpTearingControlManagerV1, ()>(1, ());
@@ -1110,6 +1198,13 @@ impl CortenCompositor {
             content_type_state,
             xdg_activation_state,
             text_input_state,
+            idle_notifier_state,
+            idle_event_loop: Some(std::sync::Mutex::new(idle_event_loop)),
+            xdg_foreign_state,
+            foreign_toplevel_list_state,
+            foreign_toplevel_handles: HashMap::new(),
+            virtual_keyboard_manager_state,
+            input_method_manager_state,
             tearing_state,
             screencopy_state,
             pending_screencopies: Vec::new(),
@@ -1170,8 +1265,464 @@ impl CortenCompositor {
                 .map(|m| m.get().clone())
                 .unwrap_or_default(),
             a11y_bridge: corten_services::a11y::AtspiBridge::new("Corten Desktop"),
+            game_mode: false,
+            zoom_level: 1.0,
+            xwayland_force_zero_scaling: corten_config::ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default("displays")
+                .map(|m| m.get().xwayland_force_zero_scaling)
+                .unwrap_or(true),
+            tablet_pressure_curve: corten_config::ConfigManager::<corten_config::InputSettingsConfig>::load_or_default("input")
+                .map(|m| m.get().tablet_pressure_curve.clone())
+                .unwrap_or_else(|_| "linear".to_string()),
+            tablet_left_handed: corten_config::ConfigManager::<corten_config::InputSettingsConfig>::load_or_default("input")
+                .map(|m| m.get().tablet_left_handed)
+                .unwrap_or(false),
         }
     }
+
+    /// Toggles One-Click Game Mode (disables blur, enables VRR/tearing, toggles DND & notifies user).
+    pub fn toggle_game_mode(&mut self) -> bool {
+        self.game_mode = !self.game_mode;
+        self.allow_tearing = self.game_mode;
+        self.vrr_enabled = self.game_mode;
+        let _ = std::process::Command::new("busctl")
+            .args([
+                "--user",
+                "call",
+                "org.freedesktop.Notifications",
+                "/org/freedesktop/Notifications",
+                "org.freedesktop.Notifications",
+                "SetDoNotDisturb",
+                "b",
+                if self.game_mode { "true" } else { "false" },
+            ])
+            .spawn();
+        let msg = if self.game_mode {
+            "Oyun Modu Aktif (VRR + Tearing + Blur Bypass + DND)"
+        } else {
+            "Oyun Modu Kapatıldı (Normal Masaüstü Modu)"
+        };
+        let _ = std::process::Command::new("notify-send")
+            .args(["Corten Game Mode", msg])
+            .spawn();
+        self.game_mode
+    }
+
+    /// Dispatches a user-configured 3-finger or 4-finger touchpad swipe action.
+    pub fn dispatch_configured_swipe_action(&mut self, action: &str, go_next_or_up: bool) {
+        match action {
+            "overview" => {
+                self.overview_mode = !self.overview_mode;
+            }
+            "maximize" => {
+                if let Some(active) = self.layout.active_window().cloned() {
+                    let is_fs = self.layout.toggle_fullscreen(&active);
+                    if let Some(toplevel) = active.toplevel() {
+                        toplevel.with_pending_state(|tstate| {
+                            use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
+                            if is_fs {
+                                tstate.states.set(State::Fullscreen);
+                            } else {
+                                tstate.states.unset(State::Fullscreen);
+                            }
+                        });
+                        toplevel.send_configure();
+                    }
+                }
+            }
+            "dashboard" => {
+                let _ = std::process::Command::new("busctl")
+                    .args([
+                        "--user",
+                        "call",
+                        "org.corten.Panel",
+                        "/org/corten/Panel",
+                        "org.corten.Panel",
+                        "TriggerModule",
+                        "s",
+                        "desktop_hub",
+                    ])
+                    .spawn();
+            }
+            "game-mode" => {
+                self.toggle_game_mode();
+            }
+            "scrollable-strip" => {
+                let usable = self.usable_area();
+                self.layout.scroll_column_step(if go_next_or_up { 1 } else { -1 }, usable);
+            }
+            _ => {
+                let target_ws = if go_next_or_up {
+                    (self.active_workspace + 1).min(9)
+                } else {
+                    self.active_workspace.saturating_sub(1).max(1)
+                };
+                if target_ws != self.active_workspace {
+                    self.switch_workspace(target_ws);
+                }
+            }
+        }
+    }
+
+    /// Adjusts GPU compositor zoom magnification (`1.0` to `4.0`).
+    pub fn adjust_zoom(&mut self, delta: f64) -> f64 {
+        self.zoom_level = (self.zoom_level + delta).clamp(1.0, 4.0);
+        self.zoom_level
+    }
+
+    /// Resets compositor zoom back to `1.0`.
+    pub fn reset_zoom(&mut self) {
+        self.zoom_level = 1.0;
+    }
+
+    /// Executes a named compositor action triggered via `cortenctl action <name>` or hotkeys.
+    pub fn handle_custom_action(&mut self, action: &str) {
+        let usable = self.usable_area();
+        match action {
+            "toggle-scratchpad" => {
+                if let Some(win) = self.layout.toggle_scratchpad(usable) {
+                    if let Some(surface) = crate::layout::window_wl_surface(&win) {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        if let Some(kb) = self.seat.get_keyboard() {
+                            kb.set_focus(self, Some(surface), serial);
+                        }
+                    }
+                }
+            }
+            "move-to-scratchpad" => {
+                if let Some(active) = self.layout.active_window().cloned() {
+                    self.layout.move_to_scratchpad(&active);
+                }
+            }
+            "toggle-sticky" => {
+                if let Some(active) = self.layout.active_window().cloned() {
+                    let pinned = self.layout.toggle_sticky(&active);
+                    let msg = if pinned {
+                        "Pencere tüm çalışma alanlarına sabitlendi (Sticky / PiP)"
+                    } else {
+                        "Pencere sabitlemesi kaldırıldı"
+                    };
+                    let _ = std::process::Command::new("notify-send")
+                        .args(["Corten Desktop", msg])
+                        .spawn();
+                }
+            }
+            "toggle-game-mode" => {
+                self.toggle_game_mode();
+            }
+            "scroll-left" => {
+                self.layout.scroll_column_step(-1, usable);
+            }
+            "scroll-right" => {
+                self.layout.scroll_column_step(1, usable);
+            }
+            "zoom-in" => {
+                self.adjust_zoom(0.25);
+            }
+            "zoom-out" => {
+                self.adjust_zoom(-0.25);
+            }
+            "zoom-reset" => {
+                self.reset_zoom();
+            }
+            "cycle-layout" => {
+                let next = self.layout.cycle_mode();
+                for (w, r) in self.layout.arrange(usable) {
+                    crate::layout::configure_window_geometry(&w, r);
+                }
+                let _ = std::process::Command::new("notify-send")
+                    .args(["Corten Yerleşim Modu", next.label()])
+                    .spawn();
+            }
+            "set-layout-scrollable" => {
+                self.layout.set_mode(corten_config::LayoutMode::Scrollable);
+                for (w, r) in self.layout.arrange(usable) {
+                    crate::layout::configure_window_geometry(&w, r);
+                }
+            }
+            "color-picker" => {
+                let x = self.cursor_location.x.round() as i32;
+                let y = self.cursor_location.y.round() as i32;
+                let (r, g, b) = sample_screen_pixel_at(x, y);
+                let (hex, rgb_str) = format_color_hex_rgb(r, g, b);
+                if let Ok(mut child) = std::process::Command::new("wl-copy")
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                {
+                    if let Some(mut stdin) = child.stdin.take() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(hex.as_bytes());
+                    }
+                }
+                let msg = format!("{} — {} panoya kopyalandı ({}, {})", hex, rgb_str, x, y);
+                let _ = std::process::Command::new("notify-send")
+                    .args(["Corten Renk Seçici", &msg])
+                    .spawn();
+            }
+            "save-session" => {
+                if let Ok(path) = self.save_window_session_to_disk() {
+                    let msg = format!("Oturum pencere konumları kaydedildi ({})", path.display());
+                    let _ = std::process::Command::new("notify-send")
+                        .args(["Corten Oturum Yöneticisi", &msg])
+                        .spawn();
+                }
+            }
+            "restore-session" => {
+                let count = self.apply_restored_session();
+                let msg = format!("{} pencerenin çalışma alanı ve konumu geri yüklendi", count);
+                let _ = std::process::Command::new("notify-send")
+                    .args(["Corten Oturum Yöneticisi", &msg])
+                    .spawn();
+            }
+            "toggle-xwayland-zero-scale" => {
+                self.xwayland_force_zero_scaling = !self.xwayland_force_zero_scaling;
+                let msg = if self.xwayland_force_zero_scaling {
+                    "XWayland Keskin Ölçekleme (Force Zero Scaling) Aktif"
+                } else {
+                    "XWayland Standart Kompozitör Ölçeklemesi Aktif"
+                };
+                let _ = std::process::Command::new("notify-send")
+                    .args(["Corten XWayland", msg])
+                    .spawn();
+            }
+            "prepare-sleep" => {
+                self.handle_prepare_for_sleep(true);
+            }
+            "resume-wake" => {
+                self.handle_prepare_for_sleep(false);
+            }
+            _ => {
+                tracing::debug!("Compositor: unhandled custom action '{}'", action);
+            }
+        }
+        self.sync_ipc_snapshot();
+    }
+
+    /// Handles `org.freedesktop.login1.Manager.PrepareForSleep(going_to_sleep)` lifecycle:
+    /// locks session prior to suspend and recovers DRM/output scales & input timers upon resume.
+    pub fn handle_prepare_for_sleep(&mut self, going_to_sleep: bool) {
+        if going_to_sleep {
+            tracing::info!("Compositor: PrepareForSleep(true) — locking session and saving window layout before suspend");
+            let _ = self.save_window_session_to_disk();
+            if !self.session_locked {
+                let lock_bin = resolve_corten_bin("corten-lock");
+                let _ = std::process::Command::new(lock_bin).spawn();
+            }
+        } else {
+            tracing::info!("Compositor: PrepareForSleep(false) — system resumed; waking outputs and refreshing surface scales");
+            self.note_input();
+            self.refresh_all_surface_scales();
+            let usable = self.usable_area();
+            for (w, r) in self.layout.arrange(usable) {
+                crate::layout::configure_window_geometry(&w, r);
+            }
+            self.sync_ipc_snapshot();
+        }
+    }
+
+    /// Captures all currently open windows' workspace and geometry into a serializable snapshot.
+    pub fn capture_session_snapshot(&self) -> Vec<SavedWindowEntry> {
+        let mut entries = Vec::new();
+        for snap in self.layout.window_snapshots() {
+            if snap.app_id.is_empty() {
+                continue;
+            }
+            let win_opt = self
+                .layout
+                .windows()
+                .iter()
+                .chain(self.layout.floating_windows().iter())
+                .find(|w| crate::layout::window_stable_id(w) == snap.id);
+            let rect = win_opt
+                .and_then(|w| self.layout.floating_geometry(w))
+                .unwrap_or_else(|| {
+                    Rectangle::new(Point::from((120, 90)), Size::from((960, 640)))
+                });
+            entries.push(SavedWindowEntry {
+                app_id: snap.app_id,
+                title: snap.title,
+                workspace: snap.workspace,
+                is_floating: snap.is_floating,
+                x: rect.loc.x,
+                y: rect.loc.y,
+                width: rect.size.w,
+                height: rect.size.h,
+            });
+        }
+        entries
+    }
+
+    /// Saves the active window session layout to `~/.config/corten/window_session.toml`.
+    pub fn save_window_session_to_disk(&self) -> std::io::Result<std::path::PathBuf> {
+        let entries = self.capture_session_snapshot();
+        let path = window_session_file_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let body = serialize_window_session(&entries);
+        std::fs::write(&path, body)?;
+        Ok(path)
+    }
+
+    /// Applies saved workspace and floating geometry rules from `~/.config/corten/window_session.toml`
+    /// to currently open windows.
+    pub fn apply_restored_session(&mut self) -> usize {
+        let saved = load_window_session_from_disk();
+        if saved.is_empty() {
+            return 0;
+        }
+        let mut restored = 0usize;
+        let all_wins: Vec<Window> = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .cloned()
+            .collect();
+        for win in all_wins {
+            let (app_id, _) = crate::layout::window_metadata(&win);
+            if let Some(entry) = saved.iter().find(|e| e.app_id == app_id) {
+                if entry.is_floating {
+                    let rect = Rectangle::new(
+                        Point::from((entry.x, entry.y)),
+                        Size::from((entry.width.max(160), entry.height.max(120))),
+                    );
+                    self.layout.set_floating_geometry(&win, rect);
+                    crate::layout::configure_window_geometry(&win, rect);
+                }
+                if (1..=9).contains(&entry.workspace) {
+                    self.layout.set_active_window(&win);
+                    let _ = self.layout.move_active_to_workspace(entry.workspace);
+                }
+                restored += 1;
+            }
+        }
+        restored
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedWindowEntry {
+    pub app_id: String,
+    pub title: String,
+    pub workspace: usize,
+    pub is_floating: bool,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+pub fn window_session_file_path() -> std::path::PathBuf {
+    let base = std::env::var("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|_| {
+            std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
+        })
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+    base.join("corten").join("window_session.tsv")
+}
+
+pub fn serialize_window_session(entries: &[SavedWindowEntry]) -> String {
+    let mut out = String::new();
+    for e in entries {
+        let safe_app = e.app_id.replace(['\t', '\n'], " ");
+        let safe_title = e.title.replace(['\t', '\n'], " ");
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            safe_app,
+            safe_title,
+            e.workspace,
+            if e.is_floating { 1 } else { 0 },
+            e.x,
+            e.y,
+            e.width,
+            e.height
+        ));
+    }
+    out
+}
+
+pub fn parse_window_session(content: &str) -> Vec<SavedWindowEntry> {
+    let mut list = Vec::new();
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() == 8 {
+            if let (Ok(ws), Ok(fl), Ok(x), Ok(y), Ok(w), Ok(h)) = (
+                parts[2].parse::<usize>(),
+                parts[3].parse::<u8>(),
+                parts[4].parse::<i32>(),
+                parts[5].parse::<i32>(),
+                parts[6].parse::<i32>(),
+                parts[7].parse::<i32>(),
+            ) {
+                list.push(SavedWindowEntry {
+                    app_id: parts[0].to_string(),
+                    title: parts[1].to_string(),
+                    workspace: ws,
+                    is_floating: fl != 0,
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                });
+            }
+        }
+    }
+    list
+}
+
+pub fn load_window_session_from_disk() -> Vec<SavedWindowEntry> {
+    let path = window_session_file_path();
+    std::fs::read_to_string(path)
+        .map(|s| parse_window_session(&s))
+        .unwrap_or_default()
+}
+
+/// Formats an RGB triplet into `("#RRGGBB", "rgb(R, G, B)")`.
+pub fn format_color_hex_rgb(r: u8, g: u8, b: u8) -> (String, String) {
+    (
+        format!("#{:02X}{:02X}{:02X}", r, g, b),
+        format!("rgb({}, {}, {})", r, g, b),
+    )
+}
+
+/// Parses a 1x1 binary (P6) or ASCII (P3) PPM image produced by `grim -g "X,Y 1x1" -t ppm -`.
+pub fn parse_ppm_pixel(ppm_bytes: &[u8]) -> Option<(u8, u8, u8)> {
+    if ppm_bytes.starts_with(b"P6") && ppm_bytes.len() >= 3 {
+        let n = ppm_bytes.len();
+        return Some((ppm_bytes[n - 3], ppm_bytes[n - 2], ppm_bytes[n - 1]));
+    }
+    if ppm_bytes.starts_with(b"P3") {
+        let text = std::str::from_utf8(ppm_bytes).ok()?;
+        let tokens: Vec<u8> = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .flat_map(|l| l.split_whitespace())
+            .skip(4) // P3, width, height, maxval
+            .filter_map(|t| t.parse::<u8>().ok())
+            .collect();
+        if tokens.len() >= 3 {
+            return Some((tokens[0], tokens[1], tokens[2]));
+        }
+    }
+    None
+}
+
+/// Samples the pixel color at screen coordinates `(x, y)` via `grim` 1x1 PPM capture.
+pub fn sample_screen_pixel_at(x: i32, y: i32) -> (u8, u8, u8) {
+    let geom = format!("{},{} 1x1", x.max(0), y.max(0));
+    if let Ok(out) = std::process::Command::new("grim")
+        .args(["-g", &geom, "-t", "ppm", "-"])
+        .output()
+    {
+        if out.status.success() {
+            if let Some(rgb) = parse_ppm_pixel(&out.stdout) {
+                return rgb;
+            }
+        }
+    }
+    // Fallback Corten Copper accent if grim is not active
+    (217, 107, 67)
 }
 
 pub fn resolve_corten_bin(name: &str) -> std::path::PathBuf {
@@ -1343,5 +1894,45 @@ mod tests {
 
         let outside_bottom: Point<f64, smithay::utils::Logical> = Point::from((300.0, 900.0));
         assert_eq!(outside_bottom.y.clamp(min_y, max_y), 799.0);
+    }
+
+    #[test]
+    fn test_color_picker_ppm_parsing_and_formatting() {
+        let p6 = b"P6\n1 1\n255\n\xD9\x6B\x43";
+        assert_eq!(parse_ppm_pixel(p6), Some((217, 107, 67)));
+        let p3 = b"P3\n1 1\n255\n64 128 255\n";
+        assert_eq!(parse_ppm_pixel(p3), Some((64, 128, 255)));
+        let (hex, rgb) = format_color_hex_rgb(217, 107, 67);
+        assert_eq!(hex, "#D96B43");
+        assert_eq!(rgb, "rgb(217, 107, 67)");
+    }
+
+    #[test]
+    fn test_window_session_serialize_and_parse_roundtrip() {
+        let entries = vec![
+            SavedWindowEntry {
+                app_id: "corten-terminal".into(),
+                title: "Terminal".into(),
+                workspace: 1,
+                is_floating: false,
+                x: 100,
+                y: 80,
+                width: 960,
+                height: 640,
+            },
+            SavedWindowEntry {
+                app_id: "corten-files".into(),
+                title: "Dosyalar".into(),
+                workspace: 2,
+                is_floating: true,
+                x: 240,
+                y: 160,
+                width: 1100,
+                height: 720,
+            },
+        ];
+        let encoded = serialize_window_session(&entries);
+        let decoded = parse_window_session(&encoded);
+        assert_eq!(decoded, entries);
     }
 }

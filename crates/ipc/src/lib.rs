@@ -85,6 +85,9 @@ pub trait CompositorControl {
     fn toggle_show_desktop(&self) -> zbus::Result<()>;
     /// Toggles the Exposé / Window Overview mode.
     fn toggle_overview(&self) -> zbus::Result<()>;
+    /// Dispatches a named compositor action (e.g. toggle-scratchpad, toggle-sticky, toggle-game-mode,
+    /// scroll-left, scroll-right, zoom-in, zoom-out, zoom-reset, cycle-layout).
+    fn dispatch_action(&self, action: &str) -> zbus::Result<String>;
     /// Captures a screenshot directly from the compositor framebuffer (or region via slurp) to PNG and clipboard.
     fn take_screenshot(&self, region: bool) -> zbus::Result<()>;
     /// Returns the currently active workspace number (1..=9).

@@ -217,6 +217,12 @@ pub struct AppearanceConfig {
     pub patina: String,
     #[serde(default = "default_density")]
     pub density: String,
+    #[serde(default)]
+    pub secondary_wallpaper_path: String,
+    #[serde(default)]
+    pub live_wallpaper_shader: bool,
+    #[serde(default)]
+    pub desktop_icons_enabled: bool,
 }
 
 impl Default for AppearanceConfig {
@@ -231,6 +237,9 @@ impl Default for AppearanceConfig {
             language: default_language(),
             patina: default_patina(),
             density: default_density(),
+            secondary_wallpaper_path: String::new(),
+            live_wallpaper_shader: false,
+            desktop_icons_enabled: false,
         }
     }
 }
@@ -244,6 +253,10 @@ pub struct InputSettingsConfig {
     pub pointer_speed: i32,
     pub remap_caps_to_ctrl: bool,
     pub virtual_keyboard_enabled: bool,
+    pub swipe_3_fingers: String,
+    pub swipe_4_fingers: String,
+    pub tablet_pressure_curve: String,
+    pub tablet_left_handed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -254,6 +267,7 @@ pub enum LayoutMode {
     MasterStack,
     Dwindle,
     Bsp,
+    Scrollable,
     Monocle,
 }
 
@@ -263,7 +277,8 @@ impl LayoutMode {
             Self::Floating => Self::MasterStack,
             Self::MasterStack => Self::Dwindle,
             Self::Dwindle => Self::Bsp,
-            Self::Bsp => Self::Monocle,
+            Self::Bsp => Self::Scrollable,
+            Self::Scrollable => Self::Monocle,
             Self::Monocle => Self::Floating,
         }
     }
@@ -274,6 +289,7 @@ impl LayoutMode {
             Self::MasterStack => "Master-Stack",
             Self::Dwindle => "Dwindle (Spiral)",
             Self::Bsp => "BSP (Ağaç Bölme)",
+            Self::Scrollable => "Scrollable (Niri Yatay Şerit)",
             Self::Monocle => "Monocle (Tekli)",
         }
     }
@@ -287,6 +303,9 @@ pub struct WindowRuleConfig {
     pub floating: Option<bool>,
     pub workspace: Option<usize>,
     pub fullscreen: Option<bool>,
+    pub sticky: Option<bool>,
+    pub scratchpad: Option<bool>,
+    pub decoration_mode: Option<String>,
     pub opacity_percent: Option<u8>,
     pub blur: Option<bool>,
 }
@@ -582,6 +601,12 @@ pub struct DisplaySettingsConfig {
     pub hdr_enabled: bool,
     pub color_space: String,
     pub max_luminance_nits: Option<u32>,
+    #[serde(default = "default_true_bool")]
+    pub xwayland_force_zero_scaling: bool,
+}
+
+fn default_true_bool() -> bool {
+    true
 }
 
 impl Default for DisplaySettingsConfig {
@@ -603,6 +628,7 @@ impl Default for DisplaySettingsConfig {
             hdr_enabled: false,
             color_space: "srgb".into(),
             max_luminance_nits: Some(400),
+            xwayland_force_zero_scaling: true,
         }
     }
 }
@@ -695,6 +721,10 @@ impl Default for InputSettingsConfig {
             pointer_speed: 0,
             remap_caps_to_ctrl: true,
             virtual_keyboard_enabled: true,
+            swipe_3_fingers: "workspace".to_string(),
+            swipe_4_fingers: "overview".to_string(),
+            tablet_pressure_curve: "linear".to_string(),
+            tablet_left_handed: false,
         }
     }
 }

@@ -28,6 +28,57 @@ pub struct InnerState {
     pub hnsw_neighbors: Vec<Vec<usize>>,
 }
 
+impl InnerState {
+    /// Removes stale inverted-index entries for `id` before overwrite or deletion.
+    pub fn remove_metadata_from_inverted(&mut self, id: usize) {
+        if let Some(old_meta) = self.metadata_store.remove(&id) {
+            for (k, v) in old_meta {
+                let mut remove_val_key = false;
+                if let Some(val_map) = self.inverted_index.get_mut(&k) {
+                    if let Some(id_set) = val_map.get_mut(&v) {
+                        id_set.remove(&id);
+                        if id_set.is_empty() {
+                            remove_val_key = true;
+                        }
+                    }
+                    if remove_val_key {
+                        val_map.remove(&v);
+                    }
+                }
+                if self.inverted_index.get(&k).is_some_and(|m| m.is_empty()) {
+                    self.inverted_index.remove(&k);
+                }
+            }
+        }
+    }
+
+    /// Upserts a normalized vector and metadata without creating duplicate IDs or leaking stale index keys.
+    pub fn upsert_vector(
+        &mut self,
+        id: usize,
+        normalized_vec: Vec<f32>,
+        meta: HashMap<String, String>,
+    ) {
+        self.remove_metadata_from_inverted(id);
+        if let Some(pos) = self.ids.iter().position(|&existing| existing == id) {
+            self.raw_vectors[pos] = VectorPoint(normalized_vec);
+        } else {
+            self.raw_vectors.push(VectorPoint(normalized_vec));
+            self.ids.push(id);
+        }
+        for (k, v) in &meta {
+            self.inverted_index
+                .entry(k.clone())
+                .or_default()
+                .entry(v.clone())
+                .or_default()
+                .insert(id);
+        }
+        self.metadata_store.insert(id, meta);
+        self.tombstone_ids.remove(&id);
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct VectorIndex {
     state: Arc<RwLock<InnerState>>,
@@ -55,6 +106,10 @@ impl VectorIndex {
         metadata: HashMap<String, String>,
     ) {
         let normalized_vec = normalize_vector(vector);
+        // Consistent lock order: state FIRST, then wal_path (prevents AB-BA deadlocks)
+        let Ok(mut state) = self.state.write() else {
+            return;
+        };
         if let Ok(wal_lock) = self.wal_path.read() {
             append_wal(
                 &wal_lock,
@@ -65,24 +120,7 @@ impl VectorIndex {
                 },
             );
         }
-
-        if let Ok(mut state) = self.state.write() {
-            state.raw_vectors.push(VectorPoint(normalized_vec));
-            state.ids.push(id);
-            state.metadata_store.insert(id, metadata.clone());
-
-            for (k, v) in &metadata {
-                state
-                    .inverted_index
-                    .entry(k.clone())
-                    .or_default()
-                    .entry(v.clone())
-                    .or_default()
-                    .insert(id);
-            }
-
-            state.tombstone_ids.remove(&id);
-        }
+        state.upsert_vector(id, normalized_vec, metadata);
     }
 
     pub fn add_document_text(
@@ -122,21 +160,7 @@ impl VectorIndex {
                     },
                 );
 
-                state.raw_vectors.push(VectorPoint(normalized_vec));
-                state.ids.push(id);
-                state.metadata_store.insert(id, meta.clone());
-
-                for (k, v) in &meta {
-                    state
-                        .inverted_index
-                        .entry(k.clone())
-                        .or_default()
-                        .entry(v.clone())
-                        .or_default()
-                        .insert(id);
-                }
-
-                state.tombstone_ids.remove(&id);
+                state.upsert_vector(id, normalized_vec, meta);
             }
         }
     }
@@ -202,30 +226,19 @@ impl VectorIndex {
     }
 
     pub fn delete_id(&self, id: usize) -> bool {
-        if let Ok(wal_lock) = self.wal_path.read() {
-            append_wal(&wal_lock, &WalEntry::Delete { id });
-        }
-
         let Ok(mut state) = self.state.write() else {
             return false;
         };
-
-        if let Some(meta) = state.metadata_store.remove(&id) {
-            for (k, v) in meta {
-                if let Some(val_map) = state.inverted_index.get_mut(&k) {
-                    if let Some(id_set) = val_map.get_mut(&v) {
-                        id_set.remove(&id);
-                    }
-                }
-            }
-            state.tombstone_ids.insert(id);
-            true
-        } else if state.ids.contains(&id) {
-            state.tombstone_ids.insert(id);
-            true
-        } else {
-            false
+        let existed = state.metadata_store.contains_key(&id) || state.ids.contains(&id);
+        if !existed {
+            return false;
         }
+        if let Ok(wal_lock) = self.wal_path.read() {
+            append_wal(&wal_lock, &WalEntry::Delete { id });
+        }
+        state.remove_metadata_from_inverted(id);
+        state.tombstone_ids.insert(id);
+        true
     }
 
     pub fn update_id(

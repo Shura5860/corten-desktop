@@ -95,7 +95,7 @@ sudo install -d /usr/share/xdg-desktop-portal/portals
 sudo tee /usr/share/xdg-desktop-portal/portals/corten.portal > /dev/null << 'EOF'
 [portal]
 DBusName=org.freedesktop.impl.portal.desktop.corten
-Interfaces=org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.Screenshot;org.freedesktop.impl.portal.FileChooser;org.freedesktop.impl.portal.Settings;
+Interfaces=org.freedesktop.impl.portal.ScreenCast;org.freedesktop.impl.portal.Screenshot;org.freedesktop.impl.portal.FileChooser;org.freedesktop.impl.portal.Settings;org.freedesktop.impl.portal.GlobalShortcuts;org.freedesktop.impl.portal.RemoteDesktop;org.freedesktop.impl.portal.InputCapture;
 UseIn=Corten;corten;
 EOF
 sudo install -d /usr/share/dbus-1/services

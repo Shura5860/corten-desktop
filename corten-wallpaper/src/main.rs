@@ -5,7 +5,7 @@ use tracing::info;
 use ::image as image_crate;
 use corten_config::{AppearanceConfig, ConfigManager};
 use corten_theme::{Palette, PatinaVariant, ThemeMode};
-use iced::widget::{container, image as iced_image};
+use iced::widget::{button, column, container, image as iced_image, row, text};
 use iced::{Element, Length, Subscription};
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
@@ -65,7 +65,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             (vec![path], false)
         }
     } else {
-        let resolved = resolve_wallpapers();
+        let resolved = resolve_wallpapers_for_output(target_output.as_deref());
         (resolved, false)
     };
 
@@ -80,6 +80,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         wallpapers,
         interval_secs,
         slideshow_enabled,
+        output_name: target_output.clone(),
     };
 
     CortenWallpaperApp::run(Settings {
@@ -129,9 +130,22 @@ pub fn collect_wallpapers(path: &Path) -> Vec<PathBuf> {
 }
 
 pub fn resolve_wallpapers() -> Vec<PathBuf> {
-    // 0. Check AppearanceConfig for user configured wallpaper
+    resolve_wallpapers_for_output(None)
+}
+
+pub fn resolve_wallpapers_for_output(output_name: Option<&str>) -> Vec<PathBuf> {
+    // 0. Check AppearanceConfig for user configured wallpaper (or per-monitor secondary wallpaper)
     if let Ok(app_mgr) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
-        let path_str = app_mgr.get().wallpaper_path.trim();
+        let cfg = app_mgr.get();
+        if let Some(out) = output_name {
+            if !out.ends_with("-1") && !cfg.secondary_wallpaper_path.trim().is_empty() {
+                let sec_p = PathBuf::from(cfg.secondary_wallpaper_path.trim());
+                if sec_p.exists() && sec_p.is_file() {
+                    return vec![sec_p];
+                }
+            }
+        }
+        let path_str = cfg.wallpaper_path.trim();
         if !path_str.is_empty() {
             let p = PathBuf::from(path_str);
             if p.exists() {
@@ -199,6 +213,7 @@ pub struct WallpaperFlags {
     pub wallpapers: Vec<PathBuf>,
     pub interval_secs: u64,
     pub slideshow_enabled: bool,
+    pub output_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +221,8 @@ pub enum Message {
     NextWallpaper,
     ReloadConfig,
     CheckPeriodic,
+    ShaderTick,
+    OpenDesktopEntry(PathBuf),
     LayerAction(LayershellCustomActions),
 }
 
@@ -266,11 +283,38 @@ pub fn sync_ambiance_to_config(path: &Path) {
     });
 }
 
+pub fn scan_desktop_folder_icons() -> Vec<(String, PathBuf, bool)> {
+    let Ok(home) = std::env::var("HOME") else {
+        return Vec::new();
+    };
+    let desktop_dir = Path::new(&home).join("Desktop");
+    let Ok(entries) = std::fs::read_dir(&desktop_dir) else {
+        return Vec::new();
+    };
+    let mut items = Vec::new();
+    for entry in entries.flatten().take(16) {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        let is_dir = path.is_dir();
+        items.push((name, path, is_dir));
+    }
+    items.sort_by(|a, b| a.0.cmp(&b.0));
+    items
+}
+
 pub struct CortenWallpaperApp {
     wallpapers: Vec<PathBuf>,
     current_index: usize,
     interval_secs: u64,
     slideshow_enabled: bool,
+    output_name: Option<String>,
+    live_shader_enabled: bool,
+    desktop_icons_enabled: bool,
+    desktop_icons: Vec<(String, PathBuf, bool)>,
+    shader_phase: f32,
     palette: Palette,
 }
 
@@ -284,12 +328,26 @@ impl Application for CortenWallpaperApp {
         if let Some(first) = flags.wallpapers.first() {
             sync_ambiance_to_config(first);
         }
+        let (live_shader_enabled, desktop_icons_enabled) =
+            ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                .map(|c| (c.get().live_wallpaper_shader, c.get().desktop_icons_enabled))
+                .unwrap_or((false, false));
+        let desktop_icons = if desktop_icons_enabled {
+            scan_desktop_folder_icons()
+        } else {
+            Vec::new()
+        };
         (
             Self {
                 wallpapers: flags.wallpapers,
                 current_index: 0,
                 interval_secs: flags.interval_secs,
                 slideshow_enabled: flags.slideshow_enabled,
+                output_name: flags.output_name,
+                live_shader_enabled,
+                desktop_icons_enabled,
+                desktop_icons,
+                shader_phase: 0.0,
                 palette: Palette::for_mode(ThemeMode::Dark),
             },
             Task::none(),
@@ -319,7 +377,21 @@ impl Application for CortenWallpaperApp {
             }
             Message::ReloadConfig | Message::CheckPeriodic => {
                 if let Ok(app_mgr) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
-                    let path_str = app_mgr.get().wallpaper_path.trim();
+                    let cfg = app_mgr.get();
+                    self.live_shader_enabled = cfg.live_wallpaper_shader;
+                    self.desktop_icons_enabled = cfg.desktop_icons_enabled;
+                    self.desktop_icons = if self.desktop_icons_enabled {
+                        scan_desktop_folder_icons()
+                    } else {
+                        Vec::new()
+                    };
+                    let path_str = if self.output_name.as_deref().is_some_and(|o| !o.ends_with("-1"))
+                        && !cfg.secondary_wallpaper_path.trim().is_empty()
+                    {
+                        cfg.secondary_wallpaper_path.trim()
+                    } else {
+                        cfg.wallpaper_path.trim()
+                    };
                     if !path_str.is_empty() {
                         let new_path = PathBuf::from(path_str);
                         if new_path.exists() && new_path.is_file() {
@@ -334,15 +406,72 @@ impl Application for CortenWallpaperApp {
                     }
                 }
             }
+            Message::ShaderTick => {
+                self.shader_phase = (self.shader_phase + 0.04) % std::f32::consts::TAU;
+            }
+            Message::OpenDesktopEntry(path) => {
+                let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+            }
             Message::LayerAction(_) => {}
         }
         Task::none()
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
+        let icons_overlay: Option<Element<'_, Self::Message>> = if self.desktop_icons_enabled && !self.desktop_icons.is_empty() {
+            let mut col = column![].spacing(10).padding(24);
+            for (name, path, is_dir) in &self.desktop_icons {
+                let icon_prefix = if *is_dir { "📁" } else { "📄" };
+                let label = if name.chars().count() > 18 {
+                    format!("{}…", name.chars().take(17).collect::<String>())
+                } else {
+                    name.clone()
+                };
+                let target_path = path.clone();
+                let item_btn = button(
+                    row![
+                        text(icon_prefix).size(15.0),
+                        text(label).size(12.0).color(iced::Color::WHITE),
+                    ]
+                    .spacing(6),
+                )
+                .padding([6, 10])
+                .style(|_, _| button::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(0.08, 0.09, 0.12, 0.72))),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.16),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(8.0),
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::OpenDesktopEntry(target_path));
+                col = col.push(item_btn);
+            }
+            Some(col.into())
+        } else {
+            None
+        };
+
+        if self.live_shader_enabled {
+            let r = (0.11 + 0.05 * self.shader_phase.sin()).clamp(0.05, 0.25);
+            let g = (0.09 + 0.03 * (self.shader_phase + 1.4).cos()).clamp(0.05, 0.20);
+            let b = (0.14 + 0.05 * (self.shader_phase * 0.7).sin()).clamp(0.08, 0.26);
+            let inner: Element<'_, Self::Message> = icons_overlay
+                .unwrap_or_else(|| iced::widget::Space::new(Length::Fill, Length::Fill).into());
+            return container(inner)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgb(r, g, b))),
+                    ..Default::default()
+                })
+                .into();
+        }
+
         if let Some(path) = self.wallpapers.get(self.current_index) {
             let handle = iced_image::Handle::from_path(path);
-            container(
+            let bg: Element<'_, Self::Message> = container(
                 iced_image(handle)
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -356,10 +485,20 @@ impl Application for CortenWallpaperApp {
                 ))),
                 ..Default::default()
             })
-            .into()
+            .into();
+            if let Some(overlay) = icons_overlay {
+                iced::widget::stack![bg, overlay]
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            } else {
+                bg
+            }
         } else {
             // Elegant fallback dark canvas
-            container(iced::widget::Space::new(Length::Fill, Length::Fill))
+            let inner: Element<'_, Self::Message> = icons_overlay
+                .unwrap_or_else(|| iced::widget::Space::new(Length::Fill, Length::Fill).into());
+            container(inner)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(move |_| container::Style {
@@ -407,6 +546,12 @@ impl Application for CortenWallpaperApp {
             iced::time::every(Duration::from_millis(1000)).map(|_| Message::CheckPeriodic),
         );
 
+        if self.live_shader_enabled {
+            subs.push(
+                iced::time::every(Duration::from_millis(80)).map(|_| Message::ShaderTick),
+            );
+        }
+
         Subscription::batch(subs)
     }
 }
@@ -448,9 +593,11 @@ mod tests {
             wallpapers: vec![PathBuf::from("/tmp/test.png")],
             interval_secs: 60,
             slideshow_enabled: true,
+            output_name: Some("DP-2".into()),
         };
         assert_eq!(flags.wallpapers.len(), 1);
         assert_eq!(flags.interval_secs, 60);
         assert!(flags.slideshow_enabled);
+        assert_eq!(flags.output_name.as_deref(), Some("DP-2"));
     }
 }

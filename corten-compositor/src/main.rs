@@ -67,6 +67,7 @@ pub enum CompositorIpcCommand {
     ToggleShowDesktop,
     ToggleOverview,
     TakeScreenshot(Option<Rectangle<i32, smithay::utils::Logical>>),
+    CustomAction(String),
 }
 
 extern "C" fn request_shutdown(_: nix::libc::c_int) {
@@ -460,6 +461,7 @@ pub(crate) fn apply_display_settings(state: &mut CortenCompositor) {
     state.allow_tearing = display_config.allow_tearing;
     state.hdr_enabled = display_config.hdr_enabled;
     state.color_space = display_config.color_space.clone();
+    state.xwayland_force_zero_scaling = display_config.xwayland_force_zero_scaling;
     if state.hdr_enabled {
         info!(
             color_space = %state.color_space,
@@ -931,6 +933,12 @@ fn main() -> anyhow::Result<()> {
                     let _ = self.tx.send(CompositorIpcCommand::ToggleOverview);
                 }
 
+                async fn dispatch_action(&self, action: String) -> String {
+                    info!(action = %action, "D-Bus: Compositor dispatch_action received");
+                    let _ = self.tx.send(CompositorIpcCommand::CustomAction(action.clone()));
+                    format!("Dispatched action: {}", action)
+                }
+
                 async fn take_screenshot(&self, region: bool) {
                     info!(region, "D-Bus: Compositor take_screenshot received");
                     if !region {
@@ -1077,6 +1085,36 @@ fn main() -> anyhow::Result<()> {
                         .unwrap_or_else(|_| (1, Vec::new(), Vec::new()))
                 }
             }
+
+            let sleep_tx = ipc_tx.clone();
+            tokio::spawn(async move {
+                if let Ok(sys_conn) = zbus::Connection::system().await {
+                    if let Ok(proxy) = zbus::Proxy::new(
+                        &sys_conn,
+                        "org.freedesktop.login1",
+                        "/org/freedesktop/login1",
+                        "org.freedesktop.login1.Manager",
+                    )
+                    .await
+                    {
+                        if let Ok(mut stream) = proxy.receive_signal("PrepareForSleep").await {
+                            use zbus::export::ordered_stream::OrderedStreamExt;
+                            while let Some(msg) = stream.next().await {
+                                let going_to_sleep =
+                                    msg.body().deserialize::<bool>().unwrap_or(false);
+                                let action = if going_to_sleep {
+                                    "prepare-sleep"
+                                } else {
+                                    "resume-wake"
+                                };
+                                let _ = sleep_tx.send(CompositorIpcCommand::CustomAction(
+                                    action.to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            });
 
             let server = CompositorServer {
                 tx: ipc_tx,
@@ -1284,6 +1322,10 @@ fn main() -> anyhow::Result<()> {
                     state.request_screenshot(region);
                     continue;
                 }
+                CompositorIpcCommand::CustomAction(action) => {
+                    state.handle_custom_action(&action);
+                    continue;
+                }
                 CompositorIpcCommand::ReloadConfig => {}
             }
             info!("Compositor: Reloading configuration from ~/.config/corten/compositor.toml");
@@ -1333,6 +1375,8 @@ fn main() -> anyhow::Result<()> {
             }
             if let Ok(config) = ConfigManager::<InputSettingsConfig>::load_or_default("input") {
                 input_settings = config.get().clone();
+                state.tablet_pressure_curve = input_settings.tablet_pressure_curve.clone();
+                state.tablet_left_handed = input_settings.tablet_left_handed;
                 let options = if input_settings.remap_caps_to_ctrl {
                     "terminate:ctrl_alt_bksp,caps:ctrl_modifier".to_string()
                 } else {
@@ -1695,6 +1739,21 @@ fn main() -> anyhow::Result<()> {
                                         let _ = std::process::Command::new(launcher_path).arg("--notes").spawn();
                                         return FilterResult::Intercept(());
                                     }
+                                    // Super + . (Period): Open Built-in Emoji & Unicode Symbol Picker
+                                    keysyms::KEY_period
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        info!("Compositor Hotkey: Super+. triggered (Launch Corten Emoji & Unicode Picker)");
+                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
+                                        let _ = std::process::Command::new(launcher_path).arg("--emoji").spawn();
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + Shift + C: System-Wide Color Picker / Eyedropper
+                                    keysyms::KEY_c | keysyms::KEY_C
+                                        if modifiers.logo && modifiers.shift && !modifiers.ctrl && !modifiers.alt => {
+                                        info!("Compositor Hotkey: Super+Shift+C triggered (Color Picker)");
+                                        state.handle_custom_action("color-picker");
+                                        return FilterResult::Intercept(());
+                                    }
                                     // Super + Q: Close active window
                                     keysyms::KEY_q | keysyms::KEY_Q
                                         if binding_matches(
@@ -1895,6 +1954,57 @@ fn main() -> anyhow::Result<()> {
                                         let _ = std::process::Command::new("busctl")
                                             .args(["--user", "call", "org.corten.Panel", "/org/corten/Panel", "org.corten.Panel", "TriggerModule", "s", "desktop_hub"])
                                             .spawn();
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + Minus: Toggle Scratchpad Window / Super + Shift + Minus: Send to Scratchpad
+                                    keysyms::KEY_minus | keysyms::KEY_underscore
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        if modifiers.shift {
+                                            state.handle_custom_action("move-to-scratchpad");
+                                        } else {
+                                            state.handle_custom_action("toggle-scratchpad");
+                                        }
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + S (without Shift): Toggle Sticky / PiP Window Across Workspaces
+                                    keysyms::KEY_s | keysyms::KEY_S
+                                        if modifiers.logo && !modifiers.shift && !modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("toggle-sticky");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + G: One-Click Game Mode
+                                    keysyms::KEY_g | keysyms::KEY_G
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("toggle-game-mode");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + Equal / Plus / KP_Add: Compositor Zoom In
+                                    keysyms::KEY_equal | keysyms::KEY_plus | keysyms::KEY_KP_Add
+                                        if modifiers.logo && !modifiers.alt => {
+                                        state.handle_custom_action("zoom-in");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + Ctrl + Minus / KP_Subtract: Compositor Zoom Out
+                                    keysyms::KEY_minus | keysyms::KEY_KP_Subtract
+                                        if modifiers.logo && modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("zoom-out");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + 0: Reset Compositor Zoom
+                                    keysyms::KEY_0
+                                        if modifiers.logo && !modifiers.shift && !modifiers.alt => {
+                                        state.handle_custom_action("zoom-reset");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + [ / Super + ]: Scrollable Strip Left / Right
+                                    keysyms::KEY_bracketleft
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("scroll-left");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    keysyms::KEY_bracketright
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("scroll-right");
                                         return FilterResult::Intercept(());
                                     }
                                     _ => {}
@@ -2561,6 +2671,18 @@ fn main() -> anyhow::Result<()> {
                     pointer.frame(&mut state);
                 }
                 InputEvent::PointerAxis { event } => {
+                    let mod_state = state.seat.get_keyboard().map(|kb| kb.modifier_state());
+                    let zoom_scroll = mod_state.as_ref().is_some_and(|m| m.logo && m.ctrl);
+                    if zoom_scroll {
+                        let v_amount = event
+                            .amount(Axis::Vertical)
+                            .or_else(|| event.amount_v120(Axis::Vertical).map(|s| s * 15.0 / 120.0))
+                            .unwrap_or(0.0);
+                        if v_amount.abs() > 0.01 {
+                            state.adjust_zoom(if v_amount < 0.0 { 0.15 } else { -0.15 });
+                            return;
+                        }
+                    }
                     let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
                     for axis in [Axis::Horizontal, Axis::Vertical] {
                         let amount = event
@@ -2632,7 +2754,7 @@ fn main() -> anyhow::Result<()> {
 
             let mut elements: Vec<CustomRenderElement> = Vec::new();
             let output_scale = state.output.current_scale();
-            let fractional_scale = output_scale.fractional_scale();
+            let fractional_scale = output_scale.fractional_scale() * state.zoom_level.clamp(1.0, 4.0);
             let render_scale = Scale::from(fractional_scale);
             let fullscreen_win = state.layout.active_fullscreen_window();
 
@@ -2675,7 +2797,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             // FAZ 25: Per-Window Dual-Kawase Background Blur for translucent/terminal windows & Ghost Acrylic Snap Silhouette
-            if fullscreen_win.is_none() {
+            if fullscreen_win.is_none() && !state.game_mode {
                 let mut win_glass_regions = Vec::new();
                 for (window, geo) in layouts.iter() {
                     let win_alpha = state.layout.window_alpha(window);
@@ -2767,6 +2889,17 @@ fn main() -> anyhow::Result<()> {
                             .size
                             .to_physical_precise_round(fractional_scale),
                     );
+                    let z = state.zoom_level.clamp(1.0, 4.0);
+                    let glow_rect = Rectangle::new(
+                        Point::from((
+                            (shifted_rect.loc.x as f64 * z).round() as i32,
+                            (shifted_rect.loc.y as f64 * z).round() as i32,
+                        )),
+                        Size::from((
+                            (shifted_rect.size.w as f64 * z).round() as i32,
+                            (shifted_rect.size.h as f64 * z).round() as i32,
+                        )),
+                    );
 
                     if is_active {
                         let is_high_vis = state.accessibility.high_vis_focus_ring
@@ -2805,7 +2938,7 @@ fn main() -> anyhow::Result<()> {
                             ];
                             // 22px soft radiant blur halo + 16dp elevation shadow with 8px squircle corners
                             let glow_elem =
-                                manager.create_element(shifted_rect, 22, 8.0, halo_color);
+                                manager.create_element(glow_rect, 22, 8.0, halo_color);
                             elements.push(CustomRenderElement::from(glow_elem));
                         }
 
@@ -2815,7 +2948,7 @@ fn main() -> anyhow::Result<()> {
                         // Grounded 4dp Dual-Layer shadow + subtle 1px border for inactive windows
                         if let Some(manager) = glow_shader.as_ref() {
                             let shadow_elem =
-                                manager.create_inactive_shadow_element(shifted_rect, 8.0);
+                                manager.create_inactive_shadow_element(glow_rect, 8.0);
                             elements.push(CustomRenderElement::from(shadow_elem));
                         }
                         let inactive_color = Color32F::new(

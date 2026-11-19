@@ -675,8 +675,66 @@ impl SystemInfo {
         items
     }
 
-    /// Reads plain text from Wayland clipboard via wl-paste
+    /// Returns true if the clipboard MIME list indicates a password manager secret
+    /// (KeePassXC, Bitwarden, 1Password, KDE Klipper hint, macOS/freedesktop concealed type).
+    pub fn is_clipboard_secret_mime(mime_list: &str) -> bool {
+        for line in mime_list.lines() {
+            let m = line.trim().to_ascii_lowercase();
+            if m == "x-kde-passwordmanagerhint"
+                || m == "application/x-keepassxc"
+                || m == "org.nspasteboard.concealedtype"
+                || m == "x- secret"
+                || m.contains("passwordmanagerhint")
+                || m.contains("concealedtype")
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Reads plain text or image entry from Wayland clipboard via wl-paste,
+    /// automatically excluding password manager secrets.
     pub fn read_clipboard_text() -> Option<String> {
+        let types_out = Command::new("wl-paste")
+            .arg("--list-types")
+            .output()
+            .ok();
+        if let Some(ref out) = types_out {
+            if out.status.success() {
+                let mime_list = String::from_utf8_lossy(&out.stdout);
+                if Self::is_clipboard_secret_mime(&mime_list) {
+                    return None;
+                }
+                let has_text = mime_list.lines().any(|l| {
+                    let t = l.trim();
+                    t.starts_with("text/plain") || t == "UTF8_STRING" || t == "STRING"
+                });
+                let has_png = mime_list.lines().any(|l| l.trim() == "image/png");
+                if has_png && !has_text {
+                    if let Ok(img_out) = Command::new("wl-paste")
+                        .args(["-t", "image/png"])
+                        .output()
+                    {
+                        if img_out.status.success() && !img_out.stdout.is_empty() {
+                            use std::collections::hash_map::DefaultHasher;
+                            use std::hash::{Hash, Hasher};
+                            let mut hasher = DefaultHasher::new();
+                            img_out.stdout.hash(&mut hasher);
+                            let hash = hasher.finish();
+                            let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+                                .unwrap_or_else(|_| "/tmp".to_string());
+                            let img_path = format!("{}/corten_clip_{:016x}.png", runtime_dir, hash);
+                            if std::fs::write(&img_path, &img_out.stdout).is_ok() {
+                                let kb = (img_out.stdout.len() / 1024).max(1);
+                                return Some(format!("🖼️ [Görsel: PNG {} KB] {}", kb, img_path));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let output = Command::new("wl-paste")
             .args(["-t", "text/plain", "-n"])
             .output()
@@ -690,8 +748,27 @@ impl SystemInfo {
         None
     }
 
-    /// Copies text to the Wayland clipboard via wl-copy
+    /// Copies text or a cached PNG image entry back to the Wayland clipboard via wl-copy
     pub fn copy_to_clipboard(text: &str) {
+        if let Some(rest) = text.strip_prefix("🖼️ [Görsel: PNG ") {
+            if let Some((_, path_part)) = rest.split_once("] ") {
+                let path = path_part.trim();
+                if let Ok(bytes) = std::fs::read(path) {
+                    if let Ok(mut child) = Command::new("wl-copy")
+                        .args(["--type", "image/png"])
+                        .stdin(std::process::Stdio::piped())
+                        .spawn()
+                    {
+                        if let Some(mut stdin) = child.stdin.take() {
+                            use std::io::Write;
+                            let _ = stdin.write_all(&bytes);
+                        }
+                        let _ = child.wait();
+                        return;
+                    }
+                }
+            }
+        }
         if let Ok(mut child) = Command::new("wl-copy")
             .stdin(std::process::Stdio::piped())
             .spawn()
@@ -990,6 +1067,14 @@ mod tests {
         assert_eq!(format_speed(500), "500 B/s");
         assert_eq!(format_speed(2048), "2 KB/s");
         assert_eq!(format_speed(5 * 1024 * 1024), "5.0 MB/s");
+    }
+
+    #[test]
+    fn test_clipboard_secret_mime_filtering() {
+        assert!(SystemInfo::is_clipboard_secret_mime("text/plain\nx-kde-passwordManagerHint\n"));
+        assert!(SystemInfo::is_clipboard_secret_mime("UTF8_STRING\napplication/x-keepassxc\n"));
+        assert!(SystemInfo::is_clipboard_secret_mime("org.nspasteboard.ConcealedType"));
+        assert!(!SystemInfo::is_clipboard_secret_mime("text/plain;charset=utf-8\nUTF8_STRING\n"));
     }
 }
 

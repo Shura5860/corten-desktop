@@ -5,31 +5,51 @@ pub struct VectorPoint(pub Vec<f32>);
 
 impl VectorPoint {
     pub fn distance(&self, other: &Self) -> f32 {
-        self.0
+        let sum: f64 = self
+            .0
             .iter()
             .zip(other.0.iter())
-            .map(|(a, b)| {
-                let diff = a - b;
+            .map(|(&a, &b)| {
+                let da = if a.is_finite() { a as f64 } else { 0.0 };
+                let db = if b.is_finite() { b as f64 } else { 0.0 };
+                let diff = da - db;
                 diff * diff
             })
-            .sum()
+            .sum();
+        if sum.is_finite() {
+            sum as f32
+        } else {
+            f32::MAX
+        }
     }
 
     pub fn cosine_similarity(&self, other: &Self) -> f32 {
-        self.0
+        let sum: f64 = self
+            .0
             .iter()
             .zip(other.0.iter())
-            .map(|(a, b)| a * b)
-            .sum()
+            .map(|(&a, &b)| {
+                let da = if a.is_finite() { a as f64 } else { 0.0 };
+                let db = if b.is_finite() { b as f64 } else { 0.0 };
+                da * db
+            })
+            .sum();
+        if sum.is_finite() { sum as f32 } else { 0.0 }
     }
 }
 
 pub fn normalize_vector(vec: &[f32]) -> Vec<f32> {
-    let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm == 0.0 {
-        vec.to_vec()
+    let clean: Vec<f32> = vec
+        .iter()
+        .map(|&x| if x.is_finite() { x } else { 0.0 })
+        .collect();
+    // Use f64 accumulator to prevent f32 overflow on large components
+    let norm_sq: f64 = clean.iter().map(|&x| (x as f64) * (x as f64)).sum();
+    let norm = norm_sq.sqrt();
+    if norm == 0.0 || !norm.is_finite() {
+        clean
     } else {
-        vec.iter().map(|x| x / norm).collect()
+        clean.iter().map(|&x| ((x as f64) / norm) as f32).collect()
     }
 }
 

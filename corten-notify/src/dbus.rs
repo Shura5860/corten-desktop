@@ -35,6 +35,8 @@ pub struct NotificationItem {
     pub timeout_ms: i32,
     pub sync_tag: Option<String>,
     pub progress: Option<u8>,
+    pub image_path: Option<String>,
+    pub has_inline_reply: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +87,32 @@ pub fn emit_action_invoked(id: u32, action_key: &str) {
                     "org.freedesktop.Notifications",
                     "ActionInvoked",
                     &(id, &key),
+                )
+                .await;
+        });
+    }
+}
+
+pub fn emit_notification_replied(id: u32, reply_text: &str) {
+    if let Some(conn) = get_dbus_connection() {
+        let text = reply_text.to_string();
+        tokio::spawn(async move {
+            let _ = conn
+                .emit_signal(
+                    None::<()>,
+                    "/org/freedesktop/Notifications",
+                    "org.freedesktop.Notifications",
+                    "NotificationReplied",
+                    &(id, &text),
+                )
+                .await;
+            let _ = conn
+                .emit_signal(
+                    None::<()>,
+                    "/org/freedesktop/Notifications",
+                    "org.freedesktop.Notifications",
+                    "ActionInvoked",
+                    &(id, "inline-reply"),
                 )
                 .await;
         });
@@ -182,6 +210,17 @@ impl NotificationServer {
         let clean_summary = strip_html_markup(&summary);
         let clean_body = strip_html_markup(&body);
 
+        let image_path = hints
+            .get("image-path")
+            .or_else(|| hints.get("image_path"))
+            .and_then(|v| v.downcast_ref::<&str>().ok().map(|s| s.to_string()))
+            .map(|s| s.strip_prefix("file://").unwrap_or(&s).to_string())
+            .filter(|s| !s.is_empty() && std::path::Path::new(s).exists());
+
+        let has_inline_reply = action_pairs
+            .iter()
+            .any(|(k, _)| k == "inline-reply" || k == "reply");
+
         let item = NotificationItem {
             id,
             app_name,
@@ -193,6 +232,8 @@ impl NotificationServer {
             timeout_ms: expire_timeout,
             sync_tag,
             progress,
+            image_path,
+            has_inline_reply,
         };
 
         // Do-Not-Disturb check: critical notifications still pass through
@@ -210,7 +251,14 @@ impl NotificationServer {
     }
 
     async fn get_capabilities(&self) -> Vec<&'static str> {
-        vec!["body", "actions", "persistence", "icon-static"]
+        vec![
+            "body",
+            "body-markup",
+            "actions",
+            "inline-reply",
+            "persistence",
+            "icon-static",
+        ]
     }
 
     async fn get_server_information(

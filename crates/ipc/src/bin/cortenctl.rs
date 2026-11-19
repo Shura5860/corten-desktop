@@ -121,6 +121,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     comp.reload_config().await?;
                     println!("Compositor config reloaded");
                 }
+                "toggle-scratchpad"
+                | "move-to-scratchpad"
+                | "toggle-sticky"
+                | "toggle-game-mode"
+                | "scroll-left"
+                | "scroll-right"
+                | "zoom-in"
+                | "zoom-out"
+                | "zoom-reset"
+                | "cycle-layout"
+                | "set-layout-scrollable"
+                | "color-picker" => {
+                    let res = comp.dispatch_action(args[2].as_str()).await?;
+                    println!("{}", res);
+                }
                 "windows" => {
                     let windows = comp.get_windows().await?;
                     let json_windows: Vec<serde_json::Value> = windows

@@ -70,14 +70,9 @@ pub fn sample_top_p(logits: &mut [f32], temperature: f32, top_p: f32, stop_token
 pub fn sample_token(
     logits: &mut [f32],
     params: &SamplerParams,
-    stop_token_ids: &HashSet<usize>,
+    _stop_token_ids: &HashSet<usize>,
 ) -> usize {
-    for &stop_id in stop_token_ids {
-        if stop_id < logits.len() {
-            logits[stop_id] = f32::NEG_INFINITY;
-        }
-    }
-
+    // Do NOT mask stop_token_ids to -inf; the model must be allowed to sample EOS/stop tokens to terminate.
     if params.temperature > 0.0 {
         for val in logits.iter_mut() {
             if *val != f32::NEG_INFINITY {
@@ -120,9 +115,10 @@ pub fn sample_token(
     }
 
     let filtered_probs = &probs[..cutoff_index];
+    let filtered_sum: f32 = filtered_probs.iter().map(|&(_, p)| p).sum();
 
     let mut rng = rand::thread_rng();
-    let r: f32 = rng.gen();
+    let r: f32 = rng.gen::<f32>() * filtered_sum;
     let mut current_p = 0.0;
 
     for &(idx, p) in filtered_probs {

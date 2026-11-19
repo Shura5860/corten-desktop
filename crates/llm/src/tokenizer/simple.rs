@@ -82,14 +82,21 @@ impl SimpleTokenizer {
                 continue;
             }
 
-            // Find distance to next special token or end of string
+            // Find distance to next *known* special token or end of string
             let mut next_special_idx = remaining.len();
             for &st in &special_tokens {
+                if !self.token_to_id.contains_key(st) {
+                    continue;
+                }
                 if let Some(pos) = remaining.find(st) {
                     if pos < next_special_idx {
                         next_special_idx = pos;
                     }
                 }
+            }
+            if next_special_idx == 0 {
+                // Safety guard against zero-progress loop
+                next_special_idx = remaining.chars().next().map(|c| c.len_utf8()).unwrap_or(remaining.len());
             }
 
             let text_chunk = &remaining[..next_special_idx];

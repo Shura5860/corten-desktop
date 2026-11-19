@@ -144,13 +144,119 @@ fn convert_svg_to_png(svg_path: &std::path::Path, out_size: u32) -> Option<PathB
             "-o", out_file.to_str()?,
         ])
         .status()
-        .ok()?;
+        .ok();
 
-    if status.success() && out_file.exists() {
+    if status.is_some_and(|s| s.success()) && out_file.exists() {
+        return Some(out_file);
+    }
+
+    if rasterize_svg_pure_rust(svg_path, &out_file, out_size) {
         Some(out_file)
     } else {
         None
     }
+}
+
+/// Pure-Rust SVG icon fallback rasterizer when `rsvg-convert` is not installed:
+/// extracts the primary hex fill/stroke color from the SVG XML and writes a valid
+/// uncompressed/zlib PNG badge so SVG desktop icons still render without external binaries.
+pub fn rasterize_svg_pure_rust(svg_path: &std::path::Path, out_file: &std::path::Path, out_size: u32) -> bool {
+    let Ok(svg_text) = std::fs::read_to_string(svg_path) else {
+        return false;
+    };
+    let (r, g, b) = extract_svg_accent_color(&svg_text);
+    let png_bytes = encode_solid_rounded_png(out_size.clamp(16, 128), r, g, b);
+    std::fs::write(out_file, png_bytes).is_ok()
+}
+
+pub fn extract_svg_accent_color(svg_text: &str) -> (u8, u8, u8) {
+    for chunk in svg_text.split('#').skip(1) {
+        let hex: String = chunk.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+        if hex.len() == 6 {
+            if let (Ok(r), Ok(g), Ok(b)) = (
+                u8::from_str_radix(&hex[0..2], 16),
+                u8::from_str_radix(&hex[2..4], 16),
+                u8::from_str_radix(&hex[4..6], 16),
+            ) {
+                if (r as u16 + g as u16 + b as u16) > 45 {
+                    return (r, g, b);
+                }
+            }
+        }
+    }
+    (217, 107, 67)
+}
+
+fn encode_solid_rounded_png(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
+    let mut raw_scanlines = Vec::with_capacity(((size * 4 + 1) * size) as usize);
+    let center = (size as f32 - 1.0) * 0.5;
+    let radius = center * 0.85;
+    for y in 0..size {
+        raw_scanlines.push(0u8); // filter type None
+        for x in 0..size {
+            let dx = (x as f32 - center).abs();
+            let dy = (y as f32 - center).abs();
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist <= radius {
+                raw_scanlines.extend_from_slice(&[r, g, b, 240]);
+            } else {
+                raw_scanlines.extend_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+    }
+
+    let mut png = Vec::new();
+    png.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&size.to_be_bytes());
+    ihdr.extend_from_slice(&size.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    write_png_chunk(&mut png, b"IHDR", &ihdr);
+
+    // Stored zlib stream (uncompressed deflate blocks)
+    let mut zlib = vec![0x78, 0x01];
+    let chunks: Vec<&[u8]> = raw_scanlines.chunks(65535).collect();
+    for (i, chunk) in chunks.iter().enumerate() {
+        let is_last = i + 1 == chunks.len();
+        zlib.push(if is_last { 0x01 } else { 0x00 });
+        let len = chunk.len() as u16;
+        zlib.extend_from_slice(&len.to_le_bytes());
+        zlib.extend_from_slice(&(!len).to_le_bytes());
+        zlib.extend_from_slice(chunk);
+    }
+    let adler = adler32(&raw_scanlines);
+    zlib.extend_from_slice(&adler.to_be_bytes());
+    write_png_chunk(&mut png, b"IDAT", &zlib);
+    write_png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+fn write_png_chunk(out: &mut Vec<u8>, tag: &[u8; 4], data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(tag);
+    out.extend_from_slice(data);
+    let mut crc = 0xFFFF_FFFFu32;
+    for &b in tag.iter().chain(data.iter()) {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            crc = if (crc & 1) != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    out.extend_from_slice(&(!crc).to_be_bytes());
+}
+
+fn adler32(data: &[u8]) -> u32 {
+    let mut a: u32 = 1;
+    let mut b: u32 = 0;
+    for &byte in data {
+        a = (a + byte as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    (b << 16) | a
 }
 
 static ICON_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, Option<PathBuf>>>> =

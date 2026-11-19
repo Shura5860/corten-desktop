@@ -161,6 +161,7 @@ pub mod pipewire {
         pub name: String,
         pub volume_pct: u8,
         pub is_muted: bool,
+        pub target_sink_id: Option<u32>,
     }
 
     pub fn list_app_streams() -> Vec<AppAudioStream> {
@@ -204,6 +205,7 @@ pub mod pipewire {
                     name: name.to_string(),
                     volume_pct: vol_info.0,
                     is_muted: vol_info.1,
+                    target_sink_id: None,
                 });
             }
         }
@@ -234,6 +236,29 @@ pub mod pipewire {
     pub fn toggle_stream_mute(id: u32) -> Result<(), ServiceError> {
         let id_str = id.to_string();
         run(&["set-mute", &id_str, "toggle"])
+    }
+
+    /// Routes an individual application audio stream to a specific PipeWire/PulseAudio output sink.
+    pub fn move_stream_to_sink(stream_id: u32, sink_id: u32) -> Result<(), ServiceError> {
+        let s_str = stream_id.to_string();
+        let k_str = sink_id.to_string();
+        if let Ok(status) = Command::new("pactl")
+            .args(["move-sink-input", &s_str, &k_str])
+            .status()
+        {
+            if status.success() {
+                return Ok(());
+            }
+        }
+        if let Ok(status) = Command::new("pw-metadata")
+            .args(["-n", "default", &s_str, "target.node", &k_str])
+            .status()
+        {
+            if status.success() {
+                return Ok(());
+            }
+        }
+        set_default_sink(sink_id)
     }
 }
 
@@ -522,6 +547,85 @@ pub mod network {
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct VpnProfile {
+        pub name: String,
+        pub kind: String, // "wireguard" or "vpn"
+        pub is_active: bool,
+    }
+
+    /// Lists configured WireGuard and OpenVPN profiles from NetworkManager (`nmcli`).
+    pub fn list_vpn_profiles() -> Vec<VpnProfile> {
+        let Ok(output) = Command::new("nmcli")
+            .args(["-t", "-f", "NAME,TYPE,ACTIVE", "connection", "show"])
+            .output()
+        else {
+            return Vec::new();
+        };
+        if !output.status.success() {
+            return Vec::new();
+        }
+        let mut profiles = Vec::new();
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() >= 3 {
+                let kind = parts[1].trim();
+                if kind == "wireguard" || kind == "vpn" || kind == "tun" {
+                    profiles.push(VpnProfile {
+                        name: parts[0].trim().to_string(),
+                        kind: kind.to_string(),
+                        is_active: parts[2].trim().eq_ignore_ascii_case("yes"),
+                    });
+                }
+            }
+        }
+        profiles
+    }
+
+    /// Connects or disconnects a NetworkManager WireGuard / OpenVPN profile.
+    pub fn set_vpn_active(name: &str, active: bool) -> bool {
+        let sub = if active { "up" } else { "down" };
+        Command::new("nmcli")
+            .args(["connection", sub, name])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// Starts a Wi-Fi Hotspot access point via NetworkManager (`nmcli dev wifi hotspot`).
+    pub fn start_wifi_hotspot(ssid: &str, password: &str) -> bool {
+        let mut cmd = Command::new("nmcli");
+        cmd.args(["dev", "wifi", "hotspot", "ssid", ssid]);
+        if password.len() >= 8 {
+            cmd.args(["password", password]);
+        }
+        cmd.status().map(|s| s.success()).unwrap_or(false)
+    }
+
+    /// Stops an active NetworkManager Wi-Fi Hotspot connection.
+    pub fn stop_wifi_hotspot() -> bool {
+        Command::new("nmcli")
+            .args(["connection", "down", "Hotspot"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// Generates a standard Wi-Fi sharing QR payload (`WIFI:T:WPA;S:<ssid>;P:<password>;;`).
+    pub fn generate_wifi_qr_payload(ssid: &str, password: &str) -> String {
+        let esc = |s: &str| {
+            s.replace('\\', "\\\\")
+                .replace(';', "\\;")
+                .replace(',', "\\,")
+                .replace(':', "\\:")
+        };
+        if password.is_empty() {
+            format!("WIFI:T:nopass;S:{};;", esc(ssid))
+        } else {
+            format!("WIFI:T:WPA;S:{};P:{};;", esc(ssid), esc(password))
+        }
     }
 }
 
@@ -1962,6 +2066,53 @@ pub mod a11y {
             }
         }
     }
+
+    /// Applies accessibility color blindness filter ("protanopia", "deuteranopia", "tritanopia", "monochrome")
+    /// and optional WCAG AAA High-Contrast luminance boost to an RGB color (`0.0..=1.0`).
+    pub fn apply_a11y_color_filter(rgb: [f32; 3], filter: &str, high_contrast: bool) -> [f32; 3] {
+        let [r, g, b] = [
+            rgb[0].clamp(0.0, 1.0),
+            rgb[1].clamp(0.0, 1.0),
+            rgb[2].clamp(0.0, 1.0),
+        ];
+        let mut out = match filter.to_ascii_lowercase().as_str() {
+            "protanopia" => [
+                0.56667 * r + 0.43333 * g,
+                0.55833 * r + 0.44167 * g,
+                0.24167 * g + 0.75833 * b,
+            ],
+            "deuteranopia" => [
+                0.625 * r + 0.375 * g,
+                0.70 * r + 0.30 * g,
+                0.30 * g + 0.70 * b,
+            ],
+            "tritanopia" => [
+                0.95 * r + 0.05 * g,
+                0.43333 * g + 0.56667 * b,
+                0.475 * g + 0.525 * b,
+            ],
+            "monochrome" => {
+                let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                [lum, lum, lum]
+            }
+            _ => [r, g, b],
+        };
+
+        if high_contrast {
+            for ch in &mut out {
+                *ch = if *ch >= 0.5 {
+                    (*ch * 1.25).clamp(0.0, 1.0)
+                } else {
+                    (*ch * 0.70).clamp(0.0, 1.0)
+                };
+            }
+        } else {
+            for ch in &mut out {
+                *ch = ch.clamp(0.0, 1.0);
+            }
+        }
+        out
+    }
 }
 
 pub mod acoustic;
@@ -2169,5 +2320,20 @@ mod tests {
             let cached = ensure_cached_wav(cue).expect("should write cached wav to temp_dir");
             assert!(cached.exists());
         }
+    }
+
+    #[test]
+    fn test_a11y_color_filters_and_high_contrast() {
+        use a11y::apply_a11y_color_filter;
+        let mono = apply_a11y_color_filter([1.0, 0.2, 0.1], "monochrome", false);
+        assert!((mono[0] - mono[1]).abs() < 1e-5);
+        assert!((mono[1] - mono[2]).abs() < 1e-5);
+
+        let prot = apply_a11y_color_filter([1.0, 0.0, 0.0], "protanopia", false);
+        assert!(prot[0] > 0.5 && prot[1] > 0.5);
+
+        let hc = apply_a11y_color_filter([0.8, 0.2, 0.5], "none", true);
+        assert!(hc[0] > 0.8);
+        assert!(hc[1] < 0.2);
     }
 }

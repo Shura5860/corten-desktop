@@ -111,6 +111,38 @@ enum SnipperState {
     Selecting { start: Point, current: Point },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AnnotationTool {
+    #[default]
+    Redact,
+    BlurPixelate,
+    RectangleBox,
+    Arrow,
+    Highlight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AnnotationItem {
+    pub tool: AnnotationTool,
+    pub start: Point,
+    pub end: Point,
+}
+
+impl AnnotationItem {
+    pub fn bounding_rect(&self) -> Rectangle {
+        let min_x = self.start.x.min(self.end.x);
+        let min_y = self.start.y.min(self.end.y);
+        let width = (self.start.x - self.end.x).abs();
+        let height = (self.start.y - self.end.y).abs();
+        Rectangle {
+            x: min_x,
+            y: min_y,
+            width,
+            height,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     PointerPressed(Point, Option<Size>),
@@ -123,6 +155,7 @@ pub enum Message {
     SkipCountdown,
     SetDelay(u64),
     ToggleRedactionMode,
+    SelectAnnotationTool(AnnotationTool),
     UndoRedaction,
     SaveRedactedImage,
     CopyImageToClipboard,
@@ -161,9 +194,9 @@ pub fn calculate_contain_image_rect(img_size: Size, bounds: Size) -> (Rectangle,
     )
 }
 
-pub fn apply_redactions_and_save(
+pub fn apply_annotations_and_save(
     src_path: &str,
-    redactions: &[Rectangle],
+    annotations: &[AnnotationItem],
     bounds: Size,
 ) -> Result<String, String> {
     let mut img = image_crate::open(src_path).map_err(|e| e.to_string())?;
@@ -171,19 +204,107 @@ pub fn apply_redactions_and_save(
 
     let (img_rect, scale) = calculate_contain_image_rect(Size::new(img_w, img_h), bounds);
 
-    use image_crate::{GenericImage, Rgba};
-    for r in redactions {
+    use image_crate::{GenericImage, GenericImageView, Rgba};
+    for item in annotations {
+        let r = item.bounding_rect();
         let x0 = (((r.x - img_rect.x) / scale).max(0.0) as u32).min(img.width());
         let y0 = (((r.y - img_rect.y) / scale).max(0.0) as u32).min(img.height());
         let x1 = (((r.x + r.width - img_rect.x) / scale).max(0.0) as u32).min(img.width());
         let y1 = (((r.y + r.height - img_rect.y) / scale).max(0.0) as u32).min(img.height());
 
-        let dark_pixel = Rgba([16, 18, 22, 255]);
-        for y in y0..y1 {
-            for x in x0..x1 {
-                if x < img.width() && y < img.height() {
-                    img.put_pixel(x, y, dark_pixel);
+        match item.tool {
+            AnnotationTool::Redact => {
+                let dark_pixel = Rgba([16, 18, 22, 255]);
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        if x < img.width() && y < img.height() {
+                            img.put_pixel(x, y, dark_pixel);
+                        }
+                    }
                 }
+            }
+            AnnotationTool::BlurPixelate => {
+                let block = 10u32;
+                let mut by = y0;
+                while by < y1 {
+                    let mut bx = x0;
+                    while bx < x1 {
+                        let sample_x = (bx + block / 2).min(img.width().saturating_sub(1));
+                        let sample_y = (by + block / 2).min(img.height().saturating_sub(1));
+                        let px = img.get_pixel(sample_x, sample_y);
+                        for yy in by..(by + block).min(y1) {
+                            for xx in bx..(bx + block).min(x1) {
+                                img.put_pixel(xx, yy, px);
+                            }
+                        }
+                        bx += block;
+                    }
+                    by += block;
+                }
+            }
+            AnnotationTool::Highlight => {
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        if x < img.width() && y < img.height() {
+                            let orig = img.get_pixel(x, y).0;
+                            let blended = Rgba([
+                                ((orig[0] as u16 * 3 + 250) / 4) as u8,
+                                ((orig[1] as u16 * 3 + 215) / 4) as u8,
+                                ((orig[2] as u16 * 3 + 40) / 4) as u8,
+                                255,
+                            ]);
+                            img.put_pixel(x, y, blended);
+                        }
+                    }
+                }
+            }
+            AnnotationTool::RectangleBox => {
+                let accent = Rgba([222, 107, 72, 255]);
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        let on_border = (x - x0) < 3
+                            || (x1.saturating_sub(x)) <= 3
+                            || (y - y0) < 3
+                            || (y1.saturating_sub(y)) <= 3;
+                        if on_border && x < img.width() && y < img.height() {
+                            img.put_pixel(x, y, accent);
+                        }
+                    }
+                }
+            }
+            AnnotationTool::Arrow => {
+                let accent = Rgba([222, 107, 72, 255]);
+                let sx = ((item.start.x - img_rect.x) / scale).clamp(0.0, img_w - 1.0);
+                let sy = ((item.start.y - img_rect.y) / scale).clamp(0.0, img_h - 1.0);
+                let ex = ((item.end.x - img_rect.x) / scale).clamp(0.0, img_w - 1.0);
+                let ey = ((item.end.y - img_rect.y) / scale).clamp(0.0, img_h - 1.0);
+                let draw_thick_line = |img: &mut image_crate::DynamicImage, ax: f32, ay: f32, bx: f32, by: f32| {
+                    let dist = ((bx - ax).hypot(by - ay)).max(1.0);
+                    let steps = (dist * 1.5) as u32;
+                    for s in 0..=steps {
+                        let t = s as f32 / steps.max(1) as f32;
+                        let px = (ax + (bx - ax) * t).round() as i32;
+                        let py = (ay + (by - ay) * t).round() as i32;
+                        for dy in -1..=1 {
+                            for dx in -1..=1 {
+                                let xx = px + dx;
+                                let yy = py + dy;
+                                if xx >= 0 && yy >= 0 && (xx as u32) < img.width() && (yy as u32) < img.height() {
+                                    img.put_pixel(xx as u32, yy as u32, accent);
+                                }
+                            }
+                        }
+                    }
+                };
+                draw_thick_line(&mut img, sx, sy, ex, ey);
+                let angle = (ey - sy).atan2(ex - sx);
+                let head_len = (16.0 / scale.max(0.25)).clamp(8.0, 28.0);
+                let wing1_x = ex - head_len * (angle - 0.45).cos();
+                let wing1_y = ey - head_len * (angle - 0.45).sin();
+                let wing2_x = ex - head_len * (angle + 0.45).cos();
+                let wing2_y = ey - head_len * (angle + 0.45).sin();
+                draw_thick_line(&mut img, ex, ey, wing1_x, wing1_y);
+                draw_thick_line(&mut img, ex, ey, wing2_x, wing2_y);
             }
         }
     }
@@ -192,7 +313,7 @@ pub fn apply_redactions_and_save(
     let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("screenshot");
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("png");
     let parent = p.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let target = parent.join(format!("{}_redacted.{}", stem, ext));
+    let target = parent.join(format!("{}_annotated.{}", stem, ext));
 
     img.save(&target).map_err(|e| e.to_string())?;
     Ok(target.to_string_lossy().to_string())
@@ -224,7 +345,8 @@ struct CortenSnipperApp {
     active_patina: PatinaVariant,
     countdown: Option<u64>,
     redaction_mode: bool,
-    redactions: Vec<Rectangle>,
+    active_tool: AnnotationTool,
+    redactions: Vec<AnnotationItem>,
     redacting_start: Option<Point>,
     redacting_current: Option<Point>,
     status_msg: Option<String>,
@@ -260,6 +382,7 @@ impl Application for CortenSnipperApp {
                 active_patina,
                 countdown: flags.delay_secs,
                 redaction_mode: false,
+                active_tool: AnnotationTool::Redact,
                 redactions: Vec::new(),
                 redacting_start: None,
                 redacting_current: None,
@@ -342,14 +465,19 @@ impl Application for CortenSnipperApp {
             Message::ToggleRedactionMode => {
                 self.redaction_mode = !self.redaction_mode;
                 self.status_msg = Some(if self.redaction_mode {
-                    "🔒 Hassas Bilgi Gizleme modu aktif. Gizlemek istediğiniz alanı sürükleyin.".into()
+                    "✏️ Çizim & Gizleme modu aktif. Aracı seçip görsel üzerinde sürükleyin.".into()
                 } else {
                     "Normal önizleme moduna dönüldü.".into()
                 });
             }
+            Message::SelectAnnotationTool(tool) => {
+                self.active_tool = tool;
+                self.redaction_mode = true;
+            }
             Message::UndoRedaction => {
                 self.redactions.pop();
-                self.status_msg = Some("Son gizleme alanı geri alındı.".into());
+                self.last_saved_path = None;
+                self.status_msg = Some("Son çizim/gizleme geri alındı.".into());
             }
             Message::SaveRedactedImage => {
                 if let Some((ref path_str, _)) = self.pinned_image {
@@ -358,7 +486,7 @@ impl Application for CortenSnipperApp {
                     } else {
                         Size::new(520.0, 320.0)
                     };
-                    match apply_redactions_and_save(path_str, &self.redactions, bounds) {
+                    match apply_annotations_and_save(path_str, &self.redactions, bounds) {
                         Ok(target) => {
                             self.last_saved_path = Some(target.clone());
                             self.status_msg = Some(format!("💾 Kaydedildi: {}", target));
@@ -370,6 +498,18 @@ impl Application for CortenSnipperApp {
                 }
             }
             Message::CopyImageToClipboard => {
+                if !self.redactions.is_empty() && self.last_saved_path.is_none() {
+                    if let Some((ref path_str, _)) = self.pinned_image {
+                        let bounds = if self.canvas_size.width > 0.0 && self.canvas_size.height > 0.0 {
+                            self.canvas_size
+                        } else {
+                            Size::new(520.0, 320.0)
+                        };
+                        if let Ok(target) = apply_annotations_and_save(path_str, &self.redactions, bounds) {
+                            self.last_saved_path = Some(target);
+                        }
+                    }
+                }
                 let target_path = self.last_saved_path.as_deref().or_else(|| self.pinned_image.as_ref().map(|(p, _)| p.as_str()));
                 if let Some(path) = target_path {
                     match copy_image_to_clipboard(path) {
@@ -411,17 +551,15 @@ impl Application for CortenSnipperApp {
                 if self.pinned_image.is_some() {
                     if self.redaction_mode {
                         if let Some(start) = self.redacting_start.take() {
-                            let min_x = start.x.min(end.x);
-                            let min_y = start.y.min(end.y);
                             let w = (start.x - end.x).abs();
                             let h = (start.y - end.y).abs();
-                            if w > 4.0 && h > 4.0 {
-                                self.redactions.push(Rectangle {
-                                    x: min_x,
-                                    y: min_y,
-                                    width: w,
-                                    height: h,
+                            if w > 4.0 || h > 4.0 {
+                                self.redactions.push(AnnotationItem {
+                                    tool: self.active_tool,
+                                    start,
+                                    end,
                                 });
+                                self.last_saved_path = None;
                             }
                         }
                         self.redacting_current = None;
@@ -550,7 +688,7 @@ impl Application for CortenSnipperApp {
                     .color(palette.primary.to_iced()),
                 horizontal_space(),
                 button(
-                    text(if self.redaction_mode { "🔒 Gizleme: Açık" } else { "🔒 Gizle (Redact)" })
+                    text(if self.redaction_mode { "✏️ Düzenle: Açık" } else { "✏️ Çiz & Gizle" })
                         .size(11.0)
                         .color(if self.redaction_mode { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
                 )
@@ -569,6 +707,11 @@ impl Application for CortenSnipperApp {
                     ..Default::default()
                 })
                 .on_press(Message::ToggleRedactionMode),
+                button(text("🔒").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::Redact)),
+                button(text("💧").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::BlurPixelate)),
+                button(text("⬜").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::RectangleBox)),
+                button(text("↗").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::Arrow)),
+                button(text("🖍").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::Highlight)),
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center);
@@ -846,7 +989,7 @@ impl canvas::Program<Message> for SelectionCanvas {
 }
 
 struct RedactionCanvas {
-    redactions: Vec<Rectangle>,
+    redactions: Vec<AnnotationItem>,
     active_start: Option<Point>,
     active_current: Option<Point>,
     palette: Palette,
@@ -900,27 +1043,62 @@ impl canvas::Program<Message> for RedactionCanvas {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
 
-        // Existing redaction boxes
-        for r in &self.redactions {
-            frame.fill_rectangle(
-                Point::new(r.x, r.y),
-                Size::new(r.width, r.height),
-                Color::from_rgba(0.06, 0.07, 0.09, 0.96),
-            );
-            frame.stroke(
-                &canvas::Path::rectangle(Point::new(r.x, r.y), Size::new(r.width, r.height)),
-                canvas::Stroke::default()
-                    .with_color(self.palette.primary.to_iced())
-                    .with_width(1.5),
-            );
-            let badge = canvas::Text {
-                content: "🔒 Gizlendi".into(),
-                position: Point::new(r.x + 4.0, r.y + 4.0),
-                color: Color::from_rgba(1.0, 1.0, 1.0, 0.70),
-                size: 10.0.into(),
-                ..Default::default()
-            };
-            frame.fill_text(badge);
+        // Existing annotation items
+        for item in &self.redactions {
+            let r = item.bounding_rect();
+            match item.tool {
+                AnnotationTool::Redact => {
+                    frame.fill_rectangle(
+                        Point::new(r.x, r.y),
+                        Size::new(r.width, r.height),
+                        Color::from_rgba(0.06, 0.07, 0.09, 0.96),
+                    );
+                    frame.stroke(
+                        &canvas::Path::rectangle(Point::new(r.x, r.y), Size::new(r.width, r.height)),
+                        canvas::Stroke::default()
+                            .with_color(self.palette.primary.to_iced())
+                            .with_width(1.5),
+                    );
+                }
+                AnnotationTool::BlurPixelate => {
+                    frame.fill_rectangle(
+                        Point::new(r.x, r.y),
+                        Size::new(r.width, r.height),
+                        Color::from_rgba(0.20, 0.22, 0.28, 0.82),
+                    );
+                    let badge = canvas::Text {
+                        content: "💧 Bulanık".into(),
+                        position: Point::new(r.x + 4.0, r.y + 4.0),
+                        color: Color::from_rgba(1.0, 1.0, 1.0, 0.80),
+                        size: 10.0.into(),
+                        ..Default::default()
+                    };
+                    frame.fill_text(badge);
+                }
+                AnnotationTool::Highlight => {
+                    frame.fill_rectangle(
+                        Point::new(r.x, r.y),
+                        Size::new(r.width, r.height),
+                        Color::from_rgba(0.98, 0.85, 0.16, 0.35),
+                    );
+                }
+                AnnotationTool::RectangleBox => {
+                    frame.stroke(
+                        &canvas::Path::rectangle(Point::new(r.x, r.y), Size::new(r.width, r.height)),
+                        canvas::Stroke::default()
+                            .with_color(self.palette.primary.to_iced())
+                            .with_width(2.5),
+                    );
+                }
+                AnnotationTool::Arrow => {
+                    frame.stroke(
+                        &canvas::Path::line(item.start, item.end),
+                        canvas::Stroke::default()
+                            .with_color(self.palette.primary.to_iced())
+                            .with_width(2.5),
+                    );
+                }
+            }
         }
 
         // Active dragging redaction box

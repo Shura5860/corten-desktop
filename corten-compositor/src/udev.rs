@@ -1380,6 +1380,10 @@ pub fn run_drm(
                     state.request_screenshot(region);
                     continue;
                 }
+                crate::CompositorIpcCommand::CustomAction(action) => {
+                    state.handle_custom_action(&action);
+                    continue;
+                }
                 crate::CompositorIpcCommand::ReloadConfig => {}
             }
             info!("Compositor: Reloading configuration from ~/.config/corten/compositor.toml");
@@ -1391,6 +1395,8 @@ pub fn run_drm(
             }
             if let Ok(config) = ConfigManager::<InputSettingsConfig>::load_or_default("input") {
                 input_settings = config.get().clone();
+                state.tablet_pressure_curve = input_settings.tablet_pressure_curve.clone();
+                state.tablet_left_handed = input_settings.tablet_left_handed;
                 let options = if input_settings.remap_caps_to_ctrl {
                     "terminate:ctrl_alt_bksp,caps:ctrl_modifier".to_string()
                 } else {
@@ -1909,6 +1915,80 @@ pub fn run_drm(
                                     keysyms::KEY_s | keysyms::KEY_S if binding("screenshot") => {
                                         info!("Compositor Hotkey: Super+Shift+S (Screenshot)");
                                         crate::trigger_screenshot(state, &hotkey_ipc_tx, true);
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + . (Period): Open Built-in Emoji & Unicode Symbol Picker
+                                    keysyms::KEY_period
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        info!("Compositor Hotkey: Super+. (Emoji & Unicode Picker)");
+                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
+                                        let _ = std::process::Command::new(launcher_path).arg("--emoji").spawn();
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + N: Open Corten Scratchpad / Quick Notes
+                                    keysyms::KEY_n | keysyms::KEY_N
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        info!("Compositor Hotkey: Super+N (Quick Notes)");
+                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
+                                        let _ = std::process::Command::new(launcher_path).arg("--notes").spawn();
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + Shift + C: System-Wide Color Picker / Eyedropper
+                                    keysyms::KEY_c | keysyms::KEY_C
+                                        if modifiers.logo && modifiers.shift && !modifiers.ctrl && !modifiers.alt => {
+                                        info!("Compositor Hotkey: Super+Shift+C (Color Picker)");
+                                        state.handle_custom_action("color-picker");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + Minus: Toggle Scratchpad Window / Super + Shift + Minus: Send to Scratchpad
+                                    keysyms::KEY_minus | keysyms::KEY_underscore
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        if modifiers.shift {
+                                            state.handle_custom_action("move-to-scratchpad");
+                                        } else {
+                                            state.handle_custom_action("toggle-scratchpad");
+                                        }
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + S (without Shift): Toggle Sticky / PiP Window Across Workspaces
+                                    keysyms::KEY_s | keysyms::KEY_S
+                                        if modifiers.logo && !modifiers.shift && !modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("toggle-sticky");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + G: One-Click Game Mode
+                                    keysyms::KEY_g | keysyms::KEY_G
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("toggle-game-mode");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + Equal / Plus / KP_Add: Compositor Zoom In
+                                    keysyms::KEY_equal | keysyms::KEY_plus | keysyms::KEY_KP_Add
+                                        if modifiers.logo && !modifiers.alt => {
+                                        state.handle_custom_action("zoom-in");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + Ctrl + Minus / KP_Subtract: Compositor Zoom Out
+                                    keysyms::KEY_minus | keysyms::KEY_KP_Subtract
+                                        if modifiers.logo && modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("zoom-out");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + 0: Reset Compositor Zoom
+                                    keysyms::KEY_0
+                                        if modifiers.logo && !modifiers.shift && !modifiers.alt => {
+                                        state.handle_custom_action("zoom-reset");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    // Super + [ / Super + ]: Scrollable Strip Left / Right
+                                    keysyms::KEY_bracketleft
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("scroll-left");
+                                        return FilterResult::Intercept(());
+                                    }
+                                    keysyms::KEY_bracketright
+                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
+                                        state.handle_custom_action("scroll-right");
                                         return FilterResult::Intercept(());
                                     }
                                     _ => {}
@@ -2733,6 +2813,25 @@ pub fn run_drm(
                             pointer.frame(&mut state);
                         }
                         PointerEvent::ScrollWheel(axis_event) => {
+                            let mod_state = state.seat.get_keyboard().map(|kb| kb.modifier_state());
+                            let zoom_scroll = mod_state.as_ref().is_some_and(|m| m.logo && m.ctrl);
+                            if zoom_scroll {
+                                let frame = libinput_scroll_frame(
+                                    &axis_event,
+                                    AxisSource::Wheel,
+                                    false,
+                                );
+                                use smithay::reexports::input::event::pointer::Axis as LibinputAxis;
+                                use smithay::reexports::input::event::pointer::PointerScrollEvent;
+                                if axis_event.has_axis(LibinputAxis::Vertical) {
+                                    let val = axis_event.scroll_value(LibinputAxis::Vertical);
+                                    if val.abs() > 0.01 {
+                                        state.adjust_zoom(if val < 0.0 { 0.15 } else { -0.15 });
+                                        continue;
+                                    }
+                                }
+                                let _ = frame;
+                            }
                             let frame = libinput_scroll_frame(
                                 &axis_event,
                                 AxisSource::Wheel,
@@ -2827,6 +2926,12 @@ pub fn run_drm(
                                         let is_vertical_fling = vy.abs() >= 300.0 && dy.abs() >= 12.0;
                                         let is_vertical_drag = dy.abs() >= 65.0;
 
+                                        let configured_action = if end.finger_count() >= 4 {
+                                            input_settings.swipe_4_fingers.as_str()
+                                        } else {
+                                            input_settings.swipe_3_fingers.as_str()
+                                        };
+
                                         if (dx.abs() > dy.abs() || vx.abs() > vy.abs())
                                             && (is_horizontal_drag || is_horizontal_fling)
                                         {
@@ -2835,24 +2940,27 @@ pub fn run_drm(
                                             } else {
                                                 dx < 0.0
                                             };
-                                            let target_ws = if go_next {
-                                                (state.active_workspace + 1).min(9)
+                                            if configured_action != "workspace" && !configured_action.is_empty() {
+                                                state.dispatch_configured_swipe_action(configured_action, go_next);
+                                                state.start_gesture_kinetic(0.0);
                                             } else {
-                                                state.active_workspace.saturating_sub(1).max(1)
-                                            };
-                                            if target_ws != state.active_workspace {
-                                                info!(
-                                                    "Touchpad 3-finger swipe fling: Switching workspace {} -> {} (dx: {:.1}, vx: {:.1} px/s)",
-                                                    state.active_workspace, target_ws, dx, vx
-                                                );
-                                                state.switch_workspace(target_ws);
-                                                // Smooth kinetic entry for incoming workspace windows
-                                                let entry_offset = if go_next { 130.0 } else { -130.0 };
-                                                state.gesture_swipe_dx = entry_offset;
-                                                state.start_gesture_kinetic(-vx.clamp(-800.0, 800.0) * 0.3);
-                                            } else {
-                                                // Reached bounds (ws 1 or 9): elastic snap-back
-                                                state.start_gesture_kinetic(vx.clamp(-600.0, 600.0));
+                                                let target_ws = if go_next {
+                                                    (state.active_workspace + 1).min(9)
+                                                } else {
+                                                    state.active_workspace.saturating_sub(1).max(1)
+                                                };
+                                                if target_ws != state.active_workspace {
+                                                    info!(
+                                                        "Touchpad {}-finger swipe fling: Switching workspace {} -> {} (dx: {:.1}, vx: {:.1} px/s)",
+                                                        end.finger_count(), state.active_workspace, target_ws, dx, vx
+                                                    );
+                                                    state.switch_workspace(target_ws);
+                                                    let entry_offset = if go_next { 130.0 } else { -130.0 };
+                                                    state.gesture_swipe_dx = entry_offset;
+                                                    state.start_gesture_kinetic(-vx.clamp(-800.0, 800.0) * 0.3);
+                                                } else {
+                                                    state.start_gesture_kinetic(vx.clamp(-600.0, 600.0));
+                                                }
                                             }
                                         } else if is_vertical_drag || is_vertical_fling {
                                             let go_up = if is_vertical_fling && vy.abs() > 300.0 {
@@ -2860,7 +2968,9 @@ pub fn run_drm(
                                             } else {
                                                 dy < 0.0
                                             };
-                                            if go_up {
+                                            if end.finger_count() >= 4 && configured_action != "overview" && !configured_action.is_empty() {
+                                                state.dispatch_configured_swipe_action(configured_action, go_up);
+                                            } else if go_up {
                                                 info!("Touchpad 3-finger swipe UP fling: Toggle Window Overview");
                                                 state.overview_mode = !state.overview_mode;
                                                 if state.overview_mode {
@@ -3115,7 +3225,7 @@ pub fn run_drm(
         // (Smithay's OutputDamageTracker requires front-to-back ordering for correct occlusion culling)
         let mut elements: Vec<CustomRenderElement> = Vec::new();
         let output_scale = state.output.current_scale();
-        let fractional_scale = output_scale.fractional_scale();
+        let fractional_scale = output_scale.fractional_scale() * state.zoom_level.clamp(1.0, 4.0);
         let render_scale = Scale::from(fractional_scale);
 
         // 0. Hardware / Software Cursor Pointer & Drag-and-Drop Icon (Topmost elements)
@@ -3511,6 +3621,17 @@ pub fn run_drm(
             }
 
             // 4. Glow halo and frame borders (Behind window content in front-to-back ordering, only for non-fullscreen windows)
+            let z = state.zoom_level.clamp(1.0, 4.0);
+            let glow_rect = Rectangle::new(
+                Point::from((
+                    (shifted_rect.loc.x as f64 * z).round() as i32,
+                    (shifted_rect.loc.y as f64 * z).round() as i32,
+                )),
+                Size::from((
+                    (shifted_rect.size.w as f64 * z).round() as i32,
+                    (shifted_rect.size.h as f64 * z).round() as i32,
+                )),
+            );
             if is_active && !is_fs {
                 let is_high_vis = state.accessibility.high_vis_focus_ring || state.accessibility.high_contrast;
                 let (ring_width, ring_color, halo_radiance) = if is_high_vis {
@@ -3525,13 +3646,13 @@ pub fn run_drm(
                         palette.primary.b,
                         halo_radiance,
                     ];
-                    let glow_elem = manager.create_element(shifted_rect, 22, 8.0, halo_color);
+                    let glow_elem = manager.create_element(glow_rect, 22, 8.0, halo_color);
                     elements.push(CustomRenderElement::from(glow_elem));
                 }
                 draw_glow_ring(&mut elements, phys_rect, 0, ring_width, ring_color, 4);
             } else if !is_fs {
                 if let Some(manager) = glow_shader.as_ref() {
-                    let shadow_elem = manager.create_inactive_shadow_element(shifted_rect, 8.0);
+                    let shadow_elem = manager.create_inactive_shadow_element(glow_rect, 8.0);
                     elements.push(CustomRenderElement::from(shadow_elem));
                 }
                 let inactive_color =
@@ -3721,7 +3842,7 @@ pub fn run_drm(
             }
 
             // FAZ 25: Per-Window Dual-Kawase Background Blur & Acrylic Glass Pipeline
-            if let Some(pipeline) = blur_pipeline.as_mut() {
+            if let Some(pipeline) = blur_pipeline.as_mut().filter(|_| !state.game_mode) {
                 let mut glass_regions: Vec<GlassRegion> = Vec::new();
 
                 // 1. Collect blur-eligible windows (translucent windows, terminals, window rule blur)

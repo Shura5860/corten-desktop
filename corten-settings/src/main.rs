@@ -209,6 +209,7 @@ pub enum Message {
     SetDisplayMaxLuminance(u32),
     ChooseIccProfile,
     ClearIccProfile,
+    ToggleXwaylandZeroScaling(bool),
     // Sound messages
     SetOutputVolume(u8),
     SetInputVolume(u8),
@@ -237,6 +238,26 @@ pub enum Message {
     // Shortcut messages
     UpdateShortcut(String, String),
     ResetShortcutsToDefault,
+    ToggleLiveWallpaperShader(bool),
+    ToggleDesktopIcons(bool),
+    UpdateSecondaryWallpaperPath(String),
+    ExtractWallpaperPalette,
+    ExportThemePack,
+    ImportThemePack,
+    SetSwipe3Fingers(String),
+    SetSwipe4Fingers(String),
+    SetTabletPressureCurve(String),
+    ToggleTabletLeftHanded(bool),
+    RuleAppIdChanged(String),
+    RuleWorkspaceChanged(String),
+    ToggleRuleFloating(bool),
+    ToggleRuleSticky(bool),
+    AddWindowRule,
+    RemoveWindowRule(usize),
+    ToggleVpnProfile(String, bool),
+    HotspotSsidChanged(String),
+    HotspotPasswordChanged(String),
+    ToggleWifiHotspot,
     SaveSettings,
     ReloadResult(Vec<String>),
     KeyboardEvent(Event),
@@ -265,6 +286,14 @@ struct CortenSettingsApp {
     bluetooth_powered: bool,
     /// `None` = not yet checked / checking, `Some(true)` = TCP reachable
     ai_endpoint_reachable: Option<bool>,
+    new_rule_app_id: String,
+    new_rule_workspace: String,
+    new_rule_floating: bool,
+    new_rule_sticky: bool,
+    vpn_profiles: Vec<corten_services::network::VpnProfile>,
+    hotspot_ssid: String,
+    hotspot_password: String,
+    hotspot_active: bool,
 }
 
 impl Default for CortenSettingsApp {
@@ -338,6 +367,14 @@ impl Default for CortenSettingsApp {
             bluetooth_devices: Vec::new(),
             bluetooth_powered: false,
             ai_endpoint_reachable: None,
+            new_rule_app_id: String::new(),
+            new_rule_workspace: "1".into(),
+            new_rule_floating: true,
+            new_rule_sticky: false,
+            vpn_profiles: corten_services::network::list_vpn_profiles(),
+            hotspot_ssid: "Corten-Hotspot".into(),
+            hotspot_password: "corten2026".into(),
+            hotspot_active: false,
         }
     }
 }
@@ -397,6 +434,7 @@ impl CortenSettingsApp {
                     return iced::Task::perform(check_endpoint_reachable(url), Message::AiEndpointChecked);
                 }
                 if cat == SettingsCategory::Bluetooth {
+                    self.vpn_profiles = corten_services::network::list_vpn_profiles();
                     return iced::Task::perform(
                         async move {
                             let (powered, _) = corten_services::bluetooth::status();
@@ -588,6 +626,9 @@ impl CortenSettingsApp {
                     corten_services::a11y::announce_screen_reader("ICC profili kaldırıldı");
                 }
             }
+            Message::ToggleXwaylandZeroScaling(v) => {
+                self.displays.xwayland_force_zero_scaling = v;
+            }
             // Sound handlers
             Message::SetOutputVolume(v) => self.sound.output_volume = v,
             Message::SetInputVolume(v) => self.sound.input_volume = v,
@@ -688,6 +729,172 @@ impl CortenSettingsApp {
                     "Kısayollar varsayılanlara sıfırlandı. Uygulanması için 'Değişiklikleri Kaydet'e basın.".into(),
                 );
             }
+            Message::ToggleLiveWallpaperShader(v) => {
+                self.appearance.live_wallpaper_shader = v;
+            }
+            Message::ToggleDesktopIcons(v) => {
+                self.appearance.desktop_icons_enabled = v;
+            }
+            Message::UpdateSecondaryWallpaperPath(p) => {
+                self.appearance.secondary_wallpaper_path = p;
+            }
+            Message::ExtractWallpaperPalette => {
+                let wp_path = std::path::Path::new(self.appearance.wallpaper_path.trim());
+                let extracted = (|| -> Option<(u8, u8, u8, PatinaVariant)> {
+                    let img = ::image::io::Reader::open(wp_path).ok()?.decode().ok()?;
+                    let rgb = img.thumbnail(64, 64).to_rgb8();
+                    let (mut tr, mut tg, mut tb, mut count) = (0u64, 0u64, 0u64, 0u64);
+                    for px in rgb.pixels() {
+                        let [r, g, b] = px.0;
+                        let lum = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+                        if lum > 30.0 && lum < 230.0 {
+                            tr += r as u64;
+                            tg += g as u64;
+                            tb += b as u64;
+                            count += 1;
+                        }
+                    }
+                    if count == 0 {
+                        return None;
+                    }
+                    let (ar, ag, ab) = ((tr / count) as u8, (tg / count) as u8, (tb / count) as u8);
+                    Some((ar, ag, ab, PatinaVariant::match_from_rgb(ar, ag, ab)))
+                })();
+
+                let (hex_color, patina) = if let Some((r, g, b, pat)) = extracted {
+                    (format!("#{:02X}{:02X}{:02X}", r, g, b), pat)
+                } else {
+                    let lower = self.appearance.wallpaper_path.to_lowercase();
+                    let pat = if lower.contains("emerald") || lower.contains("forest") || lower.contains("verdigris") {
+                        PatinaVariant::Verdigris
+                    } else if lower.contains("titanium") || lower.contains("steel") || lower.contains("arctic") {
+                        PatinaVariant::Titanium
+                    } else if lower.contains("molten") || lower.contains("amber") || lower.contains("solar") {
+                        PatinaVariant::Molten
+                    } else {
+                        PatinaVariant::Rust
+                    };
+                    let (prim, _) = pat.colors();
+                    (
+                        format!(
+                            "#{:02X}{:02X}{:02X}",
+                            (prim.r * 255.0) as u8,
+                            (prim.g * 255.0) as u8,
+                            (prim.b * 255.0) as u8
+                        ),
+                        pat,
+                    )
+                };
+                self.appearance.patina = patina.code().to_string();
+                self.appearance.accent_color = hex_color;
+                self.status_message = Some(format!(
+                    "Duvar kâğıdından renk paleti çıkarıldı: {} ({})",
+                    patina.name(),
+                    self.appearance.accent_color
+                ));
+            }
+            Message::ExportThemePack => {
+                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                let out_path = std::path::PathBuf::from(home).join("corten_theme_pack.toml");
+                if let Ok(serialized) = toml::to_string_pretty(&self.appearance) {
+                    if std::fs::write(&out_path, serialized).is_ok() {
+                        self.status_message = Some(format!(
+                            "Tema paketi dışa aktarıldı: {}",
+                            out_path.display()
+                        ));
+                    }
+                }
+            }
+            Message::ImportThemePack => {
+                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                let in_path = std::path::PathBuf::from(home).join("corten_theme_pack.toml");
+                if let Ok(content) = std::fs::read_to_string(&in_path) {
+                    if let Ok(imported) = toml::from_str::<AppearanceConfig>(&content) {
+                        self.appearance = imported;
+                        self.status_message = Some(format!(
+                            "Tema paketi içe aktarıldı: {}",
+                            in_path.display()
+                        ));
+                    }
+                } else {
+                    self.status_message = Some(format!(
+                        "İçe aktarılacak tema dosyası bulunamadı: {}",
+                        in_path.display()
+                    ));
+                }
+            }
+            Message::SetSwipe3Fingers(action) => {
+                self.input.swipe_3_fingers = action;
+            }
+            Message::SetSwipe4Fingers(action) => {
+                self.input.swipe_4_fingers = action;
+            }
+            Message::SetTabletPressureCurve(curve) => {
+                self.input.tablet_pressure_curve = curve;
+            }
+            Message::ToggleTabletLeftHanded(v) => {
+                self.input.tablet_left_handed = v;
+            }
+            Message::RuleAppIdChanged(v) => {
+                self.new_rule_app_id = v;
+            }
+            Message::RuleWorkspaceChanged(v) => {
+                self.new_rule_workspace = v;
+            }
+            Message::ToggleRuleFloating(v) => {
+                self.new_rule_floating = v;
+            }
+            Message::ToggleRuleSticky(v) => {
+                self.new_rule_sticky = v;
+            }
+            Message::AddWindowRule => {
+                let app_id = self.new_rule_app_id.trim().to_string();
+                if !app_id.is_empty() {
+                    let ws = self.new_rule_workspace.trim().parse::<usize>().ok().filter(|w| (1..=9).contains(w));
+                    self.compositor.window_rules.push(corten_config::WindowRuleConfig {
+                        app_id: Some(app_id),
+                        workspace: ws,
+                        floating: Some(self.new_rule_floating),
+                        sticky: Some(self.new_rule_sticky),
+                        ..Default::default()
+                    });
+                    self.new_rule_app_id.clear();
+                    self.status_message = Some("Yeni pencere kuralı eklendi.".into());
+                }
+            }
+            Message::RemoveWindowRule(idx) => {
+                if idx < self.compositor.window_rules.len() {
+                    self.compositor.window_rules.remove(idx);
+                }
+            }
+            Message::ToggleVpnProfile(name, currently_active) => {
+                let _ = corten_services::network::set_vpn_active(&name, !currently_active);
+                self.vpn_profiles = corten_services::network::list_vpn_profiles();
+            }
+            Message::HotspotSsidChanged(v) => {
+                self.hotspot_ssid = v;
+            }
+            Message::HotspotPasswordChanged(v) => {
+                self.hotspot_password = v;
+            }
+            Message::ToggleWifiHotspot => {
+                if self.hotspot_active {
+                    let _ = corten_services::network::stop_wifi_hotspot();
+                    self.hotspot_active = false;
+                    self.status_message = Some("Wi-Fi Hotspot erişim noktası kapatıldı.".into());
+                } else {
+                    let ok = corten_services::network::start_wifi_hotspot(
+                        &self.hotspot_ssid,
+                        &self.hotspot_password,
+                    );
+                    self.hotspot_active = ok;
+                    self.status_message = Some(if ok {
+                        format!("Wi-Fi Hotspot başlatıldı: {}", self.hotspot_ssid)
+                    } else {
+                        "Wi-Fi Hotspot başlatılamadı (NetworkManager / Wi-Fi kartı kontrol edin).".into()
+                    });
+                }
+            }
             Message::SaveSettings => {
                 let mut save_errors = Vec::new();
 
@@ -727,6 +934,11 @@ impl CortenSettingsApp {
                     CompositorSettingsConfig,
                     "compositor",
                     self.compositor.clone()
+                );
+                save_config!(
+                    AiSettingsConfig,
+                    "ai",
+                    self.ai.clone()
                 );
                 save_config!(
                     AccessibilityConfig,
@@ -1675,7 +1887,75 @@ impl CortenSettingsApp {
             palette,
         );
 
-        let wp_group = Self::settings_group(vec![wp_preset_row, wp_custom_row], palette);
+        let sec_wp_input = text_input("İkincil Monitör Duvar Kâğıdı Yolu...", &self.appearance.secondary_wallpaper_path)
+            .on_input(Message::UpdateSecondaryWallpaperPath)
+            .padding([6, 10])
+            .width(Length::Fixed(240.0));
+        let wp_secondary_row = Self::settings_row(
+            Some(Icon::MONITOR),
+            "İkincil Monitör Duvar Kâğıdı",
+            Some("Çoklu monitör kurulumunda 2. ekranda farklı görsel kullanın"),
+            sec_wp_input,
+            palette,
+        );
+
+        let live_shader_cb = Self::pill_switch(
+            self.appearance.live_wallpaper_shader,
+            Message::ToggleLiveWallpaperShader(!self.appearance.live_wallpaper_shader),
+            palette,
+        );
+        let live_shader_row = Self::settings_row(
+            Some(Icon::ACTIVITY),
+            "Canlı Shader Duvar Kâğıdı",
+            Some("Dinamik prosedürel Corten Aurora renk geçişi arka planı"),
+            live_shader_cb,
+            palette,
+        );
+
+        let desktop_icons_cb = Self::pill_switch(
+            self.appearance.desktop_icons_enabled,
+            Message::ToggleDesktopIcons(!self.appearance.desktop_icons_enabled),
+            palette,
+        );
+        let desktop_icons_row = Self::settings_row(
+            Some(Icon::APP_WINDOW),
+            "Masaüstü İkonlarını Göster (~/Desktop)",
+            Some("Masaüstü klasöründeki dosya ve kısayolları arka plan katmanında listele"),
+            desktop_icons_cb,
+            palette,
+        );
+
+        let material_you_row = Self::settings_row(
+            Some(Icon::SUN),
+            "Material You & Tema Paketi",
+            Some("Duvar kâğıdından otomatik renk çıkarın veya tema paketini (.toml) paylaşın"),
+            row![
+                button(text("Palet Çıkar").size(Typography::CAPTION))
+                    .padding([5, 10])
+                    .on_press(Message::ExtractWallpaperPalette),
+                button(text("Dışa Aktar").size(Typography::CAPTION))
+                    .padding([5, 10])
+                    .on_press(Message::ExportThemePack),
+                button(text("İçe Aktar").size(Typography::CAPTION))
+                    .padding([5, 10])
+                    .on_press(Message::ImportThemePack),
+            ]
+            .spacing(Spacing::XS)
+            .align_y(Alignment::Center),
+            palette,
+        );
+
+        let wp_group = Self::settings_group(
+            vec![
+                wp_preset_row,
+                wp_custom_row,
+                wp_secondary_row,
+                live_shader_row,
+                desktop_icons_row,
+                material_you_row,
+            ],
+            palette,
+        );
 
         column![
             heading,
@@ -2541,6 +2821,112 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let swipe3_ctrl = row![
+            Self::segment_button(
+                "Çalışma Alanı",
+                self.input.swipe_3_fingers == "workspace",
+                Message::SetSwipe3Fingers("workspace".into()),
+                palette,
+            ),
+            Self::segment_button(
+                "Genel Bakış",
+                self.input.swipe_3_fingers == "overview",
+                Message::SetSwipe3Fingers("overview".into()),
+                palette,
+            ),
+            Self::segment_button(
+                "Tam Ekran",
+                self.input.swipe_3_fingers == "maximize",
+                Message::SetSwipe3Fingers("maximize".into()),
+                palette,
+            ),
+        ]
+        .spacing(Spacing::XS);
+
+        let swipe4_ctrl = row![
+            Self::segment_button(
+                "Genel Bakış",
+                self.input.swipe_4_fingers == "overview",
+                Message::SetSwipe4Fingers("overview".into()),
+                palette,
+            ),
+            Self::segment_button(
+                "Uygulama Panosu",
+                self.input.swipe_4_fingers == "dashboard",
+                Message::SetSwipe4Fingers("dashboard".into()),
+                palette,
+            ),
+            Self::segment_button(
+                "Oyun Modu",
+                self.input.swipe_4_fingers == "game-mode",
+                Message::SetSwipe4Fingers("game-mode".into()),
+                palette,
+            ),
+        ]
+        .spacing(Spacing::XS);
+
+        let tablet_curve_ctrl = row![
+            Self::segment_button(
+                "Yumuşak",
+                self.input.tablet_pressure_curve == "soft",
+                Message::SetTabletPressureCurve("soft".into()),
+                palette,
+            ),
+            Self::segment_button(
+                "Doğrusal",
+                self.input.tablet_pressure_curve == "linear",
+                Message::SetTabletPressureCurve("linear".into()),
+                palette,
+            ),
+            Self::segment_button(
+                "Sert",
+                self.input.tablet_pressure_curve == "firm",
+                Message::SetTabletPressureCurve("firm".into()),
+                palette,
+            ),
+        ]
+        .spacing(Spacing::XS);
+
+        let tablet_lh_cb = Self::pill_switch(
+            self.input.tablet_left_handed,
+            Message::ToggleTabletLeftHanded(!self.input.tablet_left_handed),
+            palette,
+        );
+
+        let bento_gestures_and_tablet = Self::bento_card(
+            Icon::ACTIVITY,
+            "Çoklu Parmak Jestleri & Grafik Tableti (Wacom)",
+            Some("Jest & Kalem"),
+            column![
+                Self::setting_item(
+                    "3 Parmak Kaydırma Jesti",
+                    "Touchpad üzerinde 3 parmakla yatay/dikey kaydırma eylemi",
+                    swipe3_ctrl,
+                    palette,
+                ),
+                Self::setting_item(
+                    "4 Parmak Kaydırma Jesti",
+                    "Touchpad üzerinde 4 parmakla kaydırma eylemi",
+                    swipe4_ctrl,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Grafik Tableti Kalem Basınç Eğrisi",
+                    "zwp_tablet_v2 kalem ucu basınç hassasiyeti kalibrasyonu",
+                    tablet_curve_ctrl,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Sol El Tablet Modu (180° Döndürme)",
+                    "Çizim tableti çalışma alanını sol el kullanımı için ters çevir",
+                    tablet_lh_cb,
+                    palette,
+                ),
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
@@ -2549,6 +2935,8 @@ impl CortenSettingsApp {
             bento_keyboard,
             vertical_space().height(Spacing::SM),
             bento_pointer,
+            vertical_space().height(Spacing::SM),
+            bento_gestures_and_tablet,
         ]
         .spacing(Spacing::SM)
         .into()
@@ -3046,6 +3434,16 @@ impl CortenSettingsApp {
                     palette,
                 ),
                 Self::setting_item(
+                    "XWayland Keskin Ölçekleme (Force Zero Scaling)",
+                    "Kesirli ölçeklemede (%125/%150) eski X11 uygulamalarının bulanıklaşmasını önler",
+                    Self::pill_switch(
+                        self.displays.xwayland_force_zero_scaling,
+                        Message::ToggleXwaylandZeroScaling(!self.displays.xwayland_force_zero_scaling),
+                        palette,
+                    ),
+                    palette,
+                ),
+                Self::setting_item(
                     "Ekran Parlaklığı",
                     "Donanım arka aydınlatma parlaklığı kontrolü",
                     brightness_slider,
@@ -3427,6 +3825,74 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let qr_payload = corten_services::network::generate_wifi_qr_payload(
+            &self.hotspot_ssid,
+            &self.hotspot_password,
+        );
+        let hotspot_ctrl = row![
+            text_input("SSID", &self.hotspot_ssid)
+                .on_input(Message::HotspotSsidChanged)
+                .padding([4, 8])
+                .width(Length::Fixed(130.0)),
+            text_input("Parola", &self.hotspot_password)
+                .on_input(Message::HotspotPasswordChanged)
+                .padding([4, 8])
+                .width(Length::Fixed(120.0)),
+            button(
+                text(if self.hotspot_active {
+                    "Hotspot Kapat"
+                } else {
+                    "Hotspot Başlat"
+                })
+                .size(Typography::CAPTION),
+            )
+            .padding([6, 10])
+            .on_press(Message::ToggleWifiHotspot),
+        ]
+        .spacing(Spacing::XS)
+        .align_y(Alignment::Center);
+
+        let mut vpn_col = column![
+            Self::setting_item(
+                "Wi-Fi Erişim Noktası (Hotspot) & QR Paylaşım",
+                "Kablosuz internetinizi paylaşın ve QR kod metni üretin",
+                hotspot_ctrl,
+                palette,
+            ),
+            text(format!("QR Paylaşım Kodu: {}", qr_payload))
+                .size(Typography::CAPTION)
+                .color(palette.primary.to_iced()),
+        ]
+        .spacing(Spacing::SM);
+
+        for vpn in &self.vpn_profiles {
+            let v_name = vpn.name.clone();
+            let v_active = vpn.is_active;
+            vpn_col = vpn_col.push(
+                row![
+                    column![
+                        text(format!("VPN: {} ({})", vpn.name, vpn.kind))
+                            .size(Typography::BODY)
+                            .color(palette.text_primary.to_iced()),
+                        text(if v_active { "Bağlı (Aktif Tünel)" } else { "Bağlı Değil" })
+                            .size(Typography::CAPTION)
+                            .color(palette.text_muted.to_iced()),
+                    ]
+                    .width(Length::Fill),
+                    Self::pill_switch(v_active, Message::ToggleVpnProfile(v_name, v_active), palette),
+                ]
+                .align_y(Alignment::Center),
+            );
+        }
+
+        let bento_vpn_hotspot = Self::bento_card(
+            Icon::GLOBE,
+            "VPN (WireGuard / OpenVPN) & Wi-Fi Hotspot",
+            Some("NetworkManager"),
+            vpn_col,
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
@@ -3435,6 +3901,8 @@ impl CortenSettingsApp {
             bento_power,
             vertical_space().height(Spacing::SM),
             bento_devices,
+            vertical_space().height(Spacing::SM),
+            bento_vpn_hotspot,
         ]
         .spacing(Spacing::SM)
         .into()
@@ -3784,6 +4252,7 @@ impl CortenSettingsApp {
             corten_config::LayoutMode::MasterStack => "Ana-Yığın · Master-Stack",
             corten_config::LayoutMode::Dwindle => "Altın Oran Sarmal · Dwindle",
             corten_config::LayoutMode::Bsp => "İkili Ağaç · BSP",
+            corten_config::LayoutMode::Scrollable => "Yatay Şerit · Scrollable (Niri)",
             corten_config::LayoutMode::Monocle => "Tek Odak · Monocle",
         };
 
@@ -3896,6 +4365,17 @@ impl CortenSettingsApp {
                 .height(Length::Fixed(120.0))
                 .into()
             }
+            corten_config::LayoutMode::Scrollable => {
+                row![
+                    mini_win("Sütun 1: IDE", true, 0.45, 1.0),
+                    mini_win("Sütun 2: Terminal", false, 0.35, 1.0),
+                    mini_win("Sütun 3 →", false, 0.20, 1.0),
+                ]
+                .spacing(gap_px.max(4) as f32)
+                .width(Length::Fill)
+                .height(Length::Fixed(120.0))
+                .into()
+            }
             corten_config::LayoutMode::Monocle => {
                 column![
                     mini_win("Monocle Modu (Tam Odak: 1/4 Pencere)", true, 1.0, 1.0),
@@ -3981,6 +4461,12 @@ impl CortenSettingsApp {
                 palette,
             ),
             Self::segment_button(
+                "Yatay Şerit",
+                self.compositor.layout_mode == corten_config::LayoutMode::Scrollable,
+                Message::SetCompositorLayoutMode(corten_config::LayoutMode::Scrollable),
+                palette,
+            ),
+            Self::segment_button(
                 "Tek Odak",
                 self.compositor.layout_mode == corten_config::LayoutMode::Monocle,
                 Message::SetCompositorLayoutMode(corten_config::LayoutMode::Monocle),
@@ -4043,6 +4529,76 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let rule_creator = row![
+            text_input("Uygulama Kimliği (örn: firefox, mpv)", &self.new_rule_app_id)
+                .on_input(Message::RuleAppIdChanged)
+                .padding([5, 8])
+                .width(Length::Fixed(180.0)),
+            text_input("Alan (1-9)", &self.new_rule_workspace)
+                .on_input(Message::RuleWorkspaceChanged)
+                .padding([5, 8])
+                .width(Length::Fixed(70.0)),
+            Self::segment_button(
+                if self.new_rule_floating { "Yüzen" } else { "Döşeli" },
+                self.new_rule_floating,
+                Message::ToggleRuleFloating(!self.new_rule_floating),
+                palette,
+            ),
+            Self::segment_button(
+                "Sabit (PiP)",
+                self.new_rule_sticky,
+                Message::ToggleRuleSticky(!self.new_rule_sticky),
+                palette,
+            ),
+            button(text("+ Kural Ekle").size(Typography::CAPTION))
+                .padding([6, 12])
+                .on_press(Message::AddWindowRule),
+        ]
+        .spacing(Spacing::XS)
+        .align_y(Alignment::Center);
+
+        let mut rules_col = column![rule_creator].spacing(Spacing::XS);
+        for (idx, rule) in self.compositor.window_rules.iter().enumerate() {
+            let app_label = rule.app_id.as_deref().unwrap_or("*");
+            let ws_label = rule
+                .workspace
+                .map(|w| format!("Alan {}", w))
+                .unwrap_or_else(|| "Mevcut Alan".into());
+            let float_label = if rule.floating.unwrap_or(false) {
+                "Yüzen"
+            } else {
+                "Döşeli"
+            };
+            let sticky_label = if rule.sticky.unwrap_or(false) {
+                " · Sabit (PiP)"
+            } else {
+                ""
+            };
+            rules_col = rules_col.push(
+                row![
+                    text(format!(
+                        "{} → {} ({}{})",
+                        app_label, ws_label, float_label, sticky_label
+                    ))
+                    .size(Typography::BODY_SM)
+                    .color(palette.text_primary.to_iced())
+                    .width(Length::Fill),
+                    button(text("Sil").size(Typography::CAPTION).color(palette.danger.to_iced()))
+                        .padding([2, 8])
+                        .on_press(Message::RemoveWindowRule(idx)),
+                ]
+                .align_y(Alignment::Center),
+            );
+        }
+
+        let bento_rules = Self::bento_card(
+            Icon::SETTINGS,
+            "Pencere Kuralları Görsel Editörü (Window Rules)",
+            Some("Otomasyon"),
+            rules_col,
+            palette,
+        );
+
         column![
             heading,
             vertical_space().height(Spacing::SM),
@@ -4051,6 +4607,8 @@ impl CortenSettingsApp {
             bento_layout,
             vertical_space().height(Spacing::SM),
             bento_gap,
+            vertical_space().height(Spacing::SM),
+            bento_rules,
         ]
         .spacing(Spacing::SM)
         .into()

@@ -5,7 +5,7 @@ use std::arch::x86_64::*;
 
 #[inline(always)]
 pub fn dot_product_simd(a: &[f32], b: &[f32]) -> f32 {
-    let len = a.len();
+    let len = a.len().min(b.len());
     let mut sum = 0.0f32;
     let mut i = 0;
 

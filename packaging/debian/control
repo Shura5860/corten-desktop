@@ -1,0 +1,57 @@
+Source: corten-desktop
+Section: x11
+Priority: optional
+Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo,
+ rustc,
+ pkg-config,
+ clang,
+ libclang-dev,
+ libwayland-dev,
+ libxkbcommon-dev,
+ libinput-dev,
+ libdrm-dev,
+ libgbm-dev,
+ libegl-dev,
+ libgles2-mesa-dev,
+ libseat-dev,
+ libudev-dev,
+ libpam0g-dev,
+ libpipewire-0.3-dev,
+ libdbus-1-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/Shura5860/corten-desktop
+
+Package: corten-desktop
+Architecture: amd64 arm64
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ libwayland-client0,
+ libwayland-server0,
+ libxkbcommon0,
+ libinput10,
+ libdrm2,
+ libgbm1,
+ libseat1,
+ libpam0g,
+ pipewire,
+ wireplumber,
+ polkitd | policykit-1,
+ xdg-desktop-portal,
+ wl-clipboard,
+ grim
+Recommends:
+ xwayland,
+ network-manager,
+ bluez,
+ power-profiles-daemon,
+ speech-dispatcher
+Description: Pure-Rust Wayland desktop environment powered by Smithay & Iced
+ Corten Desktop is a lightweight, memory-safe Wayland desktop environment
+ written in 100% Rust. It supports Floating, Master-Stack, Dwindle, BSP,
+ Monocle, and Niri-style Scrollable Tiling layouts, XDG Desktop Portals,
+ per-application PipeWire audio routing, and optional local AURA-CORE AI.
+

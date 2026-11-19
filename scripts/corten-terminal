@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+# Corten Desktop unified terminal launcher
+if command -v foot >/dev/null 2>&1; then
+    exec foot --app-id=corten-terminal "$@"
+elif command -v alacritty >/dev/null 2>&1; then
+    exec alacritty --class corten-terminal,corten-terminal "$@"
+elif command -v kitty >/dev/null 2>&1; then
+    exec kitty --class corten-terminal "$@"
+elif command -v wezterm >/dev/null 2>&1; then
+    exec wezterm start --class corten-terminal "$@"
+elif command -v ghostty >/dev/null 2>&1; then
+    exec ghostty --class=corten-terminal "$@"
+elif command -v konsole >/dev/null 2>&1; then
+    exec konsole "$@"
+elif command -v gnome-terminal >/dev/null 2>&1; then
+    exec gnome-terminal "$@"
+else
+    exec xterm "$@"
+fi
+

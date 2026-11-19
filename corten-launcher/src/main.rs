@@ -830,6 +830,24 @@ pub static QUICK_COMMANDS: &[QuickCommand] = &[
         command: "corten-launcher --cheat-sheet",
     },
     QuickCommand {
+        name: "color-picker",
+        description: "Ekrandan Renk Seçici / Damlalık (Super+Shift+C)",
+        icon_char: Icon::DROPLET,
+        command: "cortenctl action color-picker",
+    },
+    QuickCommand {
+        name: "game-mode",
+        description: "Oyun Modunu Aç / Kapat (VRR + Tearing + DND)",
+        icon_char: Icon::ZAP,
+        command: "cortenctl action toggle-game-mode",
+    },
+    QuickCommand {
+        name: "emoji",
+        description: "Emoji ve Unicode Sembol Seçici (Super+.)",
+        icon_char: Icon::KEYBOARD,
+        command: "corten-launcher --emoji",
+    },
+    QuickCommand {
         name: "reboot",
         description: "Sistemi Yeniden Başlat",
         icon_char: Icon::ZAP,
@@ -908,6 +926,30 @@ pub static EMOJI_DATABASE: &[EmojiEntry] = &[
     EmojiEntry { emoji: "⚠️", name: "Uyarı İşareti", category: "Semboller", keywords: "warning caution dikkat ikaz tehlike" },
     EmojiEntry { emoji: "🟢", name: "Yeşil Daire", category: "Semboller", keywords: "green circle online aktif çevrimiçi" },
     EmojiEntry { emoji: "🔴", name: "Kırmızı Daire", category: "Semboller", keywords: "red circle offline kapalı dur" },
+    EmojiEntry { emoji: "→", name: "Sağ Ok (Unicode)", category: "Matematik & Unicode", keywords: "arrow right sağ ok lambda return" },
+    EmojiEntry { emoji: "←", name: "Sol Ok (Unicode)", category: "Matematik & Unicode", keywords: "arrow left sol ok geri" },
+    EmojiEntry { emoji: "↔", name: "Çift Yönlü Ok", category: "Matematik & Unicode", keywords: "arrow left right çift yönlü" },
+    EmojiEntry { emoji: "⇒", name: "Çift Sağ Ok (İse)", category: "Matematik & Unicode", keywords: "implies fat arrow double right" },
+    EmojiEntry { emoji: "≠", name: "Eşit Değildir", category: "Matematik & Unicode", keywords: "not equal eşit değil neq" },
+    EmojiEntry { emoji: "≈", name: "Yaklaşık Eşittir", category: "Matematik & Unicode", keywords: "approx almost equal yaklaşık" },
+    EmojiEntry { emoji: "≤", name: "Küçük Eşittir", category: "Matematik & Unicode", keywords: "less than or equal küçük eşit leq" },
+    EmojiEntry { emoji: "≥", name: "Büyük Eşittir", category: "Matematik & Unicode", keywords: "greater than or equal büyük eşit geq" },
+    EmojiEntry { emoji: "±", name: "Artı Eksi", category: "Matematik & Unicode", keywords: "plus minus artı eksi" },
+    EmojiEntry { emoji: "∞", name: "Sonsuzluk", category: "Matematik & Unicode", keywords: "infinity бесконечность sonsuz" },
+    EmojiEntry { emoji: "λ", name: "Lambda", category: "Matematik & Unicode", keywords: "lambda fonksiyonel functional greek" },
+    EmojiEntry { emoji: "π", name: "Pi Sayısı", category: "Matematik & Unicode", keywords: "pi math matematik daire" },
+    EmojiEntry { emoji: "Δ", name: "Delta (Fark)", category: "Matematik & Unicode", keywords: "delta diff değişim fark" },
+    EmojiEntry { emoji: "∑", name: "Sigma (Toplam)", category: "Matematik & Unicode", keywords: "sigma sum toplam" },
+    EmojiEntry { emoji: "√", name: "Karekök", category: "Matematik & Unicode", keywords: "sqrt square root karekök" },
+    EmojiEntry { emoji: "₺", name: "Türk Lirası", category: "Para & Tipografi", keywords: "tl try turkish lira türk lirası para" },
+    EmojiEntry { emoji: "€", name: "Euro", category: "Para & Tipografi", keywords: "eur euro avro para" },
+    EmojiEntry { emoji: "£", name: "Sterlin", category: "Para & Tipografi", keywords: "gbp pound sterlin" },
+    EmojiEntry { emoji: "¥", name: "Yen / Yuan", category: "Para & Tipografi", keywords: "jpy cny yen yuan" },
+    EmojiEntry { emoji: "©", name: "Telif Hakkı (Copyright)", category: "Para & Tipografi", keywords: "copyright telif" },
+    EmojiEntry { emoji: "®", name: "Tescilli Marka", category: "Para & Tipografi", keywords: "registered trademark tescilli" },
+    EmojiEntry { emoji: "™", name: "Ticari Marka (TM)", category: "Para & Tipografi", keywords: "trademark tm marka" },
+    EmojiEntry { emoji: "—", name: "Uzun Tire (Em Dash)", category: "Para & Tipografi", keywords: "em dash uzun tire" },
+    EmojiEntry { emoji: "…", name: "Üç Nokta (Ellipsis)", category: "Para & Tipografi", keywords: "ellipsis üç nokta" },
 ];
 
 pub struct CortenLauncherApp {
@@ -1089,9 +1131,14 @@ impl Application for CortenLauncherApp {
                     self.mode = LauncherMode::Applications;
                     self.search_query = query.trim_start_matches(":app").trim().to_string();
                     self.filter_entries();
-                } else if (query.starts_with(":emoji") || query.starts_with(":e ")) && self.mode != LauncherMode::Emoji {
+                } else if (query.starts_with(":emoji") || query.starts_with(":e ") || query.starts_with(". ")) && self.mode != LauncherMode::Emoji {
                     self.mode = LauncherMode::Emoji;
-                    self.search_query = query.trim_start_matches(":emoji").trim_start_matches(":e ").trim().to_string();
+                    self.search_query = query
+                        .trim_start_matches(":emoji")
+                        .trim_start_matches(":e ")
+                        .trim_start_matches(". ")
+                        .trim()
+                        .to_string();
                     self.filter_emojis();
                 } else if (query.starts_with(":notes") || query.starts_with(":note") || query.starts_with(":n ")) && self.mode != LauncherMode::Notes {
                     self.mode = LauncherMode::Notes;

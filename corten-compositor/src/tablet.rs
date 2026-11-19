@@ -17,6 +17,34 @@ use wayland_server::protocol::wl_surface::WlSurface;
 
 use crate::state::CortenCompositor;
 
+/// Transforms raw stylus pressure (`0.0..=1.0`) according to user-selected curve (`"soft"`, `"linear"`, `"firm"`).
+pub fn apply_tablet_pressure_curve(raw: f64, curve: &str) -> f64 {
+    let p = raw.clamp(0.0, 1.0);
+    match curve {
+        "soft" => p.powf(0.65),
+        "firm" => p.powf(1.55),
+        _ => p,
+    }
+}
+
+/// Applies optional 180-degree left-handed tablet coordinate inversion.
+pub fn transform_tablet_coords(
+    x: f64,
+    y: f64,
+    screen_w: u32,
+    screen_h: u32,
+    left_handed: bool,
+) -> (f64, f64) {
+    if left_handed {
+        (
+            (screen_w as f64 - x).clamp(0.0, screen_w as f64),
+            (screen_h as f64 - y).clamp(0.0, screen_h as f64),
+        )
+    } else {
+        (x, y)
+    }
+}
+
 /// Converts a libinput physical tablet tool into Smithay's `TabletToolDescriptor`.
 pub fn libinput_tool_to_descriptor(tool: &LibinputTabletTool) -> TabletToolDescriptor {
     let tool_type = match tool.tool_type() {
@@ -145,15 +173,21 @@ impl TabletState {
         let device_name = device.name();
         let tablet = self.get_or_create_tablet(state, device_name);
 
-        let x = axis.x_transformed(screen_w);
-        let y = axis.y_transformed(screen_h);
+        let (x, y) = transform_tablet_coords(
+            axis.x_transformed(screen_w),
+            axis.y_transformed(screen_h),
+            screen_w,
+            screen_h,
+            state.tablet_left_handed,
+        );
         let loc = Point::<f64, Logical>::from((x, y));
         state.cursor_location = loc;
 
         let time = (axis.time_usec() / 1000) as u32;
 
         if axis.pressure_has_changed() {
-            tool.pressure(axis.pressure());
+            let curved = apply_tablet_pressure_curve(axis.pressure(), &state.tablet_pressure_curve);
+            tool.pressure(curved);
         }
         if axis.distance_has_changed() {
             tool.distance(axis.distance());
@@ -215,8 +249,13 @@ impl TabletState {
 
         match prox.proximity_state() {
             smithay::reexports::input::event::tablet_tool::ProximityState::In => {
-                let x = prox.x_transformed(screen_w);
-                let y = prox.y_transformed(screen_h);
+                let (x, y) = transform_tablet_coords(
+                    prox.x_transformed(screen_w),
+                    prox.y_transformed(screen_h),
+                    screen_w,
+                    screen_h,
+                    state.tablet_left_handed,
+                );
                 let loc = Point::<f64, Logical>::from((x, y));
                 state.cursor_location = loc;
 
@@ -274,5 +313,16 @@ mod tests {
         };
         assert_eq!(desc.name, "Wacom Intuos Pro");
         assert_eq!(desc.usb_id, Some((0x056a, 0x0357)));
+    }
+
+    #[test]
+    fn test_tablet_pressure_curve_and_left_handed_rotation() {
+        assert!(apply_tablet_pressure_curve(0.5, "soft") > 0.5);
+        assert!(apply_tablet_pressure_curve(0.5, "firm") < 0.5);
+        assert!((apply_tablet_pressure_curve(0.5, "linear") - 0.5).abs() < 1e-6);
+        assert_eq!(
+            transform_tablet_coords(200.0, 100.0, 1920, 1080, true),
+            (1720.0, 980.0)
+        );
     }
 }

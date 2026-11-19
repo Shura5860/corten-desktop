@@ -131,8 +131,11 @@ impl ModelRunner {
             .metadata
             .get("llama.rope.freq_base")
             .or_else(|| header.metadata.get("qwen2.rope.freq_base"))
-            .and_then(|v| v.to_u64())
-            .map(|v| v as f32)
+            .and_then(|v| match v {
+                crate::gguf::header::GgufValue::Float32(f) => Some(*f),
+                crate::gguf::header::GgufValue::Float64(f) => Some(*f as f32),
+                other => other.to_u64().map(|u| u as f32),
+            })
             .unwrap_or(500000.0f32);
 
         let head_dim = hidden_dim / num_heads;

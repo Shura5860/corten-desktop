@@ -1,0 +1,121 @@
+# Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
+pkgname=corten-desktop-git
+pkgver=0.5.0.r0.g0000000
+pkgrel=1
+pkgdesc="Pure-Rust Wayland desktop environment powered by Smithay, Iced & AURA-CORE"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Shura5860/corten-desktop"
+license=('GPL-3.0-or-later' 'MIT')
+depends=(
+    'wayland'
+    'libxkbcommon'
+    'libinput'
+    'mesa'
+    'libdrm'
+    'seatd'
+    'pam'
+    'pipewire'
+    'wireplumber'
+    'polkit'
+    'xdg-desktop-portal'
+    'wl-clipboard'
+    'grim'
+)
+makedepends=(
+    'cargo'
+    'git'
+    'clang'
+    'pkgconf'
+)
+optdepends=(
+    'xorg-xwayland: X11 application compatibility via XWayland'
+    'networkmanager: Wi-Fi, VPN & Hotspot management in Corten Panel/Settings'
+    'bluez: Bluetooth device management'
+    'power-profiles-daemon: Power saver / Balanced / Performance profiles'
+    'speech-dispatcher: Screen reader announcements for accessibility'
+)
+provides=('corten-desktop')
+conflicts=('corten-desktop' 'corten-desktop-bin')
+source=("git+${url}.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "${srcdir}/corten-desktop"
+    printf "0.5.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cd "${srcdir}/corten-desktop"
+    export CARGO_TARGET_DIR=target
+    cargo build --release --locked \
+        --bin corten-compositor \
+        --bin corten-session \
+        --bin corten-panel \
+        --bin corten-launcher \
+        --bin corten-settings \
+        --bin corten-files \
+        --bin corten-notify \
+        --bin corten-lock \
+        --bin corten-greeter \
+        --bin corten-monitor \
+        --bin corten-snipper \
+        --bin corten-widgets \
+        --bin corten-wallpaper \
+        --bin corten-portal \
+        --bin corten-polkit \
+        --bin corten-ai \
+        --bin corten-welcome \
+        --bin corten-forge \
+        --bin corten-update \
+        --bin cortenctl
+}
+
+check() {
+    cd "${srcdir}/corten-desktop"
+    cargo test --release --locked -p corten-config -p corten-ipc -p corten-services -p corten-portal
+}
+
+package() {
+    cd "${srcdir}/corten-desktop"
+
+    local bins=(
+        corten-compositor
+        corten-session
+        corten-panel
+        corten-launcher
+        corten-settings
+        corten-files
+        corten-notify
+        corten-lock
+        corten-greeter
+        corten-monitor
+        corten-snipper
+        corten-widgets
+        corten-wallpaper
+        corten-portal
+        corten-polkit
+        corten-ai
+        corten-welcome
+        corten-forge
+        corten-update
+        cortenctl
+    )
+
+    for bin in "${bins[@]}"; do
+        install -Dm755 "target/release/${bin}" "${pkgdir}/usr/bin/${bin}"
+    done
+    install -Dm755 "scripts/corten-terminal" "${pkgdir}/usr/bin/corten-terminal"
+
+    install -Dm644 "corten-session/corten.desktop" \
+        "${pkgdir}/usr/share/wayland-sessions/corten.desktop"
+    install -Dm644 "corten-portal/corten.portal" \
+        "${pkgdir}/usr/share/xdg-desktop-portal/portals/corten.portal"
+    install -Dm644 "corten-portal/corten-portals.conf" \
+        "${pkgdir}/usr/share/xdg-desktop-portal/corten-portals.conf"
+
+    if [ -d "assets/wallpapers" ]; then
+        install -dm755 "${pkgdir}/usr/share/backgrounds/corten"
+        cp -r assets/wallpapers/* "${pkgdir}/usr/share/backgrounds/corten/"
+    fi
+}
+

@@ -1,0 +1,52 @@
+# Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
+pkgname=corten-desktop-bin
+pkgver=0.5.0
+pkgrel=1
+pkgdesc="Pure-Rust Wayland desktop environment powered by Smithay, Iced & AURA-CORE (precompiled binary release)"
+arch=('x86_64')
+url="https://github.com/Shura5860/corten-desktop"
+license=('GPL-3.0-or-later' 'MIT')
+depends=(
+    'wayland'
+    'libxkbcommon'
+    'libinput'
+    'mesa'
+    'libdrm'
+    'seatd'
+    'pam'
+    'pipewire'
+    'wireplumber'
+    'polkit'
+    'xdg-desktop-portal'
+    'wl-clipboard'
+    'grim'
+)
+provides=('corten-desktop')
+conflicts=('corten-desktop' 'corten-desktop-git')
+source=("${url}/releases/download/v${pkgver}/corten-desktop-v${pkgver}-x86_64-linux.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "${srcdir}"
+    install -dm755 "${pkgdir}/usr/bin"
+    for bin in corten-*; do
+        if [ -f "${bin}" ] && [ -x "${bin}" ]; then
+            install -Dm755 "${bin}" "${pkgdir}/usr/bin/${bin}"
+        fi
+    done
+    if [ -f "cortenctl" ]; then
+        install -Dm755 "cortenctl" "${pkgdir}/usr/bin/cortenctl"
+    fi
+    if [ ! -f "${pkgdir}/usr/bin/corten-terminal" ]; then
+        cat > "${pkgdir}/usr/bin/corten-terminal" << 'EOF'
+#!/usr/bin/env sh
+if command -v foot >/dev/null 2>&1; then exec foot --app-id=corten-terminal "$@";
+elif command -v alacritty >/dev/null 2>&1; then exec alacritty --class corten-terminal,corten-terminal "$@";
+elif command -v kitty >/dev/null 2>&1; then exec kitty --class corten-terminal "$@";
+elif command -v wezterm >/dev/null 2>&1; then exec wezterm start --class corten-terminal "$@";
+elif command -v ghostty >/dev/null 2>&1; then exec ghostty --class=corten-terminal "$@";
+else exec xterm "$@"; fi
+EOF
+        chmod 755 "${pkgdir}/usr/bin/corten-terminal"
+    fi
+}

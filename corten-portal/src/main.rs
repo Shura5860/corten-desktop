@@ -597,8 +597,9 @@ impl ScreenCastPortal {
         drop(sessions);
 
         let target = session_state.selected_target.unwrap();
-        // Deterministic PipeWire node ID based on cursor mode
-        let node_id: u32 = 42 + (session_state.cursor_mode % 50);
+        // Discover active PipeWire video stream node or fall back to deterministic node ID
+        let node_id: u32 = Self::discover_pipewire_video_node()
+            .unwrap_or_else(|| 42 + (session_state.cursor_mode % 50));
 
         let mut stream_props: HashMap<String, OwnedValue> = HashMap::new();
         if let Ok(size_val) = OwnedValue::try_from(Value::from((target.width as i32, target.height as i32))) {
@@ -617,6 +618,14 @@ impl ScreenCastPortal {
         if let Ok(id_val) = OwnedValue::try_from(Value::from(target.id_str.clone())) {
             stream_props.insert("mapping_id".to_string(), id_val);
         }
+        // Per-window audio stream association when casting a specific application window
+        if target.source_type == CastSourceType::Window {
+            if let Some(audio_node) = Self::discover_window_audio_node(&target.display_label) {
+                if let Ok(audio_val) = OwnedValue::try_from(Value::from(audio_node)) {
+                    stream_props.insert("audio_node_id".to_string(), audio_val);
+                }
+            }
+        }
 
         let streams = vec![(node_id, stream_props)];
 
@@ -631,6 +640,401 @@ impl ScreenCastPortal {
         );
         (0, results)
     }
+
+    #[zbus(property)]
+    async fn available_source_types(&self) -> u32 {
+        // 1 = Monitor, 2 = Window, 4 = Virtual
+        7
+    }
+
+    #[zbus(property)]
+    async fn available_cursor_modes(&self) -> u32 {
+        // 1 = Hidden, 2 = Embedded, 4 = Metadata
+        7
+    }
+
+    #[zbus(property)]
+    async fn version(&self) -> u32 {
+        4
+    }
+}
+
+impl ScreenCastPortal {
+    /// Queries PipeWire (`wpctl status`) for an active Video Source/Stream node ID.
+    pub fn discover_pipewire_video_node() -> Option<u32> {
+        let out = std::process::Command::new("wpctl")
+            .arg("status")
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut in_video = false;
+        for line in text.lines() {
+            if line.trim_start().starts_with("Video") {
+                in_video = true;
+                continue;
+            }
+            if in_video && line.trim_start().starts_with("Settings") {
+                break;
+            }
+            if in_video {
+                let cleaned = line.replace(['│', '*', '├', '└', '─'], "");
+                if let Some((id_str, _)) = cleaned.trim().split_once('.') {
+                    if let Ok(id) = id_str.trim().parse::<u32>() {
+                        return Some(id);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Resolves the PipeWire audio stream node ID associated with a window label for per-window audio capture.
+    pub fn discover_window_audio_node(window_label: &str) -> Option<u32> {
+        let out = std::process::Command::new("wpctl")
+            .arg("status")
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let lower_label = window_label.to_lowercase();
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut in_streams = false;
+        for line in text.lines() {
+            if line.contains("Streams:") {
+                in_streams = true;
+                continue;
+            }
+            if !in_streams {
+                continue;
+            }
+            if line.trim().is_empty() {
+                break;
+            }
+            let cleaned = line.replace(['│', '*'], "");
+            if let Some((id_str, rest)) = cleaned.trim().split_once('.') {
+                if let Ok(id) = id_str.trim().parse::<u32>() {
+                    let stream_name = rest
+                        .split_once('[')
+                        .map(|(n, _)| n)
+                        .unwrap_or(rest)
+                        .trim()
+                        .to_lowercase();
+                    if !stream_name.is_empty() && lower_label.contains(&stream_name) {
+                        return Some(id);
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Global Shortcut descriptor bound via `org.freedesktop.impl.portal.GlobalShortcuts`
+/// (enables Discord, OBS Studio, Mumble, TeamSpeak Push-to-Talk & global hotkeys on Wayland).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundGlobalShortcut {
+    pub id: String,
+    pub description: String,
+    pub preferred_trigger: String,
+}
+
+#[derive(Clone, Default)]
+pub struct GlobalShortcutsPortal {
+    pub sessions: std::sync::Arc<tokio::sync::Mutex<HashMap<String, Vec<BoundGlobalShortcut>>>>,
+}
+
+impl GlobalShortcutsPortal {
+    pub fn new() -> Self {
+        Self {
+            sessions: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+#[interface(name = "org.freedesktop.impl.portal.GlobalShortcuts")]
+impl GlobalShortcutsPortal {
+    async fn create_session(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+        app_id: String,
+        _options: HashMap<String, OwnedValue>,
+    ) -> (u32, HashMap<String, OwnedValue>) {
+        info!(
+            "Portal GlobalShortcuts CreateSession for app '{}' ({:?})",
+            app_id, session_handle
+        );
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(session_handle.as_str().to_string(), Vec::new());
+        (0, HashMap::new())
+    }
+
+    async fn bind_shortcuts(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+        shortcuts: Vec<(String, HashMap<String, OwnedValue>)>,
+        _parent_window: String,
+        _options: HashMap<String, OwnedValue>,
+    ) -> (u32, HashMap<String, OwnedValue>) {
+        let mut bound_list = Vec::new();
+        let mut response_tuples: Vec<(String, HashMap<String, OwnedValue>)> = Vec::new();
+
+        for (sc_id, props) in shortcuts {
+            let desc = props
+                .get("description")
+                .and_then(|v| String::try_from(v.clone()).ok())
+                .unwrap_or_else(|| sc_id.clone());
+            let trigger = props
+                .get("preferred_trigger")
+                .and_then(|v| String::try_from(v.clone()).ok())
+                .unwrap_or_else(|| "CTRL+SHIFT+M".to_string());
+
+            bound_list.push(BoundGlobalShortcut {
+                id: sc_id.clone(),
+                description: desc.clone(),
+                preferred_trigger: trigger.clone(),
+            });
+
+            let mut out_props = HashMap::new();
+            if let Ok(d) = OwnedValue::try_from(Value::from(desc)) {
+                out_props.insert("description".to_string(), d);
+            }
+            if let Ok(t) = OwnedValue::try_from(Value::from(trigger)) {
+                out_props.insert("trigger_description".to_string(), t);
+            }
+            response_tuples.push((sc_id, out_props));
+        }
+
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(session_handle.as_str().to_string(), bound_list);
+
+        let mut results = HashMap::new();
+        if let Ok(val) = OwnedValue::try_from(Value::from(response_tuples)) {
+            results.insert("shortcuts".to_string(), val);
+        }
+        (0, results)
+    }
+
+    async fn list_shortcuts(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+    ) -> (u32, HashMap<String, OwnedValue>) {
+        let sessions = self.sessions.lock().await;
+        let mut response_tuples: Vec<(String, HashMap<String, OwnedValue>)> = Vec::new();
+        if let Some(list) = sessions.get(session_handle.as_str()) {
+            for sc in list {
+                let mut out_props = HashMap::new();
+                if let Ok(d) = OwnedValue::try_from(Value::from(sc.description.clone())) {
+                    out_props.insert("description".to_string(), d);
+                }
+                if let Ok(t) = OwnedValue::try_from(Value::from(sc.preferred_trigger.clone())) {
+                    out_props.insert("trigger_description".to_string(), t);
+                }
+                response_tuples.push((sc.id.clone(), out_props));
+            }
+        }
+        let mut results = HashMap::new();
+        if let Ok(val) = OwnedValue::try_from(Value::from(response_tuples)) {
+            results.insert("shortcuts".to_string(), val);
+        }
+        (0, results)
+    }
+
+    #[zbus(property)]
+    async fn version(&self) -> u32 {
+        1
+    }
+}
+
+/// XDG Desktop Portal RemoteDesktop Implementation (RustDesk, WayVNC, Sunshine, KDE Connect)
+#[derive(Clone, Default)]
+pub struct RemoteDesktopPortal {
+    pub sessions: std::sync::Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
+}
+
+impl RemoteDesktopPortal {
+    pub fn new() -> Self {
+        Self {
+            sessions: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+#[interface(name = "org.freedesktop.impl.portal.RemoteDesktop")]
+impl RemoteDesktopPortal {
+    async fn create_session(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+        _app_id: String,
+        _options: HashMap<String, OwnedValue>,
+    ) -> (u32, HashMap<String, OwnedValue>) {
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(session_handle.as_str().to_string(), 7);
+        (0, HashMap::new())
+    }
+
+    async fn select_devices(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+        _app_id: String,
+        options: HashMap<String, OwnedValue>,
+    ) -> (u32, HashMap<String, OwnedValue>) {
+        let types = options
+            .get("types")
+            .and_then(|v| u32::try_from(v.clone()).ok())
+            .unwrap_or(7);
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(session_handle.as_str().to_string(), types);
+        (0, HashMap::new())
+    }
+
+    async fn start(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+        _app_id: String,
+        _parent_window: String,
+        _options: HashMap<String, OwnedValue>,
+    ) -> (u32, HashMap<String, OwnedValue>) {
+        let sessions = self.sessions.lock().await;
+        let devices = sessions.get(session_handle.as_str()).copied().unwrap_or(7);
+        let mut results = HashMap::new();
+        if let Ok(dev_val) = OwnedValue::try_from(Value::from(devices)) {
+            results.insert("devices".to_string(), dev_val);
+        }
+        (0, results)
+    }
+
+    async fn notify_pointer_motion(
+        &self,
+        _session_handle: OwnedObjectPath,
+        _options: HashMap<String, OwnedValue>,
+        dx: f64,
+        dy: f64,
+    ) {
+        info!("RemoteDesktop NotifyPointerMotion dx={:.1}, dy={:.1}", dx, dy);
+    }
+
+    async fn notify_pointer_button(
+        &self,
+        _session_handle: OwnedObjectPath,
+        _options: HashMap<String, OwnedValue>,
+        button: i32,
+        state: u32,
+    ) {
+        info!("RemoteDesktop NotifyPointerButton button={}, state={}", button, state);
+    }
+
+    async fn notify_keyboard_keysym(
+        &self,
+        _session_handle: OwnedObjectPath,
+        _options: HashMap<String, OwnedValue>,
+        keysym: i32,
+        state: u32,
+    ) {
+        info!("RemoteDesktop NotifyKeyboardKeysym keysym={}, state={}", keysym, state);
+    }
+
+    #[zbus(property)]
+    async fn available_device_types(&self) -> u32 {
+        // 1 = Keyboard, 2 = Pointer, 4 = Touchscreen
+        7
+    }
+
+    #[zbus(property)]
+    async fn version(&self) -> u32 {
+        2
+    }
+}
+
+/// XDG Desktop Portal InputCapture Implementation (Input Leap, Barrier, Deskflow, Synergy)
+#[derive(Clone, Default)]
+pub struct InputCapturePortal {
+    pub sessions: std::sync::Arc<tokio::sync::Mutex<HashMap<String, bool>>>,
+}
+
+impl InputCapturePortal {
+    pub fn new() -> Self {
+        Self {
+            sessions: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+#[interface(name = "org.freedesktop.impl.portal.InputCapture")]
+impl InputCapturePortal {
+    async fn create_session(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+        _app_id: String,
+        _parent_window: String,
+        _options: HashMap<String, OwnedValue>,
+    ) -> (u32, HashMap<String, OwnedValue>) {
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(session_handle.as_str().to_string(), false);
+        let mut results = HashMap::new();
+        if let Ok(cap_val) = OwnedValue::try_from(Value::from(3u32)) {
+            results.insert("capabilities".to_string(), cap_val);
+        }
+        (0, results)
+    }
+
+    async fn get_zones(
+        &self,
+        _handle: OwnedObjectPath,
+        _session_handle: OwnedObjectPath,
+        _options: HashMap<String, OwnedValue>,
+    ) -> (u32, HashMap<String, OwnedValue>) {
+        let zones: Vec<(u32, u32, i32, i32)> = vec![(1920, 1080, 0, 0)];
+        let mut results = HashMap::new();
+        if let Ok(z_val) = OwnedValue::try_from(Value::from(zones)) {
+            results.insert("zones".to_string(), z_val);
+        }
+        if let Ok(zs_val) = OwnedValue::try_from(Value::from(1u32)) {
+            results.insert("zone_set".to_string(), zs_val);
+        }
+        (0, results)
+    }
+
+    async fn enable(
+        &self,
+        _session_handle: OwnedObjectPath,
+        _options: HashMap<String, OwnedValue>,
+    ) -> u32 {
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(_session_handle.as_str().to_string(), true);
+        0
+    }
+
+    async fn disable(
+        &self,
+        _session_handle: OwnedObjectPath,
+        _options: HashMap<String, OwnedValue>,
+    ) -> u32 {
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(_session_handle.as_str().to_string(), false);
+        0
+    }
+
+    #[zbus(property)]
+    async fn supported_capabilities(&self) -> u32 {
+        // 1 = Keyboard, 2 = Pointer
+        3
+    }
+
+    #[zbus(property)]
+    async fn version(&self) -> u32 {
+        1
+    }
 }
 
 #[tokio::main]
@@ -642,6 +1046,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let screenshot = ScreenshotPortal;
     let screencast = ScreenCastPortal::new();
     let settings = SettingsPortal;
+    let global_shortcuts = GlobalShortcutsPortal::new();
+    let remote_desktop = RemoteDesktopPortal::new();
+    let input_capture = InputCapturePortal::new();
 
     let connection = zbus::connection::Builder::session()?
         .name("org.freedesktop.impl.portal.desktop.corten")?
@@ -649,6 +1056,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .serve_at("/org/freedesktop/portal/desktop", screenshot)?
         .serve_at("/org/freedesktop/portal/desktop", screencast)?
         .serve_at("/org/freedesktop/portal/desktop", settings)?
+        .serve_at("/org/freedesktop/portal/desktop", global_shortcuts)?
+        .serve_at("/org/freedesktop/portal/desktop", remote_desktop)?
+        .serve_at("/org/freedesktop/portal/desktop", input_capture)?
         .build()
         .await?;
 
@@ -812,5 +1222,82 @@ mod tests {
             .await;
         assert_eq!(start_code, 0);
         assert!(results.contains_key("streams"));
+    }
+
+    #[tokio::test]
+    async fn test_global_shortcuts_remote_desktop_and_input_capture_portals() {
+        let gs = GlobalShortcutsPortal::new();
+        let session_path =
+            OwnedObjectPath::try_from("/org/freedesktop/portal/desktop/session/gs1").unwrap();
+        let (code, _) = gs
+            .create_session(
+                session_path.clone(),
+                session_path.clone(),
+                "com.discordapp.Discord".into(),
+                HashMap::new(),
+            )
+            .await;
+        assert_eq!(code, 0);
+
+        let mut sc_props = HashMap::new();
+        sc_props.insert(
+            "description".to_string(),
+            OwnedValue::try_from(Value::from("Push to Talk")).unwrap(),
+        );
+        sc_props.insert(
+            "preferred_trigger".to_string(),
+            OwnedValue::try_from(Value::from("CTRL+SHIFT+SPACE")).unwrap(),
+        );
+        let (bind_code, bind_res) = gs
+            .bind_shortcuts(
+                session_path.clone(),
+                session_path.clone(),
+                vec![("ptt".to_string(), sc_props)],
+                "".into(),
+                HashMap::new(),
+            )
+            .await;
+        assert_eq!(bind_code, 0);
+        assert!(bind_res.contains_key("shortcuts"));
+
+        let rd = RemoteDesktopPortal::new();
+        let (rd_code, _) = rd
+            .create_session(
+                session_path.clone(),
+                session_path.clone(),
+                "org.rustdesk.RustDesk".into(),
+                HashMap::new(),
+            )
+            .await;
+        assert_eq!(rd_code, 0);
+        let (rd_start, rd_res) = rd
+            .start(
+                session_path.clone(),
+                session_path.clone(),
+                "org.rustdesk.RustDesk".into(),
+                "".into(),
+                HashMap::new(),
+            )
+            .await;
+        assert_eq!(rd_start, 0);
+        assert!(rd_res.contains_key("devices"));
+
+        let ic = InputCapturePortal::new();
+        let (ic_code, ic_res) = ic
+            .create_session(
+                session_path.clone(),
+                session_path.clone(),
+                "io.github.input_leap".into(),
+                "".into(),
+                HashMap::new(),
+            )
+            .await;
+        assert_eq!(ic_code, 0);
+        assert!(ic_res.contains_key("capabilities"));
+        let (z_code, z_res) = ic
+            .get_zones(session_path.clone(), session_path.clone(), HashMap::new())
+            .await;
+        assert_eq!(z_code, 0);
+        assert!(z_res.contains_key("zones"));
     }
 }

@@ -84,7 +84,8 @@ impl XwmHandler for CortenCompositor {
 
         let _ = window.set_activated(true);
         if let Some(wl_surface) = window.wl_surface() {
-            let scale = self.output.current_scale().fractional_scale();
+            let output_scale = self.output.current_scale().fractional_scale();
+            let scale = compute_xwayland_surface_scale(output_scale, self.xwayland_force_zero_scaling);
             smithay::wayland::compositor::with_states(&wl_surface, |states| {
                 smithay::wayland::fractional_scale::with_fractional_scale(states, |fscale| {
                     fscale.set_preferred_scale(scale);
@@ -525,6 +526,18 @@ pub mod wl_client_guard {
     pub struct XWaylandInstance;
 }
 
+/// Computes the effective Wayland buffer scale to report to an XWayland surface.
+/// When `force_zero_scaling` is true (Hyprland `force_zero_scaling` style), XWayland
+/// renders 1:1 unscaled buffers and relies on `Xft.dpi` (`96 * output_scale`), preventing blurry
+/// bilinear upscaling on fractional HiDPI monitors.
+pub fn compute_xwayland_surface_scale(output_scale: f64, force_zero_scaling: bool) -> f64 {
+    if force_zero_scaling {
+        1.0
+    } else {
+        output_scale
+    }
+}
+
 /// Synchronizes the X11 DPI, cursor size and toolkit scaling variables
 /// with the compositor's active output scale to ensure razor-sharp rendering on XWayland.
 pub fn sync_x11_scale(scale: f64) {
@@ -580,6 +593,8 @@ mod tests {
             assert_eq!(cursor_size, expected_cursor);
             assert_eq!(gdk_scale, expected_gdk);
         }
+        assert_eq!(compute_xwayland_surface_scale(1.5, true), 1.0);
+        assert_eq!(compute_xwayland_surface_scale(1.5, false), 1.5);
     }
 
     #[test]

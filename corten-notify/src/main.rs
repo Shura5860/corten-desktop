@@ -12,7 +12,7 @@ use corten_theme::{
     Icon, Palette, PatinaVariant, Spacing, ThemeMode, Transition, Typography, LUCIDE_FONT,
     LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
 };
-use iced::widget::{button, column, container, row, text};
+use iced::widget::{button, column, container, image, row, text, text_input};
 use iced::{Alignment, Element, Length, Subscription};
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
@@ -56,6 +56,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 timeout_ms: 10000,
                 sync_tag: None,
                 progress: None,
+                image_path: None,
+                has_inline_reply: false,
             }));
         });
     }
@@ -173,7 +175,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             exclusive_zone: 0,
             size: layer_size,
-            keyboard_interactivity: KeyboardInteractivity::None,
+            keyboard_interactivity: KeyboardInteractivity::OnDemand,
             binded_output_name: None,
         },
         default_font: NOTO_SANS,
@@ -217,6 +219,9 @@ pub enum Message {
     DbusEvent(NotifyEvent),
     Dismiss(u32),
     DismissApp(String),
+    ToggleMuteApp(String),
+    InlineReplyChanged(u32, String),
+    SubmitInlineReply(u32),
     DismissHistory(u32),
     ClearHistory,
     ToggleHistoryDrawer,
@@ -246,6 +251,7 @@ pub struct CortenNotificationApp {
     event_rx: Option<Arc<tokio::sync::Mutex<UnboundedReceiver<NotifyEvent>>>>,
     notifications: Vec<VisibleNotification>,
     notification_history: Vec<NotificationItem>,
+    reply_inputs: std::collections::HashMap<u32, String>,
     show_history_drawer: bool,
     theme_mode: ThemeMode,
     active_patina: PatinaVariant,
@@ -420,6 +426,7 @@ impl Application for CortenNotificationApp {
                 event_rx,
                 notifications: Vec::new(),
                 notification_history: Vec::new(),
+                reply_inputs: std::collections::HashMap::new(),
                 show_history_drawer: false,
                 theme_mode,
                 active_patina,
@@ -470,6 +477,12 @@ impl Application for CortenNotificationApp {
         match message {
             Message::DbusEvent(event) => match event {
                 NotifyEvent::Add(item) => {
+                    if item.urgency != Urgency::Critical
+                        && self.config.muted_apps.iter().any(|m| m.eq_ignore_ascii_case(&item.app_name))
+                    {
+                        info!("Notification from muted app '{}' suppressed", item.app_name);
+                        return Task::none();
+                    }
                     let timeout = if item.timeout_ms > 0 {
                         item.timeout_ms as u64
                     } else {
@@ -573,6 +586,34 @@ impl Application for CortenNotificationApp {
                     dbus::emit_notification_closed(id, 2);
                 }
             }
+            Message::ToggleMuteApp(app) => {
+                if let Some(pos) = self
+                    .config
+                    .muted_apps
+                    .iter()
+                    .position(|a| a.eq_ignore_ascii_case(&app))
+                {
+                    self.config.muted_apps.remove(pos);
+                } else {
+                    self.config.muted_apps.push(app.clone());
+                    self.notifications.retain(|n| !n.item.app_name.eq_ignore_ascii_case(&app));
+                }
+                let _ = self.config_manager.update(self.config.clone());
+            }
+            Message::InlineReplyChanged(id, val) => {
+                self.reply_inputs.insert(id, val);
+                if let Some(n) = self.notifications.iter_mut().find(|n| n.item.id == id) {
+                    n.remaining_ms = n.initial_ms.max(8000);
+                }
+            }
+            Message::SubmitInlineReply(id) => {
+                let reply_text = self.reply_inputs.remove(&id).unwrap_or_default();
+                if !reply_text.trim().is_empty() {
+                    dbus::emit_notification_replied(id, reply_text.trim());
+                    self.notifications.retain(|n| n.item.id != id);
+                    dbus::emit_notification_closed(id, 2);
+                }
+            }
             Message::DismissHistory(id) => {
                 self.notification_history.retain(|n| n.id != id);
             }
@@ -628,6 +669,12 @@ impl Application for CortenNotificationApp {
                 }
                 if !notif.item.actions.is_empty() {
                     card_h += 34;
+                }
+                if notif.item.image_path.is_some() {
+                    card_h += 120;
+                }
+                if notif.item.has_inline_reply {
+                    card_h += 38;
                 }
                 if notif.item.progress.is_some() || notif.item.urgency != Urgency::Critical {
                     card_h += 8;
@@ -957,14 +1004,26 @@ impl Application for CortenNotificationApp {
                     ]
                     .spacing(Spacing::XS)
                     .align_y(Alignment::Center),
-                    button(text("✕").size(Typography::CAPTION))
-                        .style(move |_, _| button::Style {
-                            background: None,
-                            text_color: palette.text_muted.to_iced(),
-                            border: iced::Border::default(),
-                            shadow: iced::Shadow::default(),
-                        })
-                        .on_press(Message::Dismiss(item.id)),
+                    row![
+                        button(text("🔕").size(10.0))
+                            .style(move |_, _| button::Style {
+                                background: None,
+                                text_color: palette.text_muted.to_iced(),
+                                border: iced::Border::default(),
+                                shadow: iced::Shadow::default(),
+                            })
+                            .on_press(Message::ToggleMuteApp(item.app_name.clone())),
+                        button(text("✕").size(Typography::CAPTION))
+                            .style(move |_, _| button::Style {
+                                background: None,
+                                text_color: palette.text_muted.to_iced(),
+                                border: iced::Border::default(),
+                                shadow: iced::Shadow::default(),
+                            })
+                            .on_press(Message::Dismiss(item.id)),
+                    ]
+                    .spacing(4)
+                    .align_y(Alignment::Center),
                 ]
                 .align_y(Alignment::Center)
                 .width(Length::Fill),
@@ -980,6 +1039,45 @@ impl Application for CortenNotificationApp {
                         .size(Typography::BODY_SM)
                         .color(palette.text_muted.to_iced()),
                 );
+            }
+
+            if let Some(ref img_path) = item.image_path {
+                card_content = card_content.push(
+                    image(image::Handle::from_path(img_path))
+                        .width(Length::Fill)
+                        .height(Length::Fixed(110.0)),
+                );
+            }
+
+            if item.has_inline_reply {
+                let current_reply = self
+                    .reply_inputs
+                    .get(&item.id)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                let notif_id = item.id;
+                let reply_row = row![
+                    text_input("Yanıt yazın...", current_reply)
+                        .on_input(move |v| Message::InlineReplyChanged(notif_id, v))
+                        .on_submit(Message::SubmitInlineReply(notif_id))
+                        .padding([4, 8])
+                        .size(11.0)
+                        .width(Length::Fill),
+                    button(text("↵").size(11.0).color(palette.on_primary().to_iced()))
+                        .padding([4, 8])
+                        .style(move |_, _| button::Style {
+                            background: Some(iced::Background::Color(palette.primary.to_iced())),
+                            border: iced::Border {
+                                radius: iced::border::Radius::from(6.0),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                        .on_press(Message::SubmitInlineReply(notif_id)),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center);
+                card_content = card_content.push(reply_row);
             }
 
             // Optional interactive action buttons
@@ -1084,6 +1182,8 @@ mod tests {
                 timeout_ms: remaining_ms.min(i32::MAX as u64) as i32,
                 sync_tag: None,
                 progress: None,
+                image_path: None,
+                has_inline_reply: false,
             },
             remaining_ms,
             initial_ms: remaining_ms,
