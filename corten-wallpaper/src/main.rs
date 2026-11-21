@@ -4,7 +4,7 @@ use tracing::info;
 
 use ::image as image_crate;
 use corten_config::{AppearanceConfig, ConfigManager};
-use corten_theme::{Palette, PatinaVariant, ThemeMode};
+use corten_theme::{Icon, Palette, PatinaVariant, ThemeMode, LUCIDE_FONT, LUCIDE_FONT_BYTES};
 use iced::widget::{button, column, container, image as iced_image, row, text};
 use iced::{Element, Length, Subscription};
 use iced_layershell::actions::LayershellCustomActions;
@@ -86,7 +86,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     CortenWallpaperApp::run(Settings {
         id: Some("corten-wallpaper".into()),
         flags,
-        fonts: vec![],
+        fonts: vec![std::borrow::Cow::Borrowed(LUCIDE_FONT_BYTES)],
         layer_settings: LayerShellSettings {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Background, // Sits strictly behind all normal windows and widgets
@@ -378,6 +378,13 @@ impl Application for CortenWallpaperApp {
             Message::ReloadConfig | Message::CheckPeriodic => {
                 if let Ok(app_mgr) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
                     let cfg = app_mgr.get();
+                    let mode = match cfg.theme_mode {
+                        corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                        _ => ThemeMode::Dark,
+                    };
+                    self.palette = Palette::for_mode(mode)
+                        .with_patina(PatinaVariant::from_code(&cfg.patina))
+                        .with_custom_accent(&cfg.accent_color);
                     self.live_shader_enabled = cfg.live_wallpaper_shader;
                     self.desktop_icons_enabled = cfg.desktop_icons_enabled;
                     self.desktop_icons = if self.desktop_icons_enabled {
@@ -418,37 +425,62 @@ impl Application for CortenWallpaperApp {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
+        let palette = self.palette;
         let icons_overlay: Option<Element<'_, Self::Message>> = if self.desktop_icons_enabled && !self.desktop_icons.is_empty() {
-            let mut col = column![].spacing(10).padding(24);
-            for (name, path, is_dir) in &self.desktop_icons {
-                let icon_prefix = if *is_dir { "📁" } else { "📄" };
-                let label = if name.chars().count() > 18 {
-                    format!("{}…", name.chars().take(17).collect::<String>())
-                } else {
-                    name.clone()
-                };
-                let target_path = path.clone();
-                let item_btn = button(
-                    row![
-                        text(icon_prefix).size(15.0),
-                        text(label).size(12.0).color(iced::Color::WHITE),
-                    ]
-                    .spacing(6),
-                )
-                .padding([6, 10])
-                .style(|_, _| button::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(0.08, 0.09, 0.12, 0.72))),
-                    border: iced::Border {
-                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.16),
-                        width: 1.0,
-                        radius: iced::border::Radius::from(8.0),
-                    },
-                    ..Default::default()
-                })
-                .on_press(Message::OpenDesktopEntry(target_path));
-                col = col.push(item_btn);
+            let mut grid_row = row![].spacing(14).padding(24);
+            for chunk in self.desktop_icons.chunks(8) {
+                let mut col = column![].spacing(10);
+                for (name, path, is_dir) in chunk {
+                    let icon_char = if *is_dir { Icon::FOLDER } else { Icon::FILE_TEXT };
+                    let icon_color = if *is_dir {
+                        palette.primary.to_iced()
+                    } else {
+                        palette.text_primary.to_iced()
+                    };
+                    let label = if name.chars().count() > 18 {
+                        format!("{}…", name.chars().take(17).collect::<String>())
+                    } else {
+                        name.clone()
+                    };
+                    let target_path = path.clone();
+                    let item_btn = button(
+                        row![
+                            text(icon_char)
+                                .font(LUCIDE_FONT)
+                                .size(15.0)
+                                .color(icon_color),
+                            text(label)
+                                .size(12.0)
+                                .color(palette.text_primary.to_iced()),
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                    )
+                    .padding([7, 12])
+                    .width(Length::Fixed(185.0))
+                    .style(move |_, status| {
+                        let mut bg = palette.surface.to_iced();
+                        bg.a = if status == button::Status::Hovered { 0.90 } else { 0.76 };
+                        button::Style {
+                            background: Some(iced::Background::Color(bg)),
+                            border: iced::Border {
+                                color: if status == button::Status::Hovered {
+                                    palette.primary.to_iced()
+                                } else {
+                                    palette.border.to_iced()
+                                },
+                                width: 1.0,
+                                radius: iced::border::Radius::from(10.0),
+                            },
+                            ..Default::default()
+                        }
+                    })
+                    .on_press(Message::OpenDesktopEntry(target_path));
+                    col = col.push(item_btn);
+                }
+                grid_row = grid_row.push(col);
             }
-            Some(col.into())
+            Some(grid_row.into())
         } else {
             None
         };
@@ -543,7 +575,7 @@ impl Application for CortenWallpaperApp {
         subs.push(sigusr1_sub);
 
         subs.push(
-            iced::time::every(Duration::from_millis(1000)).map(|_| Message::CheckPeriodic),
+            iced::time::every(Duration::from_millis(5000)).map(|_| Message::CheckPeriodic),
         );
 
         if self.live_shader_enabled {

@@ -157,6 +157,7 @@ pub enum Message {
     ToggleRedactionMode,
     SelectAnnotationTool(AnnotationTool),
     UndoRedaction,
+    RedoRedaction,
     SaveRedactedImage,
     CopyImageToClipboard,
     LayerAction(LayershellCustomActions),
@@ -347,6 +348,7 @@ struct CortenSnipperApp {
     redaction_mode: bool,
     active_tool: AnnotationTool,
     redactions: Vec<AnnotationItem>,
+    redo_stack: Vec<AnnotationItem>,
     redacting_start: Option<Point>,
     redacting_current: Option<Point>,
     status_msg: Option<String>,
@@ -384,6 +386,7 @@ impl Application for CortenSnipperApp {
                 redaction_mode: false,
                 active_tool: AnnotationTool::Redact,
                 redactions: Vec::new(),
+                redo_stack: Vec::new(),
                 redacting_start: None,
                 redacting_current: None,
                 status_msg: None,
@@ -410,6 +413,9 @@ impl Application for CortenSnipperApp {
                     }
                     keyboard::Key::Character(ref c) if (c == "z" || c == "Z") && modifiers.control() => {
                         Some(Message::UndoRedaction)
+                    }
+                    keyboard::Key::Character(ref c) if (c == "y" || c == "Y") && modifiers.control() => {
+                        Some(Message::RedoRedaction)
                     }
                     keyboard::Key::Character(ref c) if (c == "s" || c == "S") && modifiers.control() => {
                         Some(Message::SaveRedactedImage)
@@ -475,9 +481,18 @@ impl Application for CortenSnipperApp {
                 self.redaction_mode = true;
             }
             Message::UndoRedaction => {
-                self.redactions.pop();
-                self.last_saved_path = None;
-                self.status_msg = Some("Son çizim/gizleme geri alındı.".into());
+                if let Some(last) = self.redactions.pop() {
+                    self.redo_stack.push(last);
+                    self.last_saved_path = None;
+                    self.status_msg = Some("Son çizim geri alındı (Ctrl+Y ile yinele).".into());
+                }
+            }
+            Message::RedoRedaction => {
+                if let Some(item) = self.redo_stack.pop() {
+                    self.redactions.push(item);
+                    self.last_saved_path = None;
+                    self.status_msg = Some("Çizim yeniden uygulandı.".into());
+                }
             }
             Message::SaveRedactedImage => {
                 if let Some((ref path_str, _)) = self.pinned_image {
@@ -559,6 +574,7 @@ impl Application for CortenSnipperApp {
                                     start,
                                     end,
                                 });
+                                self.redo_stack.clear();
                                 self.last_saved_path = None;
                             }
                         }

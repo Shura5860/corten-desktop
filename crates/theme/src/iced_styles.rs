@@ -36,10 +36,69 @@ pub fn popover_style(palette: Palette) -> container::Style {
     surface_style(palette, true)
 }
 
+/// Standardized elevation & glass surface hierarchy across all Corten applications.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceLevel {
+    /// Flat base container (`background`)
+    Base,
+    /// Standard card or sidebar (`surface`, 1px border)
+    Raised,
+    /// Floating modal / popover (`surface` + elevation shadow)
+    Overlay,
+    /// Frosted acrylic glass (`surface` translucent + patina highlight border + ambient shadow)
+    Glass,
+}
+
+/// Returns a consistent `container::Style` for the requested `SurfaceLevel` in both Dark & Light modes.
+pub fn surface_level_style(palette: Palette, level: SurfaceLevel, radius: f32) -> container::Style {
+    match level {
+        SurfaceLevel::Base => container::Style {
+            text_color: Some(palette.text_primary.to_iced()),
+            background: Some(Background::Color(palette.background.to_iced())),
+            border: Border {
+                color: iced::Color::TRANSPARENT,
+                width: 0.0,
+                radius: border::Radius::from(radius),
+            },
+            shadow: Shadow::default(),
+        },
+        SurfaceLevel::Raised => container::Style {
+            text_color: Some(palette.text_primary.to_iced()),
+            background: Some(Background::Color(palette.surface.to_iced())),
+            border: Border {
+                color: palette.border.to_iced(),
+                width: 1.0,
+                radius: border::Radius::from(radius),
+            },
+            shadow: Shadow::default(),
+        },
+        SurfaceLevel::Overlay => {
+            let shadow_alpha = if palette.is_light() { 0.14 } else { 0.30 };
+            container::Style {
+                text_color: Some(palette.text_primary.to_iced()),
+                background: Some(Background::Color(palette.surface.to_iced())),
+                border: Border {
+                    color: palette.border.to_iced(),
+                    width: 1.0,
+                    radius: border::Radius::from(radius),
+                },
+                shadow: Shadow {
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, shadow_alpha),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 14.0,
+                },
+            }
+        }
+        SurfaceLevel::Glass => acrylic_glass_style(palette, radius),
+    }
+}
+
 /// High-end frosted glass acrylic style with patina border highlight and ambient shadow
 pub fn acrylic_glass_style(palette: Palette, radius: f32) -> container::Style {
     let mut bg = palette.surface.to_iced();
-    bg.a = 0.95;
+    bg.a = if palette.is_light() { 0.96 } else { 0.93 };
+    let border_alpha = if palette.is_light() { 0.40 } else { 0.32 };
+    let shadow_alpha = if palette.is_light() { 0.16 } else { 0.35 };
     container::Style {
         text_color: Some(palette.text_primary.to_iced()),
         background: Some(Background::Color(bg)),
@@ -48,13 +107,13 @@ pub fn acrylic_glass_style(palette: Palette, radius: f32) -> container::Style {
                 palette.primary.r,
                 palette.primary.g,
                 palette.primary.b,
-                0.32,
+                border_alpha,
             ),
             width: 1.0,
             radius: border::Radius::from(radius),
         },
         shadow: Shadow {
-            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+            color: iced::Color::from_rgba(0.0, 0.0, 0.0, shadow_alpha),
             offset: iced::Vector::new(0.0, 6.0),
             blur_radius: 16.0,
         },
@@ -343,5 +402,67 @@ pub fn pill_switch<'a, Message: Clone + 'a>(
         background: None,
         ..Default::default()
     })
+    .into()
+}
+
+/// Unified empty-state placeholder card with centered Lucide icon, title and muted hint.
+pub fn empty_state_card<'a, Message: 'a>(
+    icon: char,
+    title: &'a str,
+    subtitle: &'a str,
+    palette: Palette,
+) -> iced::Element<'a, Message> {
+    use crate::icons::LUCIDE_FONT;
+    use iced::widget::{column, text};
+    use iced::{Alignment, Length};
+
+    container(
+        column![
+            text(icon)
+                .font(LUCIDE_FONT)
+                .size(28.0)
+                .color(palette.text_muted.to_iced()),
+            text(title)
+                .size(14.0)
+                .color(palette.text_primary.to_iced()),
+            text(subtitle)
+                .size(12.0)
+                .color(palette.text_muted.to_iced()),
+        ]
+        .spacing(6)
+        .align_x(Alignment::Center),
+    )
+    .padding(24)
+    .width(Length::Fill)
+    .center_x(Length::Fill)
+    .style(move |_| surface_level_style(palette, SurfaceLevel::Raised, Radius::MD))
+    .into()
+}
+
+/// Unified compact toast/snackbar banner for action feedback across Corten applications.
+pub fn toast_banner<'a, Message: 'a>(
+    icon: char,
+    message: &'a str,
+    palette: Palette,
+) -> iced::Element<'a, Message> {
+    use crate::icons::LUCIDE_FONT;
+    use iced::widget::{row, text};
+    use iced::Alignment;
+
+    container(
+        row![
+            text(icon)
+                .font(LUCIDE_FONT)
+                .size(14.0)
+                .color(palette.primary.to_iced()),
+            text(message)
+                .size(12.5)
+                .color(palette.text_primary.to_iced()),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    )
+    .padding([8, 14])
+    .style(move |_| surface_level_style(palette, SurfaceLevel::Glass, Radius::FULL))
     .into()
 }

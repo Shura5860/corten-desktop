@@ -605,6 +605,9 @@ impl ScreenCastPortal {
         if let Ok(size_val) = OwnedValue::try_from(Value::from((target.width as i32, target.height as i32))) {
             stream_props.insert("size".to_string(), size_val);
         }
+        if let Ok(pos_val) = OwnedValue::try_from(Value::from((0i32, 0i32))) {
+            stream_props.insert("position".to_string(), pos_val);
+        }
         let src_type_val = match target.source_type {
             CastSourceType::Monitor => 1u32,
             CastSourceType::Window => 2u32,

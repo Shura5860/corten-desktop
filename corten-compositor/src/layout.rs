@@ -776,6 +776,8 @@ pub struct LayoutManager {
     scratchpad_windows: Vec<Window>,
     /// Horizontal scroll offset (in logical px) for `LayoutMode::Scrollable` (Niri strip)
     scroll_offset_x: f64,
+    /// Target horizontal scroll offset for smooth spring-damped strip transitions
+    target_scroll_offset_x: f64,
     /// Column width fraction (0.25..=1.0) for `LayoutMode::Scrollable`
     scroll_column_fraction: f32,
     /// One-shot session restore queue loaded once at startup (consumed as each saved window spawns)
@@ -815,6 +817,7 @@ impl LayoutManager {
             sticky_windows: HashSet::new(),
             scratchpad_windows: Vec::new(),
             scroll_offset_x: 0.0,
+            target_scroll_offset_x: 0.0,
             scroll_column_fraction: 0.58,
             pending_session_entries: crate::state::load_window_session_from_disk(),
             bsp_tree: None,
@@ -933,7 +936,27 @@ impl LayoutManager {
         let col_w = ((usable_area.size.w as f64) * self.scroll_column_fraction as f64).max(320.0);
         let step = col_w + self.gap as f64;
         let max_scroll = (self.windows.len().saturating_sub(1) as f64 * step).max(0.0);
-        self.scroll_offset_x = (self.scroll_offset_x + (dir as f64) * step).clamp(0.0, max_scroll);
+        self.target_scroll_offset_x = (self.target_scroll_offset_x + (dir as f64) * step).clamp(0.0, max_scroll);
+        self.scroll_offset_x = crate::render::step_smooth_scroll(self.scroll_offset_x, self.target_scroll_offset_x);
+    }
+
+    /// Advances smooth horizontal scroll strip animation by one frame.
+    pub fn step_scroll_animation(&mut self) {
+        self.scroll_offset_x = crate::render::step_smooth_scroll(self.scroll_offset_x, self.target_scroll_offset_x);
+    }
+
+    /// Cycles column width preset in `LayoutMode::Scrollable`: 33% -> 50% -> 66% -> 100%.
+    pub fn cycle_scroll_column_fraction(&mut self) -> f32 {
+        self.scroll_column_fraction = if self.scroll_column_fraction < 0.40 {
+            0.50
+        } else if self.scroll_column_fraction < 0.60 {
+            0.66
+        } else if self.scroll_column_fraction < 0.85 {
+            1.00
+        } else {
+            0.33
+        };
+        self.scroll_column_fraction
     }
 
     /// Dynamic workspace count (GNOME/Niri style): returns `highest_occupied_ws + 1` clamped to `1..=9`.

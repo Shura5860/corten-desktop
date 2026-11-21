@@ -1917,78 +1917,14 @@ pub fn run_drm(
                                         crate::trigger_screenshot(state, &hotkey_ipc_tx, true);
                                         return FilterResult::Intercept(());
                                     }
-                                    // Super + . (Period): Open Built-in Emoji & Unicode Symbol Picker
-                                    keysyms::KEY_period
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        info!("Compositor Hotkey: Super+. (Emoji & Unicode Picker)");
-                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
-                                        let _ = std::process::Command::new(launcher_path).arg("--emoji").spawn();
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + N: Open Corten Scratchpad / Quick Notes
-                                    keysyms::KEY_n | keysyms::KEY_N
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        info!("Compositor Hotkey: Super+N (Quick Notes)");
-                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
-                                        let _ = std::process::Command::new(launcher_path).arg("--notes").spawn();
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + Shift + C: System-Wide Color Picker / Eyedropper
-                                    keysyms::KEY_c | keysyms::KEY_C
-                                        if modifiers.logo && modifiers.shift && !modifiers.ctrl && !modifiers.alt => {
-                                        info!("Compositor Hotkey: Super+Shift+C (Color Picker)");
-                                        state.handle_custom_action("color-picker");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + Minus: Toggle Scratchpad Window / Super + Shift + Minus: Send to Scratchpad
-                                    keysyms::KEY_minus | keysyms::KEY_underscore
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        if modifiers.shift {
-                                            state.handle_custom_action("move-to-scratchpad");
-                                        } else {
-                                            state.handle_custom_action("toggle-scratchpad");
-                                        }
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + S (without Shift): Toggle Sticky / PiP Window Across Workspaces
-                                    keysyms::KEY_s | keysyms::KEY_S
-                                        if modifiers.logo && !modifiers.shift && !modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("toggle-sticky");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + G: One-Click Game Mode
-                                    keysyms::KEY_g | keysyms::KEY_G
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("toggle-game-mode");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + Equal / Plus / KP_Add: Compositor Zoom In
-                                    keysyms::KEY_equal | keysyms::KEY_plus | keysyms::KEY_KP_Add
-                                        if modifiers.logo && !modifiers.alt => {
-                                        state.handle_custom_action("zoom-in");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + Ctrl + Minus / KP_Subtract: Compositor Zoom Out
-                                    keysyms::KEY_minus | keysyms::KEY_KP_Subtract
-                                        if modifiers.logo && modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("zoom-out");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + 0: Reset Compositor Zoom
-                                    keysyms::KEY_0
-                                        if modifiers.logo && !modifiers.shift && !modifiers.alt => {
-                                        state.handle_custom_action("zoom-reset");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + [ / Super + ]: Scrollable Strip Left / Right
-                                    keysyms::KEY_bracketleft
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("scroll-left");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    keysyms::KEY_bracketright
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("scroll-right");
+                                    _ if crate::hotkeys::dispatch_shared_compositor_hotkey(
+                                        state,
+                                        sym,
+                                        modifiers.logo,
+                                        modifiers.ctrl,
+                                        modifiers.alt,
+                                        modifiers.shift,
+                                    ) => {
                                         return FilterResult::Intercept(());
                                     }
                                     _ => {}
@@ -3224,8 +3160,11 @@ pub fn run_drm(
         // Build render elements for display frame in FRONT-TO-BACK order
         // (Smithay's OutputDamageTracker requires front-to-back ordering for correct occlusion culling)
         let mut elements: Vec<CustomRenderElement> = Vec::new();
+        state.step_visual_animations();
         let output_scale = state.output.current_scale();
-        let fractional_scale = output_scale.fractional_scale() * state.zoom_level.clamp(1.0, 4.0);
+        let base_scale = output_scale.fractional_scale();
+        let fractional_scale = base_scale * state.zoom_level.clamp(1.0, 4.0);
+        let zoom_pan = state.zoom_pan_offset(initial_size, base_scale);
         let render_scale = Scale::from(fractional_scale);
 
         // 0. Hardware / Software Cursor Pointer & Drag-and-Drop Icon (Topmost elements)
@@ -3233,7 +3172,7 @@ pub fn run_drm(
             let loc = state
                 .cursor_location
                 .to_i32_round::<i32>()
-                .to_physical_precise_round(fractional_scale);
+                .to_physical_precise_round(fractional_scale) + zoom_pan;
             let dnd_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                 render_elements_from_surface_tree(
                     &mut renderer,
@@ -3253,7 +3192,7 @@ pub fn run_drm(
                     let loc = state
                         .cursor_location
                         .to_i32_round::<i32>()
-                        .to_physical_precise_round(fractional_scale);
+                        .to_physical_precise_round(fractional_scale) + zoom_pan;
                     let cursor_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                         render_elements_from_surface_tree(
                             &mut renderer,
@@ -3274,8 +3213,8 @@ pub fn run_drm(
                     if let Some(loaded) = cursor_theme_manager.get(icon) {
                         let phys_loc: smithay::utils::Point<f64, smithay::utils::Physical> =
                             smithay::utils::Point::from((
-                                ((cx - loaded.xhot) as f64) * fractional_scale,
-                                ((cy - loaded.yhot) as f64) * fractional_scale,
+                                ((cx - loaded.xhot) as f64) * fractional_scale + zoom_pan.x as f64,
+                                ((cy - loaded.yhot) as f64) * fractional_scale + zoom_pan.y as f64,
                             ));
                         if let Ok(elem) = MemoryRenderBufferRenderElement::from_buffer(
                             &mut renderer,
@@ -3292,11 +3231,13 @@ pub fn run_drm(
                     }
 
                     if !rendered_xcursor {
+                        let zoomed_cx = (cx as f64 * fractional_scale).round() as i32 + zoom_pan.x;
+                        let zoomed_cy = (cy as f64 * fractional_scale).round() as i32 + zoom_pan.y;
                         draw_semantic_cursor(
                             &mut elements,
                             icon,
-                            cx,
-                            cy,
+                            zoomed_cx,
+                            zoomed_cy,
                             &cursor_body_ids,
                             &cursor_border_ids,
                             &cursor_tail_id,
@@ -3436,8 +3377,8 @@ pub fn run_drm(
                 }
                 let loc = layer_map
                     .layer_geometry(layer_surface)
-                    .map(|g| g.loc.to_physical_precise_round(fractional_scale))
-                    .unwrap_or_else(|| (0, 0).into());
+                    .map(|g| g.loc.to_physical_precise_round(fractional_scale) + zoom_pan)
+                    .unwrap_or(zoom_pan);
                 let surface_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                     render_elements_from_surface_tree(
                         &mut renderer,
@@ -3476,8 +3417,8 @@ pub fn run_drm(
             for layer_surface in layer_map.layers_on(Layer::Top) {
                 let loc = layer_map
                     .layer_geometry(layer_surface)
-                    .map(|g| g.loc.to_physical_precise_round(fractional_scale))
-                    .unwrap_or_else(|| (0, 0).into());
+                    .map(|g| g.loc.to_physical_precise_round(fractional_scale) + zoom_pan)
+                    .unwrap_or(zoom_pan);
                 let surface_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                     render_elements_from_surface_tree(
                         &mut renderer,
@@ -3542,7 +3483,7 @@ pub fn run_drm(
 
             let is_active = active_window.as_ref() == Some(window);
             let phys_rect = Rectangle::new(
-                shifted_rect.loc.to_physical_precise_round(fractional_scale),
+                shifted_rect.loc.to_physical_precise_round(fractional_scale) + zoom_pan,
                 shifted_rect
                     .size
                     .to_physical_precise_round(fractional_scale),
@@ -3555,7 +3496,7 @@ pub fn run_drm(
             if let Some(surface) = crate::layout::window_wl_surface(window) {
                 for (popup, popup_offset) in PopupManager::popups_for_surface(&surface) {
                     let popup_loc = (client_logical_loc + popup_offset)
-                        .to_physical_precise_round(fractional_scale);
+                        .to_physical_precise_round(fractional_scale) + zoom_pan;
                     let popup_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                         render_elements_from_surface_tree(
                             &mut renderer,
@@ -3597,7 +3538,7 @@ pub fn run_drm(
             // 3. Render client window surface content
             if let Some(surface) = crate::layout::window_wl_surface(window) {
                 let client_loc = client_logical_loc
-                    .to_physical_precise_round(fractional_scale);
+                    .to_physical_precise_round(fractional_scale) + zoom_pan;
                 let win_alpha = state.layout.window_alpha(window);
                 let window_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                     render_elements_from_surface_tree(
@@ -3621,16 +3562,11 @@ pub fn run_drm(
             }
 
             // 4. Glow halo and frame borders (Behind window content in front-to-back ordering, only for non-fullscreen windows)
-            let z = state.zoom_level.clamp(1.0, 4.0);
-            let glow_rect = Rectangle::new(
-                Point::from((
-                    (shifted_rect.loc.x as f64 * z).round() as i32,
-                    (shifted_rect.loc.y as f64 * z).round() as i32,
-                )),
-                Size::from((
-                    (shifted_rect.size.w as f64 * z).round() as i32,
-                    (shifted_rect.size.h as f64 * z).round() as i32,
-                )),
+            let glow_rect = crate::state::compute_zoomed_glow_rect(
+                shifted_rect,
+                state.zoom_level,
+                zoom_pan,
+                base_scale,
             );
             if is_active && !is_fs {
                 let is_high_vis = state.accessibility.high_vis_focus_ring || state.accessibility.high_contrast;

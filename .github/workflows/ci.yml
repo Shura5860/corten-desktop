@@ -57,11 +57,14 @@ jobs:
             libpipewire-0.3-dev \
             libspa-0.2-dev
 
-      - name: Verify install.sh syntax
-        run: bash -n install.sh
+      - name: Verify shell & packaging scripts syntax
+        run: |
+          bash -n install.sh
+          bash -n packaging/debian/build-deb.sh
+          sh -n scripts/corten-terminal
 
       - name: Run Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run Workspace Unit Tests
         run: cargo test --workspace

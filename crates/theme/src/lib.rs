@@ -12,6 +12,9 @@ pub mod typography;
 #[cfg(feature = "iced")]
 pub mod iced_styles;
 
+#[cfg(feature = "iced")]
+pub use iced_styles::SurfaceLevel;
+
 pub use animation::Transition;
 pub use bar::BarTokens;
 pub use color::{Color, ColorFilterMode, Palette, PatinaVariant, ThemeMode};

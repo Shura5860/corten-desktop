@@ -1,7 +1,9 @@
 pub mod cursor;
 mod glow_shader;
 mod handlers;
+pub mod hotkeys;
 mod layout;
+pub mod render;
 mod screencopy;
 mod state;
 pub mod tablet;
@@ -182,7 +184,7 @@ pub(crate) fn send_osd_notification(sync_tag: &str, summary: &str, body: &str, p
             "org.corten.Panel",
             "/org/corten/Panel",
             "org.corten.Panel",
-            "trigger_module",
+            "TriggerModule",
             "s",
             &mod_name,
         ])
@@ -1956,55 +1958,14 @@ fn main() -> anyhow::Result<()> {
                                             .spawn();
                                         return FilterResult::Intercept(());
                                     }
-                                    // Super + Minus: Toggle Scratchpad Window / Super + Shift + Minus: Send to Scratchpad
-                                    keysyms::KEY_minus | keysyms::KEY_underscore
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        if modifiers.shift {
-                                            state.handle_custom_action("move-to-scratchpad");
-                                        } else {
-                                            state.handle_custom_action("toggle-scratchpad");
-                                        }
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + S (without Shift): Toggle Sticky / PiP Window Across Workspaces
-                                    keysyms::KEY_s | keysyms::KEY_S
-                                        if modifiers.logo && !modifiers.shift && !modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("toggle-sticky");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + G: One-Click Game Mode
-                                    keysyms::KEY_g | keysyms::KEY_G
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("toggle-game-mode");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + Equal / Plus / KP_Add: Compositor Zoom In
-                                    keysyms::KEY_equal | keysyms::KEY_plus | keysyms::KEY_KP_Add
-                                        if modifiers.logo && !modifiers.alt => {
-                                        state.handle_custom_action("zoom-in");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + Ctrl + Minus / KP_Subtract: Compositor Zoom Out
-                                    keysyms::KEY_minus | keysyms::KEY_KP_Subtract
-                                        if modifiers.logo && modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("zoom-out");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + 0: Reset Compositor Zoom
-                                    keysyms::KEY_0
-                                        if modifiers.logo && !modifiers.shift && !modifiers.alt => {
-                                        state.handle_custom_action("zoom-reset");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    // Super + [ / Super + ]: Scrollable Strip Left / Right
-                                    keysyms::KEY_bracketleft
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("scroll-left");
-                                        return FilterResult::Intercept(());
-                                    }
-                                    keysyms::KEY_bracketright
-                                        if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
-                                        state.handle_custom_action("scroll-right");
+                                    _ if crate::hotkeys::dispatch_shared_compositor_hotkey(
+                                        state,
+                                        sym,
+                                        modifiers.logo,
+                                        modifiers.ctrl,
+                                        modifiers.alt,
+                                        modifiers.shift,
+                                    ) => {
                                         return FilterResult::Intercept(());
                                     }
                                     _ => {}
@@ -2753,8 +2714,11 @@ fn main() -> anyhow::Result<()> {
                 backend.bind().map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
             let mut elements: Vec<CustomRenderElement> = Vec::new();
+            state.step_visual_animations();
             let output_scale = state.output.current_scale();
-            let fractional_scale = output_scale.fractional_scale() * state.zoom_level.clamp(1.0, 4.0);
+            let base_scale = output_scale.fractional_scale();
+            let fractional_scale = base_scale * state.zoom_level.clamp(1.0, 4.0);
+            let zoom_pan = state.zoom_pan_offset(size, base_scale);
             let render_scale = Scale::from(fractional_scale);
             let fullscreen_win = state.layout.active_fullscreen_window();
 
@@ -2765,7 +2729,7 @@ fn main() -> anyhow::Result<()> {
                 for layer in [Layer::Background, Layer::Bottom] {
                     for layer_surface in layer_map.layers_on(layer) {
                         if let Some(geo) = layer_map.layer_geometry(layer_surface) {
-                            let loc = geo.loc.to_physical_precise_round(fractional_scale);
+                            let loc = geo.loc.to_physical_precise_round(fractional_scale) + zoom_pan;
                             let surface_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                                 render_elements_from_surface_tree(
                                     renderer,
@@ -2884,21 +2848,16 @@ fn main() -> anyhow::Result<()> {
                     let is_active = active_window.as_ref() == Some(window);
 
                     let phys_rect = Rectangle::new(
-                        shifted_rect.loc.to_physical_precise_round(fractional_scale),
+                        shifted_rect.loc.to_physical_precise_round(fractional_scale) + zoom_pan,
                         shifted_rect
                             .size
                             .to_physical_precise_round(fractional_scale),
                     );
-                    let z = state.zoom_level.clamp(1.0, 4.0);
-                    let glow_rect = Rectangle::new(
-                        Point::from((
-                            (shifted_rect.loc.x as f64 * z).round() as i32,
-                            (shifted_rect.loc.y as f64 * z).round() as i32,
-                        )),
-                        Size::from((
-                            (shifted_rect.size.w as f64 * z).round() as i32,
-                            (shifted_rect.size.h as f64 * z).round() as i32,
-                        )),
+                    let glow_rect = crate::state::compute_zoomed_glow_rect(
+                        shifted_rect,
+                        state.zoom_level,
+                        zoom_pan,
+                        base_scale,
                     );
 
                     if is_active {
@@ -2968,7 +2927,7 @@ fn main() -> anyhow::Result<()> {
                     if let Some(surface) = layout::window_wl_surface(window) {
                         let client_logical_loc = shifted_rect.loc - csd_offset + Point::from((0, titlebar_h));
                         let client_phys_loc = client_logical_loc
-                            .to_physical_precise_round(fractional_scale);
+                            .to_physical_precise_round(fractional_scale) + zoom_pan;
                         let win_alpha = state.layout.window_alpha(window);
                         let window_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                             render_elements_from_surface_tree(
@@ -2993,7 +2952,7 @@ fn main() -> anyhow::Result<()> {
                         // Render any popups (context menus, dropdowns)
                         for (popup, popup_offset) in PopupManager::popups_for_surface(&surface) {
                             let popup_loc = (client_logical_loc + popup_offset)
-                                .to_physical_precise_round(fractional_scale);
+                                .to_physical_precise_round(fractional_scale) + zoom_pan;
                             let popup_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                                 render_elements_from_surface_tree(
                                     renderer,
@@ -4246,11 +4205,7 @@ pub(crate) fn draw_window_titlebar(
     if rect.size.w > 40 && rect.size.h > 20 {
         // 1. Fused two-stage gradient header plate background (Backmost layer of the titlebar)
         let header_bar = Rectangle::new(rect.loc, (rect.size.w, header_h).into());
-        let header_bg = if is_active {
-            Color32F::new(0.09, 0.10, 0.14, 0.99)
-        } else {
-            Color32F::new(0.06, 0.07, 0.10, 0.96)
-        };
+        let (header_bg, _, _) = crate::render::compute_titlebar_colors(palette, is_active, false);
         tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
             Id::new(),
             header_bar,

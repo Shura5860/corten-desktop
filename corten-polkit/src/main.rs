@@ -476,9 +476,17 @@ impl Application for CortenPolkitApp {
                                 selection: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.4),
                             }),
                         button(
-                            text(if self.show_password { "👁 Gizle" } else { "👁 Göster" })
-                                .size(11.0)
-                                .color(palette.text_muted.to_iced()),
+                            row![
+                                text(if self.show_password { Icon::EYE_OFF } else { Icon::EYE })
+                                    .font(LUCIDE_FONT)
+                                    .size(13.0)
+                                    .color(palette.text_muted.to_iced()),
+                                text(if self.show_password { "Gizle" } else { "Göster" })
+                                    .size(11.0)
+                                    .color(palette.text_muted.to_iced()),
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center),
                         )
                         .padding([Spacing::XS, Spacing::SM])
                         .style(|_, _| button::Style::default())
@@ -515,7 +523,11 @@ impl Application for CortenPolkitApp {
         .padding(Spacing::XL)
         .style(move |_| {
             let mut s = acrylic_glass_style(palette, 16.0);
-            s.border.color = iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.50);
+            s.border.color = if self.error_message.is_some() {
+                palette.danger.to_iced()
+            } else {
+                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.50)
+            };
             s.border.width = 1.5;
             s
         });

@@ -48,12 +48,12 @@ jobs:
 
       - name: Package Release Tarball & SHA256
         run: |
-          VERSION="${GITHUB_REF_NAME:-v0.2.0}"
+          VERSION="${GITHUB_REF_NAME:-v0.5.6}"
           if [[ "${VERSION}" == "main" || "${VERSION}" == "master" ]]; then
             VERSION="v$(date +'%Y.%m.%d')"
           fi
           PKG_NAME="corten-desktop-${VERSION}-x86_64-linux"
-          mkdir -p "${PKG_NAME}/bin" "${PKG_NAME}/assets" "${PKG_NAME}/systemd" "${PKG_NAME}/packaging"
+          mkdir -p "${PKG_NAME}/bin" "${PKG_NAME}/assets" "${PKG_NAME}/systemd" "${PKG_NAME}/packaging" "${PKG_NAME}/corten-portal" "${PKG_NAME}/scripts"
           for bin in \
             corten-compositor corten-session corten-welcome corten-panel \
             corten-launcher corten-notify corten-settings corten-lock \
@@ -62,10 +62,14 @@ jobs:
             cortenctl corten-ai corten-forge corten-update; do
             cp "target/release/${bin}" "${PKG_NAME}/bin/"
           done
+          cp scripts/corten-terminal "${PKG_NAME}/bin/corten-terminal"
+          chmod +x "${PKG_NAME}/bin/corten-terminal"
+          cp -r scripts/* "${PKG_NAME}/scripts/"
           cp -r assets/* "${PKG_NAME}/assets/"
           cp -r systemd/* "${PKG_NAME}/systemd/"
-          cp packaging/PKGBUILD "${PKG_NAME}/packaging/"
-          cp install.sh README.md LICENSE "${PKG_NAME}/"
+          cp -r packaging/* "${PKG_NAME}/packaging/"
+          cp corten-portal/corten.portal corten-portal/corten-portals.conf "${PKG_NAME}/corten-portal/"
+          cp flake.nix install.sh README.md LICENSE "${PKG_NAME}/"
           tar -czf "${PKG_NAME}.tar.gz" "${PKG_NAME}"
           sha256sum "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
 

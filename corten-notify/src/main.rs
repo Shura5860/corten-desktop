@@ -12,7 +12,7 @@ use corten_theme::{
     Icon, Palette, PatinaVariant, Spacing, ThemeMode, Transition, Typography, LUCIDE_FONT,
     LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
 };
-use iced::widget::{button, column, container, image, row, text, text_input};
+use iced::widget::{button, column, container, image, mouse_area, row, text, text_input};
 use iced::{Alignment, Element, Length, Subscription};
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
@@ -222,6 +222,7 @@ pub enum Message {
     ToggleMuteApp(String),
     InlineReplyChanged(u32, String),
     SubmitInlineReply(u32),
+    HoverNotification(Option<u32>),
     DismissHistory(u32),
     ClearHistory,
     ToggleHistoryDrawer,
@@ -252,9 +253,11 @@ pub struct CortenNotificationApp {
     notifications: Vec<VisibleNotification>,
     notification_history: Vec<NotificationItem>,
     reply_inputs: std::collections::HashMap<u32, String>,
+    hovered_notification: Option<u32>,
     show_history_drawer: bool,
     theme_mode: ThemeMode,
     active_patina: PatinaVariant,
+    custom_accent: String,
 }
 
 fn resolve_notification_icon(icon: &str, app_name: &str, summary: &str) -> char {
@@ -404,17 +407,18 @@ impl Application for CortenNotificationApp {
             .map(|rx| Arc::new(tokio::sync::Mutex::new(rx)));
 
         let load_font_task = iced::font::load(LUCIDE_FONT_BYTES).map(|_| Message::Tick);
-        let (active_patina, theme_mode) =
+        let (active_patina, custom_accent, theme_mode) =
             ConfigManager::<AppearanceConfig>::load_or_default("appearance")
                 .map(|c| {
                     let pat = PatinaVariant::from_code(&c.get().patina);
+                    let acc = c.get().accent_color.clone();
                     let mode = match c.get().theme_mode {
                         corten_config::ThemeModeChoice::Light => ThemeMode::Light,
                         _ => ThemeMode::Dark,
                     };
-                    (pat, mode)
+                    (pat, acc, mode)
                 })
-                .unwrap_or((PatinaVariant::Rust, ThemeMode::Dark));
+                .unwrap_or((PatinaVariant::Rust, String::new(), ThemeMode::Dark));
 
         (
             Self {
@@ -427,9 +431,11 @@ impl Application for CortenNotificationApp {
                 notifications: Vec::new(),
                 notification_history: Vec::new(),
                 reply_inputs: std::collections::HashMap::new(),
+                hovered_notification: None,
                 show_history_drawer: false,
                 theme_mode,
                 active_patina,
+                custom_accent,
             },
             load_font_task,
         )
@@ -556,6 +562,7 @@ impl Application for CortenNotificationApp {
                         ConfigManager::<AppearanceConfig>::load_or_default("appearance")
                     {
                         self.active_patina = PatinaVariant::from_code(&app_cfg.get().patina);
+                        self.custom_accent = app_cfg.get().accent_color.clone();
                         self.theme_mode = match app_cfg.get().theme_mode {
                             corten_config::ThemeModeChoice::Light => ThemeMode::Light,
                             _ => ThemeMode::Dark,
@@ -614,6 +621,10 @@ impl Application for CortenNotificationApp {
                     dbus::emit_notification_closed(id, 2);
                 }
             }
+            Message::HoverNotification(id) => {
+                self.hovered_notification = id;
+                return Task::none();
+            }
             Message::DismissHistory(id) => {
                 self.notification_history.retain(|n| n.id != id);
             }
@@ -639,8 +650,12 @@ impl Application for CortenNotificationApp {
                 for notification in &mut self.notifications {
                     notification.entrance.tick(200);
                 }
+                let hovered = self.hovered_notification;
                 let mut expired_ids = Vec::new();
                 self.notifications.retain_mut(|n| {
+                    if hovered == Some(n.item.id) {
+                        return true;
+                    }
                     let keep = tick_visible_notification(n);
                     if !keep {
                         expired_ids.push(n.item.id);
@@ -690,7 +705,9 @@ impl Application for CortenNotificationApp {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
-        let palette = Palette::for_mode(self.theme_mode).with_patina(self.active_patina);
+        let palette = Palette::for_mode(self.theme_mode)
+            .with_patina(self.active_patina)
+            .with_custom_accent(&self.custom_accent);
 
         if self.show_history_drawer {
             let hist_count = self.notification_history.len();
@@ -753,16 +770,52 @@ impl Application for CortenNotificationApp {
 
             let mut history_list = column![].spacing(Spacing::XS).width(Length::Fill);
 
+            if !self.config.muted_apps.is_empty() {
+                let mut muted_row = row![
+                    text(Icon::BELL_OFF)
+                        .font(LUCIDE_FONT)
+                        .size(11.0)
+                        .color(palette.text_muted.to_iced()),
+                    text("Susturulan:")
+                        .size(10.5)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center);
+                for app in self.config.muted_apps.iter().take(4) {
+                    let app_clone = app.clone();
+                    muted_row = muted_row.push(
+                        button(
+                            row![
+                                text(app).size(10.0).color(palette.text_primary.to_iced()),
+                                text(Icon::X).font(LUCIDE_FONT).size(9.0).color(palette.text_muted.to_iced()),
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center),
+                        )
+                        .padding([2, 6])
+                        .style(move |_, _| button::Style {
+                            background: Some(iced::Background::Color(palette.surface_hover.to_iced())),
+                            border: iced::Border {
+                                color: palette.border.to_iced(),
+                                width: 1.0,
+                                radius: iced::border::Radius::from(corten_theme::Radius::FULL),
+                            },
+                            ..Default::default()
+                        })
+                        .on_press(Message::ToggleMuteApp(app_clone)),
+                    );
+                }
+                history_list = history_list.push(muted_row);
+            }
+
             if self.notification_history.is_empty() {
-                history_list = history_list.push(
-                    container(
-                        text("Geçmiş bildirim yok")
-                            .size(Typography::BODY_SM)
-                            .color(palette.text_muted.to_iced()),
-                    )
-                    .padding(24)
-                    .center_x(Length::Fill),
-                );
+                history_list = history_list.push(corten_theme::iced_styles::empty_state_card(
+                    Icon::BELL,
+                    "Geçmiş bildirim yok",
+                    "Yeni bildirimler geldiğinde burada listelenir",
+                    palette,
+                ));
             } else {
                 for item in self.notification_history.iter().rev().take(8) {
                     let id = item.id;
@@ -1005,7 +1058,7 @@ impl Application for CortenNotificationApp {
                     .spacing(Spacing::XS)
                     .align_y(Alignment::Center),
                     row![
-                        button(text("🔕").size(10.0))
+                        button(text(Icon::BELL_OFF).font(LUCIDE_FONT).size(11.0))
                             .style(move |_, _| button::Style {
                                 background: None,
                                 text_color: palette.text_muted.to_iced(),
@@ -1013,7 +1066,7 @@ impl Application for CortenNotificationApp {
                                 shadow: iced::Shadow::default(),
                             })
                             .on_press(Message::ToggleMuteApp(item.app_name.clone())),
-                        button(text("✕").size(Typography::CAPTION))
+                        button(text(Icon::X).font(LUCIDE_FONT).size(Typography::CAPTION))
                             .style(move |_, _| button::Style {
                                 background: None,
                                 text_color: palette.text_muted.to_iced(),
@@ -1157,7 +1210,12 @@ impl Application for CortenNotificationApp {
                 left: 0.0,
             });
 
-            cards = cards.push(animated_card);
+            let hover_id = item.id;
+            let wrapped_card = mouse_area(animated_card)
+                .on_enter(Message::HoverNotification(Some(hover_id)))
+                .on_exit(Message::HoverNotification(None));
+
+            cards = cards.push(wrapped_card);
         }
 
         container(cards).padding(Spacing::SM).into()

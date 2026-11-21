@@ -392,6 +392,7 @@ pub enum Message {
     ClipboardSearchChanged(String),
     CopyClipboardItem(String),
     TogglePinClipboardItem(String),
+    SetClipboardFilter(String),
     DeleteClipboardItem(usize),
     ClearClipboardHistory,
     PickScreenColor,
@@ -498,6 +499,7 @@ pub struct CortenPanelApp {
     clipboard_history: Vec<String>,
     pinned_clipboard: Vec<String>,
     clipboard_search: String,
+    clipboard_filter: String,
     osd_state: Option<(OsdKind, u8, u8)>,
     show_notification_center: bool,
     notification_history: Vec<(String, String, String)>,
@@ -519,6 +521,7 @@ pub struct CortenPanelApp {
     trash_item_count: usize,
     language: Language,
     active_patina: PatinaVariant,
+    custom_accent: String,
     brightness_pct: u8,
     show_desktop_context_hub: bool,
     audio_vu_level: (f32, f32),
@@ -527,6 +530,7 @@ pub struct CortenPanelApp {
     launch_bounce: Option<(ActiveApp, u8)>,
     eq_tick: u8,
     osd_display_level: f32,
+    last_tick_sec: u64,
 }
 
 fn check_system_integrity(sentinel_mtimes: &mut std::collections::HashMap<std::path::PathBuf, u64>) -> Option<String> {
@@ -722,6 +726,50 @@ fn save_pinned_clipboard(items: &[String]) {
     if let Ok(json) = serde_json::to_string_pretty(items) {
         let _ = std::fs::write(path, json);
     }
+}
+
+fn is_hex_color_entry(s: &str) -> bool {
+    parse_hex_swatch_color(s).is_some()
+}
+
+fn parse_hex_swatch_color(s: &str) -> Option<iced::Color> {
+    let trimmed = s.trim();
+    if trimmed.starts_with('#') && trimmed.len() == 7 {
+        let r = u8::from_str_radix(&trimmed[1..3], 16).ok()?;
+        let g = u8::from_str_radix(&trimmed[3..5], 16).ok()?;
+        let b = u8::from_str_radix(&trimmed[5..7], 16).ok()?;
+        return Some(iced::Color::from_rgb8(r, g, b));
+    }
+    None
+}
+
+fn for_clip_tab<'a>(
+    label: &'a str,
+    key: &'static str,
+    active: &str,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let is_active = active == key;
+    button(text(label).size(10.5).color(if is_active {
+        palette.on_primary().to_iced()
+    } else {
+        palette.text_muted.to_iced()
+    }))
+    .padding([3, 8])
+    .style(move |_, _| button::Style {
+        background: Some(iced::Background::Color(if is_active {
+            palette.primary.to_iced()
+        } else {
+            palette.surface_hover.to_iced()
+        })),
+        border: iced::Border {
+            radius: iced::border::Radius::from(6.0),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .on_press(Message::SetClipboardFilter(key.into()))
+    .into()
 }
 
 fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
@@ -1138,17 +1186,18 @@ impl Application for CortenPanelApp {
             .map(|c| c.get().night_light)
             .unwrap_or(false);
 
-        let (active_patina, theme_mode, language) = corten_config::ConfigManager::<corten_config::AppearanceConfig>::load_or_default("appearance")
+        let (active_patina, custom_accent, theme_mode, language) = corten_config::ConfigManager::<corten_config::AppearanceConfig>::load_or_default("appearance")
             .map(|c| {
                 let p = PatinaVariant::from_code(&c.get().patina);
+                let a = c.get().accent_color.clone();
                 let m = match c.get().theme_mode {
                     corten_config::ThemeModeChoice::Light => ThemeMode::Light,
                     corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
                 };
                 let l = Language::from_code(&c.get().language);
-                (p, m, l)
+                (p, a, m, l)
             })
-            .unwrap_or_else(|_| (PatinaVariant::Rust, ThemeMode::Dark, Language::detect_system()));
+            .unwrap_or_else(|_| (PatinaVariant::Rust, String::new(), ThemeMode::Dark, Language::detect_system()));
 
         let mut app = Self {
                 config_manager: flags.config_manager,
@@ -1157,6 +1206,7 @@ impl Application for CortenPanelApp {
                 ipc_rx,
                 theme_mode,
                 active_patina,
+                custom_accent,
                 current_time,
                 current_date,
                 audio_status,
@@ -1200,6 +1250,7 @@ impl Application for CortenPanelApp {
                 clipboard_history: load_pinned_clipboard(),
                 pinned_clipboard: load_pinned_clipboard(),
                 clipboard_search: String::new(),
+                clipboard_filter: "all".into(),
                 osd_state: None,
                 show_notification_center: false,
                 notification_history: vec![
@@ -1230,6 +1281,7 @@ impl Application for CortenPanelApp {
                 launch_bounce: None,
                 eq_tick: 0,
                 osd_display_level: 50.0,
+                last_tick_sec: 0,
             };
         let init_dock_w = app.calculate_dock_width();
         app.last_dock_width = init_dock_w;
@@ -1256,7 +1308,9 @@ impl Application for CortenPanelApp {
     }
 
     fn style(&self, _theme: &Self::Theme) -> iced_layershell::Appearance {
-        let palette = Palette::for_mode(self.theme_mode).with_patina(self.active_patina);
+        let palette = Palette::for_mode(self.theme_mode)
+            .with_patina(self.active_patina)
+            .with_custom_accent(&self.custom_accent);
         iced_layershell::Appearance {
             background_color: iced::Color::TRANSPARENT,
             text_color: palette.text_primary.to_iced(),
@@ -1265,18 +1319,21 @@ impl Application for CortenPanelApp {
 
     fn subscription(&self) -> Subscription<Self::Message> {
         let events = event::listen().map(Message::IcedEvent);
-        let timer = iced::time::every(Duration::from_millis(500)).map(|_| Message::Tick);
-        
+        // Battery-friendly cadence: 1000ms idle tick (instead of 500ms), 500ms only when OSD is actively fading
+        let tick_ms = if self.osd_state.is_some() { 500 } else { 1000 };
+        let timer = iced::time::every(Duration::from_millis(tick_ms)).map(|_| Message::Tick);
+
         let needs_animation = !self.popover_transition.is_complete()
             || self.launch_bounce.is_some()
             || self
                 .osd_state
                 .as_ref()
                 .is_some_and(|(_, lvl, _)| (self.osd_display_level - *lvl as f32).abs() > 0.2)
-            || self.media_players.iter().any(|p| p.playback_status == corten_services::mpris::PlaybackStatus::Playing)
-            || !self.app_streams.is_empty()
-            || self.audio_vu_level.0 > 0.01
-            || self.audio_vu_level.1 > 0.01;
+            || (self.show_control_center
+                && (self.media_players.iter().any(|p| p.playback_status == corten_services::mpris::PlaybackStatus::Playing)
+                    || !self.app_streams.is_empty()
+                    || self.audio_vu_level.0 > 0.01
+                    || self.audio_vu_level.1 > 0.01));
 
         let mut subs = vec![events, timer];
         if needs_animation {
@@ -1486,11 +1543,11 @@ impl Application for CortenPanelApp {
                         }
                         cmd if cmd.starts_with("osd:toast:") => {
                             let msg = cmd.trim_start_matches("osd:toast:").to_string();
-                            self.osd_state = Some((OsdKind::Toast(msg), 100, 3));
+                            self.osd_state = Some((OsdKind::Toast(msg), 100, 5));
                         }
                         cmd if cmd.starts_with("toast:") => {
                             let msg = cmd.trim_start_matches("toast:").to_string();
-                            self.osd_state = Some((OsdKind::Toast(msg), 100, 3));
+                            self.osd_state = Some((OsdKind::Toast(msg), 100, 5));
                         }
                         cmd if cmd.starts_with("osd:workspace:") => {
                             if let Ok(ws) = cmd.trim_start_matches("osd:workspace:").trim().parse::<usize>() {
@@ -1585,6 +1642,11 @@ impl Application for CortenPanelApp {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
+                // Guard periodic system probes so sub-second OSD ticks never double-fire fork/exec work
+                let is_new_sec = current_secs != self.last_tick_sec;
+                if is_new_sec {
+                    self.last_tick_sec = current_secs;
+                }
 
                 let (time, date) =
                     SystemInfo::get_datetime(&self.config.time_format, &self.config.date_format);
@@ -1637,38 +1699,42 @@ impl Application for CortenPanelApp {
                     return self.layer_config_task();
                 }
 
-                // Smart On-Demand & Cadence Polling (Zero-Fork / Low-Load)
-                if self.show_volume_slider || self.show_control_center || current_secs.is_multiple_of(2) {
+                // Smart On-Demand & Battery-Friendly Cadence Polling (Zero-Excess-Fork)
+                if is_new_sec && (self.show_volume_slider || self.show_control_center || current_secs.is_multiple_of(5)) {
                     self.audio_status = pipewire::get_volume();
                 }
-                if self.show_control_center || current_secs.is_multiple_of(2) {
+                if is_new_sec && (self.show_control_center || current_secs.is_multiple_of(5)) {
                     self.mic_active = SystemInfo::is_mic_active();
                     self.network_status = SystemInfo::get_network_details();
                     self.battery_status = SystemInfo::get_battery_info();
                 }
-                if self.show_control_center && current_secs.is_multiple_of(3) {
+                if is_new_sec && self.show_control_center && current_secs.is_multiple_of(3) {
                     return Task::perform(async {
                         tokio::task::spawn_blocking(move || {
                             corten_services::mpris::list_players().unwrap_or_default()
                         }).await.unwrap_or_default()
                     }, Message::MediaPlayersUpdated);
                 }
-                if (self.show_volume_slider || self.show_control_center) && current_secs.is_multiple_of(3) {
+                if is_new_sec && (self.show_volume_slider || self.show_control_center) && current_secs.is_multiple_of(3) {
                     self.audio_sinks = pipewire::list_sinks();
                 }
-                if self.show_control_center && current_secs.is_multiple_of(4) {
+                if is_new_sec && self.show_control_center && current_secs.is_multiple_of(4) {
                     self.listening_ports = SystemInfo::get_listening_dev_ports();
                     self.app_streams = corten_services::pipewire::list_app_streams();
                 }
-                if current_secs.is_multiple_of(4) {
+                if is_new_sec && self.show_mini_task_manager && current_secs.is_multiple_of(3) {
                     self.top_processes = SystemInfo::get_top_memory_processes(6);
                 }
-                let (_rx_s, _tx_s, rx_fmt, tx_fmt) = self.net_speed_tracker.sample_speed();
-                self.net_speed_display = (rx_fmt, tx_fmt);
-                self.tray_items = SystemInfo::get_active_tray_items();
+                if is_new_sec && (self.show_net_speed_details || self.show_control_center || current_secs.is_multiple_of(2)) {
+                    let (_rx_s, _tx_s, rx_fmt, tx_fmt) = self.net_speed_tracker.sample_speed();
+                    self.net_speed_display = (rx_fmt, tx_fmt);
+                }
+                if is_new_sec && current_secs.is_multiple_of(5) {
+                    self.tray_items = SystemInfo::get_active_tray_items();
+                }
 
                 // Gentle trash polling (every 10 seconds or on-demand)
-                if current_secs.is_multiple_of(10) {
+                if is_new_sec && current_secs.is_multiple_of(10) {
                     self.trash_item_count = get_trash_count();
                 }
 
@@ -1742,8 +1808,8 @@ impl Application for CortenPanelApp {
                     }
                 }
 
-                // Removable USB / disk auto-detection & notification (every 2 seconds)
-                if current_secs.is_multiple_of(2) {
+                // Removable USB / disk auto-detection & notification (every 5 seconds)
+                if is_new_sec && current_secs.is_multiple_of(5) {
                     if let Ok(devices) = corten_services::udisks2::list_devices() {
                         let removable: Vec<_> =
                             devices.into_iter().filter(|d| d.is_removable).collect();
@@ -1794,8 +1860,8 @@ impl Application for CortenPanelApp {
                     }
                 }
 
-                // Critical system file integrity watcher / tripwire (every 5 seconds)
-                if current_secs.is_multiple_of(5) {
+                // Critical system file integrity watcher / tripwire (every 10 seconds)
+                if is_new_sec && current_secs.is_multiple_of(10) {
                     if let Some(alert) = check_system_integrity(&mut self.sentinel_mtimes) {
                         self.osd_state = Some((OsdKind::Toast(alert.clone()), 100, 4));
                         self.notification_history.insert(
@@ -1805,8 +1871,8 @@ impl Application for CortenPanelApp {
                     }
                 }
 
-                // Clipboard history polling (gentle on-demand & periodic, zero-excess-fork)
-                if self.show_clipboard_modal || current_secs.is_multiple_of(3) {
+                // Clipboard history polling (gentle on-demand & 5s periodic, zero-excess-fork)
+                if is_new_sec && (self.show_clipboard_modal || current_secs.is_multiple_of(5)) {
                     if let Some(txt) = SystemInfo::read_clipboard_text() {
                         if self.clipboard_history.first() != Some(&txt) {
                             self.clipboard_history.retain(|item| item != &txt);
@@ -2259,11 +2325,13 @@ impl Application for CortenPanelApp {
             }
             Message::SetPatina(patina) => {
                 self.active_patina = patina;
+                let (prim, _) = patina.colors();
+                let hex = format!("#{:02X}{:02X}{:02X}", (prim.r * 255.0) as u8, (prim.g * 255.0) as u8, (prim.b * 255.0) as u8);
+                self.custom_accent = hex.clone();
                 if let Ok(mut app_mgr) = ConfigManager::<corten_config::AppearanceConfig>::load_or_default("appearance") {
                     let mut cfg = app_mgr.get().clone();
                     cfg.patina = patina.code().to_string();
-                    let (prim, _) = patina.colors();
-                    cfg.accent_color = format!("#{:02X}{:02X}{:02X}", (prim.r * 255.0) as u8, (prim.g * 255.0) as u8, (prim.b * 255.0) as u8);
+                    cfg.accent_color = hex;
                     let _ = app_mgr.update(cfg);
                 }
             }
@@ -2732,6 +2800,9 @@ impl Application for CortenPanelApp {
                 }
                 save_pinned_clipboard(&self.pinned_clipboard);
             }
+            Message::SetClipboardFilter(f) => {
+                self.clipboard_filter = f;
+            }
             Message::DeleteClipboardItem(idx) => {
                 if idx < self.clipboard_history.len() {
                     let removed = self.clipboard_history.remove(idx);
@@ -2803,7 +2874,9 @@ impl Application for CortenPanelApp {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
-        let palette = Palette::for_mode(self.theme_mode).with_patina(self.active_patina);
+        let palette = Palette::for_mode(self.theme_mode)
+            .with_patina(self.active_patina)
+            .with_custom_accent(&self.custom_accent);
         let popover_spring = self.popover_transition.spring();
         let popover_alpha = (0.68 + 0.32 * popover_spring).clamp(0.0, 1.0);
         let popover_lift_gap = (4.0 + 8.0 * popover_spring.clamp(0.0, 1.15)).round();
@@ -5162,29 +5235,48 @@ impl Application for CortenPanelApp {
                 .padding([6, 10])
                 .size(12.0);
 
-            let mut items_col = iced::widget::column![].spacing(6);
+            let filter_tabs = row![
+                for_clip_tab("Tümü", "all", &self.clipboard_filter, palette),
+                for_clip_tab("Sabitlenen", "pinned", &self.clipboard_filter, palette),
+                for_clip_tab("Renkler", "color", &self.clipboard_filter, palette),
+                for_clip_tab("Görseller", "image", &self.clipboard_filter, palette),
+            ]
+            .spacing(4);
+
+            let mut items_col = iced::widget::column![filter_tabs].spacing(6);
             let mut filtered_items: Vec<(usize, &String, bool)> = self
                 .clipboard_history
                 .iter()
                 .enumerate()
                 .filter(|(_, text)| {
-                    self.clipboard_search.is_empty()
-                        || text.to_lowercase().contains(&self.clipboard_search.to_lowercase())
+                    let q_ok = self.clipboard_search.is_empty()
+                        || text.to_lowercase().contains(&self.clipboard_search.to_lowercase());
+                    let is_pin = self.pinned_clipboard.contains(text);
+                    let is_hex = is_hex_color_entry(text);
+                    let is_img = text.starts_with("[IMG:") || text.ends_with(".png");
+                    let tab_ok = match self.clipboard_filter.as_str() {
+                        "pinned" => is_pin,
+                        "color" => is_hex,
+                        "image" => is_img,
+                        _ => true,
+                    };
+                    q_ok && tab_ok
                 })
                 .map(|(idx, text)| (idx, text, self.pinned_clipboard.contains(text)))
                 .collect();
             filtered_items.sort_by_key(|(_, _, is_pinned)| !*is_pinned);
 
             if filtered_items.is_empty() {
-                items_col = items_col.push(
-                    container(text("Pano geçmişi boş veya aramayla eşleşmedi.").size(12.0).color(palette.text_muted.to_iced()))
-                        .padding([16, 10])
-                        .center_x(Length::Fill),
-                );
+                items_col = items_col.push(corten_theme::iced_styles::empty_state_card(
+                    Icon::CLIPBOARD,
+                    "Pano öğesi bulunamadı",
+                    "Kopyaladığınız metinler, renkler ve görseller burada görünür",
+                    palette,
+                ));
             } else {
                 for (idx, text_entry, is_pinned) in filtered_items {
-                    let display_text = if text_entry.chars().count() > 46 {
-                        format!("{}...", text_entry.chars().take(46).collect::<String>())
+                    let display_text = if text_entry.chars().count() > 42 {
+                        format!("{}...", text_entry.chars().take(42).collect::<String>())
                     } else {
                         text_entry.clone()
                     };
@@ -5195,27 +5287,46 @@ impl Application for CortenPanelApp {
                     } else {
                         palette.text_muted.to_iced()
                     };
+                    let mut entry_content = row![].spacing(6).align_y(Alignment::Center);
+                    if let Some(swatch) = parse_hex_swatch_color(text_entry) {
+                        entry_content = entry_content.push(
+                            container(row![])
+                                .width(Length::Fixed(14.0))
+                                .height(Length::Fixed(14.0))
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(swatch)),
+                                    border: iced::Border {
+                                        color: palette.border.to_iced(),
+                                        width: 1.0,
+                                        radius: iced::border::Radius::from(4.0),
+                                    },
+                                    ..Default::default()
+                                }),
+                        );
+                    }
+                    entry_content = entry_content.push(
+                        text(display_text)
+                            .size(12.0)
+                            .color(palette.text_primary.to_iced()),
+                    );
                     let item_row = row![
                         button(
-                            text(if is_pinned { "📌" } else { "📍" })
-                                .size(11.0)
+                            text(Icon::PIN)
+                                .font(LUCIDE_FONT)
+                                .size(12.0)
                                 .color(pin_color)
                         )
                         .padding([4, 6])
                         .style(|_, _| button::Style::default())
                         .on_press(Message::TogglePinClipboardItem(pin_val)),
-                        button(
-                            text(display_text)
-                                .size(12.0)
-                                .color(palette.text_primary.to_iced())
-                        )
+                        button(entry_content)
                         .width(Length::Fill)
                         .padding([5, 8])
                         .style(move |_, status| {
                             let bg = match status {
-                                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+                                button::Status::Hovered => palette.surface_hover.to_iced(),
                                 _ if is_pinned => iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14),
-                                _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+                                _ => palette.surface.to_iced(),
                             };
                             button::Style {
                                 background: Some(iced::Background::Color(bg)),
@@ -5223,16 +5334,16 @@ impl Application for CortenPanelApp {
                                     color: if is_pinned {
                                         iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35)
                                     } else {
-                                        iced::Color::TRANSPARENT
+                                        palette.border.to_iced()
                                     },
-                                    width: if is_pinned { 1.0 } else { 0.0 },
+                                    width: 1.0,
                                     radius: iced::border::Radius::from(6.0),
                                 },
                                 ..Default::default()
                             }
                         })
                         .on_press(Message::CopyClipboardItem(copy_val)),
-                        button(text("✕").size(11.0).color(palette.text_muted.to_iced()))
+                        button(text(Icon::X).font(LUCIDE_FONT).size(11.0).color(palette.text_muted.to_iced()))
                             .padding([4, 6])
                             .style(|_, _| button::Style::default())
                             .on_press(Message::DeleteClipboardItem(idx)),

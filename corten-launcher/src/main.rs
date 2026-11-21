@@ -1827,6 +1827,29 @@ impl Application for CortenLauncherApp {
                 .on_press(Message::SelectCategory(cat))
             };
 
+            let mode_pill = |label: &'static str, prefix: &'static str| {
+                let is_on = !prefix.is_empty() && self.search_query.starts_with(prefix);
+                button(text(label).size(10.5).color(if is_on {
+                    palette.on_primary().to_iced()
+                } else {
+                    palette.text_muted.to_iced()
+                }))
+                .padding([3, 8])
+                .style(move |_, _| button::Style {
+                    background: Some(iced::Background::Color(if is_on {
+                        palette.primary.to_iced()
+                    } else {
+                        palette.surface_hover.to_iced()
+                    })),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(8.0),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::SearchInputChanged(prefix.to_string()))
+            };
+
             let categories_row = row![
                 cat_pill("Tümü", AppCategory::All, self.selected_category == AppCategory::All),
                 cat_pill("Geliştirme", AppCategory::Development, self.selected_category == AppCategory::Development),
@@ -1834,6 +1857,9 @@ impl Application for CortenLauncherApp {
                 cat_pill("İnternet", AppCategory::Internet, self.selected_category == AppCategory::Internet),
                 cat_pill("Ofis", AppCategory::Office, self.selected_category == AppCategory::Office),
                 cat_pill("Sistem", AppCategory::System, self.selected_category == AppCategory::System),
+                mode_pill("Emoji (.)", ". "),
+                mode_pill("Komut (>)", "> "),
+                mode_pill("AI (?)", "? "),
             ]
             .spacing(5)
             .align_y(Alignment::Center);

@@ -194,8 +194,10 @@ pub struct CortenCompositor {
     pub a11y_bridge: corten_services::a11y::AtspiBridge,
     /// One-click Game Mode: disables blur/effects, enables tearing/VRR, inhibits idle & DND
     pub game_mode: bool,
-    /// Compositor GPU screen magnifier zoom factor (`1.0` = normal, up to `4.0`)
+    /// Compositor GPU screen magnifier current animated zoom factor (`1.0` = normal, up to `4.0`)
     pub zoom_level: f64,
+    /// Target GPU screen magnifier zoom factor for smooth spring interpolation
+    pub target_zoom_level: f64,
     /// Native X11 DPI zero-scaling mode for razor-sharp XWayland windows on fractional HiDPI
     pub xwayland_force_zero_scaling: bool,
     /// Graphics tablet stylus pressure response curve (`"soft"`, `"linear"`, `"firm"`)
@@ -1267,6 +1269,7 @@ impl CortenCompositor {
             a11y_bridge: corten_services::a11y::AtspiBridge::new("Corten Desktop"),
             game_mode: false,
             zoom_level: 1.0,
+            target_zoom_level: 1.0,
             xwayland_force_zero_scaling: corten_config::ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default("displays")
                 .map(|m| m.get().xwayland_force_zero_scaling)
                 .unwrap_or(true),
@@ -1301,6 +1304,11 @@ impl CortenCompositor {
         } else {
             "Oyun Modu Kapatıldı (Normal Masaüstü Modu)"
         };
+        crate::render::send_panel_toast(if self.game_mode {
+            "Oyun Modu: Açık"
+        } else {
+            "Oyun Modu: Kapalı"
+        });
         let _ = std::process::Command::new("notify-send")
             .args(["Corten Game Mode", msg])
             .spawn();
@@ -1363,15 +1371,39 @@ impl CortenCompositor {
         }
     }
 
-    /// Adjusts GPU compositor zoom magnification (`1.0` to `4.0`).
+    /// Adjusts GPU compositor zoom magnification (`1.0` to `4.0`) with smooth spring target.
     pub fn adjust_zoom(&mut self, delta: f64) -> f64 {
-        self.zoom_level = (self.zoom_level + delta).clamp(1.0, 4.0);
-        self.zoom_level
+        self.target_zoom_level = (self.target_zoom_level + delta).clamp(1.0, 4.0);
+        self.zoom_level = crate::render::step_smooth_zoom(self.zoom_level, self.target_zoom_level);
+        crate::render::send_panel_toast(&format!(
+            "Yakınlaştırma: %{}",
+            (self.target_zoom_level * 100.0).round() as u32
+        ));
+        self.target_zoom_level
     }
 
     /// Resets compositor zoom back to `1.0`.
     pub fn reset_zoom(&mut self) {
+        self.target_zoom_level = 1.0;
         self.zoom_level = 1.0;
+        crate::render::send_panel_toast("Yakınlaştırma: %100");
+    }
+
+    /// Steps smooth per-frame compositor visual animations (zoom & scrollable strip).
+    pub fn step_visual_animations(&mut self) {
+        self.zoom_level = crate::render::step_smooth_zoom(self.zoom_level, self.target_zoom_level);
+        self.layout.step_scroll_animation();
+    }
+
+    /// Computes physical-pixel viewport pan offset `(pan_x, pan_y)` for cursor-following GPU magnification.
+    /// Returns `(0, 0)` when `zoom_level <= 1.001` so standard desktop rendering incurs zero shift.
+    pub fn zoom_pan_offset(&self, output_phys_size: Size<i32, smithay::utils::Physical>, base_scale: f64) -> Point<i32, smithay::utils::Physical> {
+        compute_zoom_pan_offset(
+            self.cursor_location,
+            output_phys_size,
+            base_scale,
+            self.zoom_level,
+        )
     }
 
     /// Executes a named compositor action triggered via `cortenctl action <name>` or hotkeys.
@@ -1414,6 +1446,16 @@ impl CortenCompositor {
             }
             "scroll-right" => {
                 self.layout.scroll_column_step(1, usable);
+            }
+            "cycle-column-width" => {
+                let frac = self.layout.cycle_scroll_column_fraction();
+                for (w, r) in self.layout.arrange(usable) {
+                    crate::layout::configure_window_geometry(&w, r);
+                }
+                crate::render::send_panel_toast(&format!(
+                    "Sütun Genişliği: %{}",
+                    (frac * 100.0).round() as u32
+                ));
             }
             "zoom-in" => {
                 self.adjust_zoom(0.25);
@@ -1678,6 +1720,54 @@ pub fn load_window_session_from_disk() -> Vec<SavedWindowEntry> {
         .unwrap_or_default()
 }
 
+/// Computes smooth cursor-following viewport pan offset in physical pixels when GPU magnifier zoom > 1.0.
+/// Clamps pan strictly within `[output_dim * (1 - zoom), 0]` so the viewport never exposes black edges.
+pub fn compute_zoom_pan_offset(
+    cursor_logical: Point<f64, smithay::utils::Logical>,
+    output_phys_size: Size<i32, smithay::utils::Physical>,
+    base_scale: f64,
+    zoom_level: f64,
+) -> Point<i32, smithay::utils::Physical> {
+    let z = zoom_level.clamp(1.0, 4.0);
+    if z <= 1.001 {
+        return Point::from((0, 0));
+    }
+    let out_w = output_phys_size.w.max(1) as f64;
+    let out_h = output_phys_size.h.max(1) as f64;
+    let zoomed_scale = base_scale.max(0.5) * z;
+    let min_x = out_w * (1.0 - z);
+    let min_y = out_h * (1.0 - z);
+    let pan_x = (out_w * 0.5 - cursor_logical.x * zoomed_scale).clamp(min_x, 0.0);
+    let pan_y = (out_h * 0.5 - cursor_logical.y * zoomed_scale).clamp(min_y, 0.0);
+    Point::from((pan_x.round() as i32, pan_y.round() as i32))
+}
+
+/// Scales and translates a logical window rectangle for GLSL shadow/glow shader alignment under zoom.
+pub fn compute_zoomed_glow_rect(
+    rect: Rectangle<i32, smithay::utils::Logical>,
+    zoom_level: f64,
+    pan_phys: Point<i32, smithay::utils::Physical>,
+    base_scale: f64,
+) -> Rectangle<i32, smithay::utils::Logical> {
+    let z = zoom_level.clamp(1.0, 4.0);
+    if z <= 1.001 {
+        return rect;
+    }
+    let inv_base = 1.0 / base_scale.max(0.5);
+    let pan_log_x = (pan_phys.x as f64 * inv_base).round() as i32;
+    let pan_log_y = (pan_phys.y as f64 * inv_base).round() as i32;
+    Rectangle::new(
+        Point::from((
+            (rect.loc.x as f64 * z).round() as i32 + pan_log_x,
+            (rect.loc.y as f64 * z).round() as i32 + pan_log_y,
+        )),
+        Size::from((
+            (rect.size.w as f64 * z).round() as i32,
+            (rect.size.h as f64 * z).round() as i32,
+        )),
+    )
+}
+
 /// Formats an RGB triplet into `("#RRGGBB", "rgb(R, G, B)")`.
 pub fn format_color_hex_rgb(r: u8, g: u8, b: u8) -> (String, String) {
     (
@@ -1934,5 +2024,33 @@ mod tests {
         let encoded = serialize_window_session(&entries);
         let decoded = parse_window_session(&encoded);
         assert_eq!(decoded, entries);
+    }
+
+    #[test]
+    fn test_cursor_following_zoom_pan_and_glow_rect() {
+        let out = Size::from((1920, 1080));
+        // At 1.0x zoom, pan must be exactly (0, 0)
+        assert_eq!(
+            compute_zoom_pan_offset(Point::from((960.0, 540.0)), out, 1.0, 1.0),
+            Point::from((0, 0))
+        );
+        // At 2.0x zoom with cursor at top-left, pan clamps to (0, 0) (no black borders)
+        assert_eq!(
+            compute_zoom_pan_offset(Point::from((0.0, 0.0)), out, 1.0, 2.0),
+            Point::from((0, 0))
+        );
+        // At 2.0x zoom with cursor at center (960, 540), pan shifts by (-960, -540)
+        let center_pan = compute_zoom_pan_offset(Point::from((960.0, 540.0)), out, 1.0, 2.0);
+        assert_eq!(center_pan, Point::from((-960, -540)));
+        // At 2.0x zoom with cursor at bottom-right (1920, 1080), pan clamps to (-1920, -1080)
+        assert_eq!(
+            compute_zoom_pan_offset(Point::from((1920.0, 1080.0)), out, 1.0, 2.0),
+            Point::from((-1920, -1080))
+        );
+        // Glow rect matches zoomed and panned window coordinates
+        let win = Rectangle::new(Point::from((500, 300)), Size::from((400, 200)));
+        let glow = compute_zoomed_glow_rect(win, 2.0, center_pan, 1.0);
+        assert_eq!(glow.loc, Point::from((40, 60)));
+        assert_eq!(glow.size, Size::from((800, 400)));
     }
 }

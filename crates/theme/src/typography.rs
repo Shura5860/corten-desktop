@@ -14,9 +14,9 @@ impl Typography {
     pub const TITLE: f32 = 20.0;
     pub const DISPLAY: f32 = 28.0;
 
-    /// Scales a font size by an accessibility multiplier, clamped to reasonable bounds.
+    /// Scales a font size by an accessibility multiplier (`0.85x` compact up to `2.5x` large).
     pub fn scaled(size: f32, scale: f32) -> f32 {
-        let scale = scale.clamp(1.0, 2.5);
+        let scale = scale.clamp(0.85, 2.5);
         (size * scale).round()
     }
 }

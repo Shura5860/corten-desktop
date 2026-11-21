@@ -104,6 +104,77 @@ impl Language {
         }
     }
 
+    /// Extended UI/UX dictionary for v0.5.0+ & v0.6.0 features (Game Mode, Zoom, Clipboard, Settings, Notify).
+    pub fn ui_label(&self, key: &str) -> &'static str {
+        match (self, key) {
+            (Language::Tr, "game_mode") => "Oyun Modu",
+            (Language::En, "game_mode") => "Game Mode",
+            (Language::De, "game_mode") => "Spielmodus",
+            (Language::Fr, "game_mode") => "Mode Jeu",
+            (Language::Es, "game_mode") => "Modo Juego",
+            (Language::Ru, "game_mode") => "Игровой режим",
+            (Language::Ja, "game_mode") => "ゲームモード",
+
+            (Language::Tr, "zoom_level") => "Yakınlaştırma",
+            (Language::En, "zoom_level") => "Zoom",
+            (Language::De, "zoom_level") => "Zoom",
+            (Language::Fr, "zoom_level") => "Zoom",
+            (Language::Es, "zoom_level") => "Zoom",
+            (Language::Ru, "zoom_level") => "Масштаб",
+            (Language::Ja, "zoom_level") => "ズーム",
+
+            (Language::Tr, "color_picker") => "Renk Seçici",
+            (Language::En, "color_picker") => "Color Picker",
+            (Language::De, "color_picker") => "Farbwähler",
+            (Language::Fr, "color_picker") => "Pipette",
+            (Language::Es, "color_picker") => "Selector de color",
+            (Language::Ru, "color_picker") => "Пипетка",
+            (Language::Ja, "color_picker") => "カラーピッカー",
+
+            (Language::Tr, "unsaved_changes") => "Kaydedilmemiş değişiklikler var",
+            (Language::En, "unsaved_changes") => "You have unsaved changes",
+            (Language::De, "unsaved_changes") => "Ungespeicherte Änderungen",
+            (Language::Fr, "unsaved_changes") => "Modifications non enregistrées",
+            (Language::Es, "unsaved_changes") => "Cambios sin guardar",
+            (Language::Ru, "unsaved_changes") => "Есть несохранённые изменения",
+            (Language::Ja, "unsaved_changes") => "未保存の変更があります",
+
+            (Language::Tr, "discard") => "Geri Al",
+            (Language::En, "discard") => "Discard",
+            (Language::De, "discard") => "Verwerfen",
+            (Language::Fr, "discard") => "Annuler",
+            (Language::Es, "discard") => "Descartar",
+            (Language::Ru, "discard") => "Сбросить",
+            (Language::Ja, "discard") => "破棄",
+
+            (Language::Tr, "pinned") => "Sabitlenenler",
+            (Language::En, "pinned") => "Pinned",
+            (Language::De, "pinned") => "Angeheftet",
+            (Language::Fr, "pinned") => "Épinglés",
+            (Language::Es, "pinned") => "Fijados",
+            (Language::Ru, "pinned") => "Закреплённые",
+            (Language::Ja, "pinned") => "ピン留め",
+
+            (Language::Tr, "all") => "Tümü",
+            (Language::En, "all") => "All",
+            (Language::De, "all") => "Alle",
+            (Language::Fr, "all") => "Tout",
+            (Language::Es, "all") => "Todo",
+            (Language::Ru, "all") => "Все",
+            (Language::Ja, "all") => "すべて",
+
+            (Language::Tr, "muted_apps") => "Susturulan Uygulamalar",
+            (Language::En, "muted_apps") => "Muted Apps",
+            (Language::De, "muted_apps") => "Stummgeschaltete Apps",
+            (Language::Fr, "muted_apps") => "Applications muettes",
+            (Language::Es, "muted_apps") => "Apps silenciadas",
+            (Language::Ru, "muted_apps") => "Заглушённые приложения",
+            (Language::Ja, "muted_apps") => "ミュート中のアプリ",
+
+            _ => "",
+        }
+    }
+
     pub fn format_date(&self, weekday_1_to_7: u32, day: u32, month_1_to_12: u32) -> String {
         match self {
             Language::Tr => {

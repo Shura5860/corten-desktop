@@ -338,6 +338,32 @@ impl Palette {
         self
     }
 
+    /// Returns `true` when this palette uses a light background surface.
+    pub fn is_light(&self) -> bool {
+        self.background.relative_luminance() >= 0.5
+    }
+
+    /// Parses a `#RRGGBB` or `RRGGBB` hex string and overrides `primary` & `primary_hover`
+    /// for Material You / custom wallpaper accent color theming.
+    pub fn with_custom_accent(mut self, hex: &str) -> Self {
+        let clean = hex.trim().trim_start_matches('#');
+        if clean.len() == 6 {
+            if let Ok(rgb) = u32::from_str_radix(clean, 16) {
+                let prim = Color::from_hex(rgb);
+                let delta = if self.is_light() { -0.08 } else { 0.08 };
+                let hover = Color::from_rgba(
+                    (prim.r + delta).clamp(0.0, 1.0),
+                    (prim.g + delta).clamp(0.0, 1.0),
+                    (prim.b + delta).clamp(0.0, 1.0),
+                    1.0,
+                );
+                self.primary = prim;
+                self.primary_hover = hover;
+            }
+        }
+        self
+    }
+
     /// Applies accessibility color vision deficiency filter across entire palette
     pub fn with_color_filter(mut self, filter: ColorFilterMode) -> Self {
         if filter == ColorFilterMode::None {
@@ -469,5 +495,22 @@ mod tests {
         let pal = Palette::dark().with_color_filter(ColorFilterMode::Monochrome);
         assert_eq!(pal.primary.r, pal.primary.g);
         assert_eq!(pal.primary.g, pal.primary.b);
+    }
+
+    #[test]
+    fn test_custom_accent_hex_and_light_detection() {
+        let dark = Palette::dark();
+        let light = Palette::light();
+        assert!(!dark.is_light());
+        assert!(light.is_light());
+
+        let custom = dark.with_custom_accent("#3EA892");
+        assert!((custom.primary.r - (0x3E as f32 / 255.0)).abs() < 1e-3);
+        assert!((custom.primary.g - (0xA8 as f32 / 255.0)).abs() < 1e-3);
+        assert!(custom.primary_hover.g > custom.primary.g);
+
+        // Invalid hex should leave primary unchanged
+        let unchanged = dark.with_custom_accent("invalid");
+        assert_eq!(unchanged.primary, dark.primary);
     }
 }

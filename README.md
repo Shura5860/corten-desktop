@@ -7,11 +7,12 @@
 **A purpose-built, process-isolated Wayland desktop ecosystem forged in pure Rust.**  
 *Zero C display wrappers (`wlroots`), zero Electron/WebKit runtimes, and zero fragile glue scripts.*
 
+[![Version](https://img.shields.io/badge/Release-v0.5.6-d96b43.svg?style=flat-square)](https://github.com/Shura5860/corten-desktop/releases/tag/v0.5.6)
 [![Language](https://img.shields.io/badge/Language-Rust%202021-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Display Protocol](https://img.shields.io/badge/Protocol-Wayland-blue.svg?style=flat-square&logo=wayland)](https://wayland.freedesktop.org/)
 [![Compositor Engine](https://img.shields.io/badge/Engine-Smithay%200.7-red.svg?style=flat-square)](https://github.com/Smithay/smithay)
 [![UI Toolkit](https://img.shields.io/badge/Shell%20Toolkit-Iced%200.13%20(tiny--skia)-blueviolet.svg?style=flat-square)](https://github.com/iced-rs/iced)
-[![Unit Tests](https://img.shields.io/badge/Tests-185%20Passed-brightgreen.svg?style=flat-square)](#-verifying--building-from-source)
+[![Clippy](https://img.shields.io/badge/Clippy-Zero%20Warnings-brightgreen.svg?style=flat-square)](#-verifying--building-from-source)
 [![License](https://img.shields.io/badge/License-GPL--3.0-green.svg?style=flat-square)](LICENSE)
 
 <br />
@@ -60,7 +61,7 @@ It is an integrated, cohesive desktop environment engineered from the kernel DRM
 
 ### Corten Forge & AURA Copilot
 > *Left: **Corten Forge**, a unified package manager orchestrating Flatpak sandboxes, Arch repositories, and Corten Core OTA releases.  
-> Right: **Corten AURA**, an embedded, zero-cloud desktop copilot powered by pure-Rust GGUF tensor inference and a 20-tool ReAct automation engine.*
+> Right: **Corten AURA**, an embedded, zero-cloud desktop copilot powered by pure-Rust GGUF tensor inference and a 23-tool ReAct automation engine with Dynamic Semantic Tool Pruning.*
 
 ![Corten Forge & AURA](assets/screenshots/corten-forge-aura.jpg)
 
@@ -94,10 +95,11 @@ Corten is designed around strict separation of concerns, process isolation, and 
                     ▼                              └──────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
 │                              COMPOSITOR CORE (`corten-compositor`)                              │
-│  • Window Management (`layout.rs`): Master-Stack, Recursive `BspNode`, Interactive Drag-Split   │
+│  • Window Management (`layout.rs`): Floating, Master-Stack, BSP, Monocle & Scrollable Strip     │
+│  • Power Features: Scratchpad, Sticky/PiP, One-Click Game Mode, GPU Magnifier Zoom, Session     │
 │  • GLSL ES Pipeline (`glow_shader.rs`): SDF-Masked Dual-Kawase Blur, Active Halo Glow           │
 │  • KMS / DRM Core (`udev.rs`): Direct Scanout, Hardware Overlay Planes, VRR, Async Tearing      │
-│  • Protocols & Sync (`handlers.rs`): `linux-drm-syncobj-v1`, `wlr-screencopy`, `ext-session`    │
+│  • Protocols: `drm-syncobj-v1`, `idle-notify-v1`, `xdg-foreign-v2`, `foreign-toplevel-list-v1`  │
 └───────────────────┬─────────────────────────────────────────────────────────────────────────────┘
                     │ DRM ioctl / GBM / EGL / libinput / libseat / PipeWire
                     ▼
@@ -143,7 +145,7 @@ Corten integrates an embedded, privacy-first local intelligence engine directly 
                                           ▼
                          ┌─────────────────────────────────┐
                          │    ReAct Automation Engine      │
-                         │    (20 Desktop & System Tools)  │
+                         │    (23 Desktop & System Tools)  │
                          └────────────────┬────────────────┘
                                           │ Destructive Action Check
                                           ▼
@@ -155,7 +157,7 @@ Corten integrates an embedded, privacy-first local intelligence engine directly 
 
 1. **`corten-vector`:** A concurrent, thread-safe vector engine utilizing an append-only Write-Ahead Log (`wal.rs`) for crash safety. For built-in file search and application indexing, it utilizes deterministic Locality-Sensitive Hashing (LSH) to project token n-grams into normalized vector spaces with minimal memory overhead.
 2. **`corten-llm`:** A pure-Rust tensor execution engine that maps `.gguf` quantized weights directly into virtual memory via zero-copy memory maps (`memmap2`). Supports standard quantization formats (`Q4_K`, `Q6_K`, `Q5_0`, `Q8_0`, `F16`) on CPU via Rayon thread pools, with automatic transparent fallback to loopback GPU backends (`Ollama` or `llama-server`) when dedicated VRAM offloading is available.
-3. **`aura.rs` ReAct Agent:** A multi-step reasoning orchestrator equipped with a 20-tool registry capable of managing workspaces, adjusting audio/brightness, capturing screenshots, inspecting git diffs, and querying hardware state.
+3. **`aura.rs` ReAct Agent (AURA-CORE v2.4.1):** A multi-step reasoning orchestrator equipped with a 23-tool registry and Dynamic Semantic Tool Pruning capable of managing workspaces, adjusting audio/brightness, capturing screenshots, inspecting git diffs, and querying hardware state.
 4. **Human-In-The-Loop (`HITL`) Gate:** Any potentially destructive system command (such as bulk file deletions, disk format operations, or elevated privileges) is intercepted by a security gate requiring explicit user authorization before execution.
 
 ---
@@ -238,6 +240,28 @@ For Arch-based systems, Corten can be installed in a single automated step:
 
 ---
 
+### Distribution Packages (`v0.5.0`)
+
+* **Arch Linux (PKGBUILD):**
+  ```bash
+  cd packaging/arch && makepkg -si
+  ```
+* **NixOS / Nix Flake:**
+  ```bash
+  nix build github:Shura5860/corten-desktop
+  ```
+* **Debian / Ubuntu (`.deb` builder):**
+  ```bash
+  ./packaging/debian/build-deb.sh 0.5.0
+  sudo dpkg -i target/debian/corten-desktop_0.5.0_*.deb
+  ```
+* **Fedora / RHEL (RPM Spec):**
+  ```bash
+  rpmbuild -ba packaging/rpm/corten-desktop.spec
+  ```
+
+---
+
 ### Manual Compilation & Verification
 
 ```bash
@@ -245,16 +269,16 @@ For Arch-based systems, Corten can be installed in a single automated step:
 git clone https://github.com/Shura5860/corten-desktop.git
 cd corten-desktop
 
-# 2. Run the full unit test suite (185 tests across 30 crates)
+# 2. Run the full unit test suite across all 30 workspace crates
 cargo test --workspace
 
 # 3. Enforce strict static analysis (Zero Warnings Policy)
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 # 4. Compile optimized release binaries
 cargo build --release --workspace
 
-# 5. Install binaries, assets, and Wayland session entry
+# 5. Install binaries, assets, portals, and Wayland session entry
 sudo ./install.sh
 ```
 
@@ -279,7 +303,15 @@ Keybindings are configured via TOML in `~/.config/corten/corten.toml`:
 | <kbd>Super</kbd> + <kbd>I</kbd> | Open system settings & monitor topology (`corten-settings`) |
 | <kbd>Super</kbd> + <kbd>W</kbd> | Toggle Exposé / Window Overview mode |
 | <kbd>Super</kbd> + <kbd>D</kbd> | Toggle Show Desktop mode |
-| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> | Interactive region screenshot with editor (`corten-snipper`) |
+| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> | Interactive region screenshot with annotation editor (`corten-snipper`) |
+| <kbd>Super</kbd> + <kbd>.</kbd> | Built-in Emoji, Math & Developer Unicode picker |
+| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd> | System-wide Color Picker / Eyedropper (`#RRGGBB` -> clipboard) |
+| <kbd>Super</kbd> + <kbd>-</kbd> / <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>-</kbd> | Toggle Drop-Down Scratchpad / Move active window to Scratchpad |
+| <kbd>Super</kbd> + <kbd>S</kbd> | Pin active window across all workspaces (Sticky / PiP) |
+| <kbd>Super</kbd> + <kbd>G</kbd> | Toggle One-Click Game Mode (VRR + Tearing + Blur Bypass + DND) |
+| <kbd>Super</kbd> + <kbd>=</kbd> / <kbd>Super</kbd> + <kbd>Ctrl</kbd> + <kbd>-</kbd> / <kbd>Super</kbd> + <kbd>Ctrl</kbd> + <kbd>Scroll</kbd> | GPU Compositor Screen Magnifier Zoom In / Out (`Super + 0` resets) |
+| <kbd>Super</kbd> + <kbd>[</kbd> / <kbd>Super</kbd> + <kbd>]</kbd> | Scroll left / right in Niri-style Scrollable Tiling strip |
+| <kbd>Super</kbd> + <kbd>R</kbd> | Cycle Scrollable column width (`33%` / `50%` / `66%` / `100%`) |
 | <kbd>PrtScn</kbd> | Fullscreen capture (saved to `~/Pictures/` & copied to clipboard) |
 | <kbd>Super</kbd> + <kbd>1</kbd> .. <kbd>9</kbd> | Switch to workspace `1..9` |
 | <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>1</kbd> .. <kbd>9</kbd> | Move active window to workspace `1..9` |
