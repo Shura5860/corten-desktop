@@ -48,6 +48,22 @@ impl AppEntry {
         info!("Launching app '{}': {}", self.name, program);
 
         let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "corten-0".into());
+        let x11_display = std::env::var("DISPLAY").ok().or_else(|| {
+            std::env::var("XDG_RUNTIME_DIR")
+                .ok()
+                .and_then(|d| {
+                    std::fs::read_to_string(PathBuf::from(d).join("corten-x11-display")).ok()
+                })
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    if std::path::Path::new("/tmp/.X11-unix/X0").exists() {
+                        Some(":0".to_string())
+                    } else {
+                        None
+                    }
+                })
+        });
 
         let mut cmd = Command::new(program);
         cmd.args(arguments)
@@ -55,6 +71,9 @@ impl AppEntry {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
+        if let Some(ref disp) = x11_display {
+            cmd.env("DISPLAY", disp);
+        }
         for (k, v) in envs {
             cmd.env(k, v);
         }

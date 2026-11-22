@@ -471,7 +471,10 @@ fn main() -> Result<()> {
     env::set_var("QT_QPA_PLATFORM", "wayland;xcb");
     env::set_var("WINIT_UNIX_BACKEND", "wayland");
     env::set_var("ELECTRON_OZONE_PLATFORM_HINT", "auto");
-    env::set_var("OZONE_PLATFORM", "wayland");
+    // Use lightweight tiny-skia 2D renderer for Corten Iced daemons/apps instead of heavy wgpu/Vulkan (~160MB/32-thread savings per process)
+    if env::var("ICED_BACKEND").is_err() {
+        env::set_var("ICED_BACKEND", "tiny-skia");
+    }
     // Ensure Flatpak exported .desktop entries and icons are discoverable via XDG_DATA_DIRS
     {
         let home = env::var("HOME").unwrap_or_default();
@@ -534,6 +537,8 @@ fn main() -> Result<()> {
             "GTK_THEME",
             "XCURSOR_THEME",
             "XCURSOR_SIZE",
+            "ICED_BACKEND",
+            "XDG_DATA_DIRS",
         ])
         .status();
 

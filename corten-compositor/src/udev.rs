@@ -2914,7 +2914,7 @@ pub fn run_drm(
         }
         let tearing_allowed = state.is_tearing_allowed_for_output(&state.output);
         if !pending_crtcs.is_empty() && !tearing_allowed {
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::sleep(std::time::Duration::from_millis(3));
             continue;
         }
         let mut send_callbacks = vblank_got || tearing_allowed;
@@ -3207,14 +3207,19 @@ pub fn run_drm(
             }
         }
 
-        // Compile neon glow shader & Dual-Kawase blur pipeline on first frame
+        // Compile glow/header/snap shaders & Dual-Kawase blur pipeline on first frame
         if glow_shader.is_none() {
             let gles: &mut smithay::backend::renderer::gles::GlesRenderer =
                 std::borrow::BorrowMut::borrow_mut(&mut renderer);
             if let Ok(manager) = GlowShaderManager::new(gles) {
                 glow_shader = Some(manager);
             }
-            if let Ok(pipeline) = DualKawaseBlurPipeline::new(gles) {
+            let disable_blur = std::env::var("CORTEN_DISABLE_BLUR").ok().as_deref() == Some("1")
+                || (std::env::var("CORTEN_FORCE_BLUR").ok().as_deref() != Some("1")
+                    && is_virtual_software_gpu());
+            if disable_blur {
+                tracing::info!("Compositor: Virtual/software GPU detected; disabling heavy multi-pass Dual-Kawase blur to keep CPU usage low.");
+            } else if let Ok(pipeline) = DualKawaseBlurPipeline::new(gles) {
                 blur_pipeline = Some(pipeline);
             }
         }
@@ -3826,20 +3831,19 @@ pub fn run_drm(
         // Flush client socket buffers again after frame callbacks so clients receive frame timing immediately
         let _ = display.flush_clients();
 
-        // Adaptive frame pacing: run at 240Hz (4ms) during active spring animations,
-        // window dragging, or pending VBlank; relax to 12ms when idle to conserve battery/CPU.
+        // Adaptive frame pacing: responsive during active spring animations or dragging;
+        // relax cleanly when idle to keep CPU/battery usage minimal.
         let is_animating = state.layout.is_animating(usable_area)
             || state.dragged_window.is_some()
-            || state.gesture_kinetic_active
-            || !pending_crtcs.is_empty();
+            || state.gesture_kinetic_active;
         let pace_ms = if state.screen_asleep {
             50
         } else if is_animating {
             4
         } else {
-            12
+            24
         };
-        std::thread::sleep(std::time::Duration::from_millis(pace_ms));
+        let _ = event_loop.dispatch(Some(std::time::Duration::from_millis(pace_ms)), &mut state);
     }
 
     // Release the DRM output before the renderer/session. This lets Smithay
@@ -4157,6 +4161,36 @@ fn handle_pointer_motion_interactions(
             }
         }
     }
+}
+
+/// Detects virtual / software DRM drivers (QEMU/KVM bochs, qxl, virtio, vmwgfx)
+/// where multi-pass full-screen Dual-Kawase blur runs on CPU (llvmpipe) and causes high CPU load.
+fn is_virtual_software_gpu() -> bool {
+    if std::env::var("LIBGL_ALWAYS_SOFTWARE").ok().as_deref() == Some("1") {
+        return true;
+    }
+    if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let s = name.to_string_lossy();
+            if !s.starts_with("card") || s.contains('-') {
+                continue;
+            }
+            let uevent = entry.path().join("device/uevent");
+            if let Ok(text) = std::fs::read_to_string(uevent) {
+                let lower = text.to_lowercase();
+                if lower.contains("driver=bochs")
+                    || lower.contains("driver=qxl")
+                    || lower.contains("driver=virtio")
+                    || lower.contains("driver=vmwgfx")
+                    || lower.contains("driver=vkms")
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]

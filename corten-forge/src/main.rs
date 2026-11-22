@@ -408,24 +408,37 @@ impl CortenForgeApp {
                 );
             }
             Message::LaunchApp(pkg) => {
+                let x11_display = std::env::var("DISPLAY").ok().or_else(|| {
+                    std::env::var("XDG_RUNTIME_DIR")
+                        .ok()
+                        .and_then(|d| {
+                            std::fs::read_to_string(std::path::PathBuf::from(d).join("corten-x11-display")).ok()
+                        })
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| {
+                            if std::path::Path::new("/tmp/.X11-unix/X0").exists() {
+                                Some(":0".to_string())
+                            } else {
+                                None
+                            }
+                        })
+                });
                 match pkg.source {
                     PackageSource::Flatpak => {
                         let mut cmd = std::process::Command::new("flatpak");
-                        cmd.args([
-                            "run",
-                            "--env=ELECTRON_OZONE_PLATFORM_HINT=auto",
-                            &pkg.id,
-                        ]);
-                        if pkg.id == "com.spotify.Client" {
-                            cmd.args([
-                                "--enable-features=UseOzonePlatform",
-                                "--ozone-platform=wayland",
-                            ]);
+                        cmd.args(["run", &pkg.id]);
+                        if let Some(ref disp) = x11_display {
+                            cmd.env("DISPLAY", disp);
                         }
                         let _ = cmd.spawn();
                     }
                     PackageSource::ArchRepo | PackageSource::Aur => {
-                        let _ = std::process::Command::new(&pkg.id).spawn();
+                        let mut cmd = std::process::Command::new(&pkg.id);
+                        if let Some(ref disp) = x11_display {
+                            cmd.env("DISPLAY", disp);
+                        }
+                        let _ = cmd.spawn();
                     }
                     PackageSource::CortenCore => {}
                 }

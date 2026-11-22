@@ -477,6 +477,7 @@ pub struct CortenPanelApp {
     panel_visible: bool,
     show_launcher_modal: bool,
     popover_transition: Transition,
+    surface_height: u32,
     launcher_search: String,
     active_workspace: usize,
     occupied_workspaces: Vec<u32>,
@@ -1246,6 +1247,7 @@ impl Application for CortenPanelApp {
                 panel_visible: true,
                 show_launcher_modal: false,
                 popover_transition: Transition::new(120),
+                surface_height: 68,
                 launcher_search: String::new(),
                 active_workspace,
                 occupied_workspaces,
@@ -2612,6 +2614,14 @@ impl Application for CortenPanelApp {
                 if self.show_calendar {
                     self.show_control_center = false;
                     self.show_power_menu = false;
+                    self.dock_context_menu = None;
+                    self.active_window_previews = None;
+                    self.show_net_speed_details = false;
+                    self.show_downloads_stack = false;
+                    self.show_mini_task_manager = false;
+                    self.show_desktop_context_hub = false;
+                    self.show_clipboard_modal = false;
+                    self.show_notification_center = false;
                 }
                 return self.layer_config_task();
             }
@@ -2885,6 +2895,9 @@ impl Application for CortenPanelApp {
                 self.dock_context_menu = None;
                 self.pending_power_action = None;
                 return self.layer_config_task();
+            }
+            Message::IcedEvent(Event::Window(iced::window::Event::Resized(size))) => {
+                self.surface_height = size.height.round() as u32;
             }
             Message::IcedEvent(_) | Message::LayerAction(_) | Message::NoOp => {}
         }
@@ -3824,7 +3837,10 @@ impl Application for CortenPanelApp {
             .align_y(Alignment::Center);
 
         // ==================== CONTROL CENTER POPUP CARD ====================
-        let content: Element<'_, Self::Message> = if self.show_control_center {
+        // Wait until the Wayland compositor has actually expanded the layer surface (>= 200px)
+        // before rendering tall popovers so the 68px Dock bar never squishes or glitches mid-resize.
+        let popover_surface_ready = self.surface_height >= 200;
+        let content: Element<'_, Self::Message> = if self.show_control_center && popover_surface_ready {
             // Power quick buttons: Lock, Logout, Reboot, Poweroff
             let power_btn = |label: &'static str, action: SystemPowerAction, color: iced::Color| {
                 button(
@@ -4967,7 +4983,7 @@ impl Application for CortenPanelApp {
                 .spacing(12)
                 .align_x(Alignment::Center)
                 .into()
-        } else if self.show_calendar {
+        } else if self.show_calendar && popover_surface_ready {
             let t = self.language.t();
             // Corten Takvim & Hava Durumu Modülü
             let header = row![

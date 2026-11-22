@@ -99,6 +99,45 @@ impl XwmHandler for CortenCompositor {
         self.sync_ipc_snapshot();
     }
 
+    fn map_window_notify(&mut self, _xwm: XwmId, window: X11Surface) {
+        let wid = (1u64 << 32) | u64::from(window.window_id());
+        let already_tracked = self
+            .layout
+            .windows()
+            .iter()
+            .any(|w| window_stable_id(w) == wid);
+        if !already_tracked {
+            let smithay_window = Window::new_x11_window(window.clone());
+            self.layout.add_window(smithay_window.clone());
+            let usable = self.usable_area();
+            let geo = window.geometry();
+            let titlebar_h = crate::layout::window_titlebar_height(&smithay_window, false);
+            let max_w = (usable.size.w - 32).max(200);
+            let max_h = (usable.size.h - 32).max(160);
+            let w = geo.size.w.clamp(160, max_w);
+            let h = (geo.size.h + titlebar_h).clamp(100 + titlebar_h, max_h);
+            let x = geo
+                .loc
+                .x
+                .clamp(usable.loc.x + 16, (usable.loc.x + usable.size.w - w).max(usable.loc.x));
+            let y = geo
+                .loc
+                .y
+                .clamp(usable.loc.y + 16, (usable.loc.y + usable.size.h - h).max(usable.loc.y));
+            let rect = Rectangle::new((x, y).into(), (w, h).into());
+            self.layout.set_floating_geometry(&smithay_window, rect);
+            configure_window_geometry(&smithay_window, rect);
+        }
+        let _ = window.set_activated(true);
+        if let Some(wl_surface) = window.wl_surface() {
+            let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+            if let Some(keyboard) = self.seat.get_keyboard() {
+                keyboard.set_focus(self, Some(wl_surface), serial);
+            }
+        }
+        self.sync_ipc_snapshot();
+    }
+
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
         if !self
             .override_redirect_windows
@@ -494,6 +533,16 @@ pub fn start_xwayland(
                 unsafe {
                     std::env::set_var("DISPLAY", &display_value);
                 }
+                if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+                    let _ = std::fs::write(
+                        std::path::PathBuf::from(runtime_dir).join("corten-x11-display"),
+                        &display_value,
+                    );
+                }
+                let _ = std::process::Command::new("dbus-update-activation-environment")
+                    .args(["--systemd", "DISPLAY"])
+                    .env("DISPLAY", &display_value)
+                    .spawn();
                 let scale = state.output.current_scale().fractional_scale();
                 sync_x11_scale(scale);
                 match X11Wm::start_wm(handle_for_wm.clone(), x11_socket, client_for_wm.clone()) {

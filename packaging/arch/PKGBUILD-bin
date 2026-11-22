@@ -36,6 +36,7 @@ optdepends=(
 )
 provides=('corten-desktop')
 conflicts=('corten-desktop' 'corten-desktop-git')
+options=('!debug' '!strip')
 source=("${url}/releases/download/v${pkgver}/corten-desktop-v${pkgver}-x86_64-linux.tar.gz")
 sha256sums=('SKIP')
 
