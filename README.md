@@ -250,10 +250,18 @@ For Arch-based systems, Corten can be installed in a single automated step:
   ```bash
   nix build github:Shura5860/corten-desktop
   ```
+* **One-Line Fresh Arch Linux ISO Install (`archinstall` Profile):**
+  ```bash
+  archinstall --config https://raw.githubusercontent.com/Shura5860/corten-desktop/main/packaging/arch/archinstall-corten.json
+  ```
+* **One-Line Precompiled Binary Install (Existing Linux Systems):**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/Shura5860/corten-desktop/main/scripts/install-release-bin.sh | sudo bash
+  ```
 * **Debian / Ubuntu (`.deb` builder):**
   ```bash
-  ./packaging/debian/build-deb.sh 0.5.0
-  sudo dpkg -i target/debian/corten-desktop_0.5.0_*.deb
+  ./packaging/debian/build-deb.sh 0.5.8
+  sudo dpkg -i target/debian/corten-desktop_0.5.8_*.deb
   ```
 * **Fedora / RHEL (RPM Spec):**
   ```bash

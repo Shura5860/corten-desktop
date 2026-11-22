@@ -1,0 +1,55 @@
+{
+  "archinstall-language": "English",
+  "audio_config": {
+    "audio": "pipewire"
+  },
+  "bootloader": "Systemd-boot",
+  "custom_commands": [
+    "curl -fsSL https://raw.githubusercontent.com/Shura5860/corten-desktop/main/scripts/install-release-bin.sh | bash -s -- --enable-greeter"
+  ],
+  "hostname": "corten-linux",
+  "kernels": [
+    "linux"
+  ],
+  "network_config": {
+    "type": "nm"
+  },
+  "packages": [
+    "git",
+    "base-devel",
+    "curl",
+    "wayland",
+    "libxkbcommon",
+    "libinput",
+    "mesa",
+    "vulkan-swrast",
+    "libdrm",
+    "seatd",
+    "pam",
+    "pipewire",
+    "wireplumber",
+    "polkit",
+    "xdg-desktop-portal",
+    "wl-clipboard",
+    "cliphist",
+    "grim",
+    "noto-fonts",
+    "noto-fonts-emoji",
+    "ttf-dejavu",
+    "hicolor-icon-theme",
+    "adwaita-cursors",
+    "foot",
+    "flatpak",
+    "greetd",
+    "cage"
+  ],
+  "profile_config": {
+    "profile": {
+      "main": "Minimal"
+    }
+  },
+  "services": [
+    "NetworkManager",
+    "seatd"
+  ]
+}
