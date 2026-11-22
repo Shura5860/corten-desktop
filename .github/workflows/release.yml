@@ -48,7 +48,7 @@ jobs:
 
       - name: Package Release Tarball & SHA256
         run: |
-          VERSION="${GITHUB_REF_NAME:-v0.5.6}"
+          VERSION="${GITHUB_REF_NAME:-v0.5.7}"
           if [[ "${VERSION}" == "main" || "${VERSION}" == "master" ]]; then
             VERSION="v$(date +'%Y.%m.%d')"
           fi

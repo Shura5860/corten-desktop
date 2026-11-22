@@ -509,8 +509,41 @@ impl Application for CortenWidgetsApp {
 
         cards = cards.push(row![horizontal_space(), drawer_btn].align_y(Alignment::Center));
 
-        let scroll_container = scrollable(cards)
-            .direction(scrollable::Direction::Vertical(scrollable::Scrollbar::default()))
+        let scroll_container = scrollable(container(cards).padding(iced::Padding {
+            top: 0.0,
+            right: 8.0,
+            bottom: 0.0,
+            left: 0.0,
+        }))
+            .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new()
+                    .width(4.0)
+                    .scroller_width(4.0)
+                    .margin(2.0),
+            ))
+            .style(move |_, _| scrollable::Style {
+                container: container::Style::default(),
+                vertical_rail: scrollable::Rail {
+                    background: None,
+                    border: iced::Border::default(),
+                    scroller: scrollable::Scroller {
+                        color: palette.border.to_iced(),
+                        border: iced::Border {
+                            radius: iced::border::Radius::from(Radius::FULL),
+                            ..Default::default()
+                        },
+                    },
+                },
+                horizontal_rail: scrollable::Rail {
+                    background: None,
+                    border: iced::Border::default(),
+                    scroller: scrollable::Scroller {
+                        color: iced::Color::TRANSPARENT,
+                        border: iced::Border::default(),
+                    },
+                },
+                gap: None,
+            })
             .height(Length::Fill);
 
         container(scroll_container)
@@ -594,10 +627,7 @@ impl CortenWidgetsApp {
                 .color(palette.primary.to_iced()),
             text(title)
                 .size(11.5)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             horizontal_space(),
             text(subtitle)
@@ -622,17 +652,11 @@ impl CortenWidgetsApp {
             row![
                 text(time_str)
                     .size(26.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(palette.text_primary.to_iced()),
                 text(sec_str)
                     .size(13.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Medium,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_MEDIUM)
                     .color(palette.primary.to_iced()),
             ]
             .align_y(Alignment::Center),
@@ -642,10 +666,7 @@ impl CortenWidgetsApp {
             container(
                 text(utc_str)
                     .size(9.5)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Medium,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_MEDIUM)
                     .color(palette.primary.to_iced()),
             )
             .padding([2, 6])
@@ -715,13 +736,13 @@ impl CortenWidgetsApp {
 
         let rx_box = container(
             iced::widget::column![
-                text("↓ İNDİRME").size(9.5).color(palette.text_muted.to_iced()),
+                row![
+                    text(Icon::ARROW_DOWN).font(LUCIDE_FONT).size(10.0).color(palette.primary.to_iced()),
+                    text("İNDİRME").size(9.5).color(palette.text_muted.to_iced()),
+                ].spacing(4).align_y(Alignment::Center),
                 text(rx_formatted)
                     .size(13.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(palette.primary.to_iced()),
             ]
             .spacing(2),
@@ -740,13 +761,13 @@ impl CortenWidgetsApp {
 
         let tx_box = container(
             iced::widget::column![
-                text("↑ YÜKLEME").size(9.5).color(palette.text_muted.to_iced()),
+                row![
+                    text(Icon::ARROW_UP).font(LUCIDE_FONT).size(10.0).color(palette.text_muted.to_iced()),
+                    text("YÜKLEME").size(9.5).color(palette.text_muted.to_iced()),
+                ].spacing(4).align_y(Alignment::Center),
                 text(tx_formatted)
                     .size(13.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(palette.text_primary.to_iced()),
             ]
             .spacing(2),
@@ -782,7 +803,7 @@ impl CortenWidgetsApp {
             horizontal_space(),
             text(format!("%{}", self.gpu_metrics.gpu_util))
                 .size(11.5)
-                .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.primary.to_iced()),
         ];
 
@@ -799,7 +820,7 @@ impl CortenWidgetsApp {
             horizontal_space(),
             text(format!("{} °C", self.gpu_metrics.temp_c))
                 .size(11.5)
-                .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(secondary_patina.to_iced()),
         ];
 
@@ -846,10 +867,7 @@ impl CortenWidgetsApp {
             iced::widget::column![
                 text(format!("{:.0}°C", self.weather.temperature))
                     .size(20.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(palette.text_primary.to_iced()),
                 text(&self.weather.condition)
                     .size(10.5)
@@ -882,7 +900,7 @@ impl CortenWidgetsApp {
                     text(&day.day_name).size(9.0).color(palette.text_muted.to_iced()),
                     text(format!("{}° / {}°", day.max_temp, day.min_temp))
                         .size(10.0)
-                        .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                        .font(corten_theme::NOTO_SANS_MEDIUM)
                         .color(palette.text_primary.to_iced()),
                 ]
                 .align_x(Alignment::Center)
@@ -1025,7 +1043,7 @@ impl CortenWidgetsApp {
 
         let time_text = text(self.pomodoro.formatted_time())
             .size(24.0)
-            .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+            .font(corten_theme::NOTO_SANS_BOLD)
             .color(palette.text_primary.to_iced());
 
         let p_bar = progress_bar(0.0..=1.0, self.pomodoro.progress())
@@ -1133,10 +1151,7 @@ impl CortenWidgetsApp {
                 .color(palette.primary.to_iced()),
             text("HIZLI NOTLAR")
                 .size(11.5)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             horizontal_space(),
             edit_btn,

@@ -18,7 +18,7 @@
         {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "corten-desktop";
-            version = "0.5.6";
+            version = "0.5.7";
             src = ./.;
 
             cargoLock = {

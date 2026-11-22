@@ -1520,13 +1520,18 @@ pub fn run_drm(
                                 // Always allow VT Switching (Ctrl + Alt + F1..F7) and Emergency Exit even while locked!
                                 if modifiers.ctrl && modifiers.alt {
                                     let vt = match sym {
-                                        keysyms::KEY_F1 => Some(1),
-                                        keysyms::KEY_F2 => Some(2),
-                                        keysyms::KEY_F3 => Some(3),
-                                        keysyms::KEY_F4 => Some(4),
-                                        keysyms::KEY_F5 => Some(5),
-                                        keysyms::KEY_F6 => Some(6),
-                                        keysyms::KEY_F7 => Some(7),
+                                        keysyms::KEY_F1 | keysyms::KEY_XF86Switch_VT_1 => Some(1),
+                                        keysyms::KEY_F2 | keysyms::KEY_XF86Switch_VT_2 => Some(2),
+                                        keysyms::KEY_F3 | keysyms::KEY_XF86Switch_VT_3 => Some(3),
+                                        keysyms::KEY_F4 | keysyms::KEY_XF86Switch_VT_4 => Some(4),
+                                        keysyms::KEY_F5 | keysyms::KEY_XF86Switch_VT_5 => Some(5),
+                                        keysyms::KEY_F6 | keysyms::KEY_XF86Switch_VT_6 => Some(6),
+                                        keysyms::KEY_F7 | keysyms::KEY_XF86Switch_VT_7 => Some(7),
+                                        keysyms::KEY_F8 | keysyms::KEY_XF86Switch_VT_8 => Some(8),
+                                        keysyms::KEY_F9 | keysyms::KEY_XF86Switch_VT_9 => Some(9),
+                                        keysyms::KEY_F10 | keysyms::KEY_XF86Switch_VT_10 => Some(10),
+                                        keysyms::KEY_F11 | keysyms::KEY_XF86Switch_VT_11 => Some(11),
+                                        keysyms::KEY_F12 | keysyms::KEY_XF86Switch_VT_12 => Some(12),
                                         keysyms::KEY_BackSpace => {
                                             info!("Compositor Emergency Exit: Ctrl+Alt+Backspace triggered!");
                                             shutdown_requested_for_keyboard.set(true);

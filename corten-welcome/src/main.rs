@@ -318,10 +318,7 @@ impl Application for CortenWelcomeApp {
             logo_image,
             text("CORTEN")
                 .size(15.0)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.primary.to_iced()),
             text("• Hoş Geldiniz Sunumu")
                 .size(13.0)
@@ -537,10 +534,7 @@ impl Application for CortenWelcomeApp {
                 row![
                     text("Sonraki Slayt")
                         .size(14)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Semibold,
-                            ..Default::default()
-                        })
+                        .font(corten_theme::NOTO_SANS_SEMIBOLD)
                         .color(palette.on_primary().to_iced()),
                     text("→").size(15).color(palette.on_primary().to_iced()),
                 ]
@@ -673,10 +667,7 @@ impl CortenWelcomeApp {
                             .color(palette.primary.to_iced()),
                         text(title)
                             .size(Typography::TITLE_SM)
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Semibold,
-                                ..Default::default()
-                            })
+                            .font(corten_theme::NOTO_SANS_SEMIBOLD)
                             .color(palette.text_primary.to_iced()),
                     ]
                     .spacing(8)
@@ -707,10 +698,7 @@ impl CortenWelcomeApp {
                     .color(palette.text_muted.to_iced()),
                 text(val.to_string())
                     .size(11)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Semibold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_SEMIBOLD)
                     .color(palette.primary.to_iced()),
             ]
             .spacing(4)
@@ -750,10 +738,7 @@ impl CortenWelcomeApp {
             vertical_space().height(Spacing::SM),
             text("Corten Masaüstüne Hoş Geldiniz")
                 .size(28)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Saf Rust ve Wayland mimarisiyle sıfırdan inşa edilmiş, minimalist endüstriyel zarafet ve ödün vermeyen performans.")
                 .size(Typography::BODY)
@@ -812,10 +797,7 @@ impl CortenWelcomeApp {
             let status_badge = if is_selected {
                 text("✓ Aktif")
                     .size(11)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(prim_c.to_iced())
             } else {
                 text("Seç")
@@ -843,10 +825,7 @@ impl CortenWelcomeApp {
                         vertical_space().height(Spacing::XS),
                         text(title_text)
                             .size(13)
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Bold,
-                                ..Default::default()
-                            })
+                            .font(corten_theme::NOTO_SANS_BOLD)
                             .color(palette.text_primary.to_iced()),
                         text(subtitle_text)
                             .size(11)
@@ -1009,10 +988,7 @@ impl CortenWelcomeApp {
         column![
             text("Kişiselleştirme ve Tasarım Seçimi")
                 .size(26)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Masaüstünüzün görsel kimliğini belirleyin; pencere kenarları, dock vurguları ve menüler anında güncellenir:")
                 .size(Typography::BODY)
@@ -1020,19 +996,13 @@ impl CortenWelcomeApp {
             vertical_space().height(Spacing::SM),
             text("1. Patina Metalik Vurgu Rengi")
                 .size(13)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Semibold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_SEMIBOLD)
                 .color(palette.primary.to_iced()),
             patina_cards_row,
             vertical_space().height(Spacing::SM),
             text("2. Arayüz Modu & Ekran Konforu")
                 .size(13)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Semibold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_SEMIBOLD)
                 .color(palette.primary.to_iced()),
             mode_row,
             vertical_space().height(Spacing::SM),
@@ -1068,10 +1038,7 @@ impl CortenWelcomeApp {
                     column![
                         text(title)
                             .size(Typography::TITLE_SM)
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Semibold,
-                                ..Default::default()
-                            })
+                            .font(corten_theme::NOTO_SANS_SEMIBOLD)
                             .color(palette.text_primary.to_iced()),
                         text(desc)
                             .size(12)
@@ -1098,10 +1065,7 @@ impl CortenWelcomeApp {
         column![
             text("Merkezi Kapsül Dock & Ayrı Başlatıcı")
                 .size(26)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Masaüstünüzü yönetmenin en zarif ve doğrudan yolu:")
                 .size(Typography::BODY)
@@ -1137,10 +1101,7 @@ impl CortenWelcomeApp {
                     container(
                         text(key)
                             .size(12)
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Bold,
-                                ..Default::default()
-                            })
+                            .font(corten_theme::NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced())
                     )
                     .padding([4, 10])
@@ -1176,10 +1137,7 @@ impl CortenWelcomeApp {
         column![
             text("Işık Hızında Klavye İş Akışı")
                 .size(26)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Elinizi klavyeden kaldırmadan tüm sistemi yönetmenizi sağlayan temel kısayollar:")
                 .size(Typography::BODY)
@@ -1244,10 +1202,7 @@ impl CortenWelcomeApp {
                     column![
                         text(title)
                             .size(Typography::TITLE_SM)
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Semibold,
-                                ..Default::default()
-                            })
+                            .font(corten_theme::NOTO_SANS_SEMIBOLD)
                             .color(palette.text_primary.to_iced()),
                         text(desc).size(12).color(palette.text_muted.to_iced()),
                     ]
@@ -1272,10 +1227,7 @@ impl CortenWelcomeApp {
         column![
             text("AURA-CORE Yerel Yapay Zekâ & Güvenlik")
                 .size(26)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Harici bulut veya Python bağımlılığı olmadan tamamen cihazınızda çalışan Saf Rust yapay zekâ motoru:")
                 .size(Typography::BODY)
@@ -1342,10 +1294,7 @@ impl CortenWelcomeApp {
             vertical_space().height(Spacing::SM),
             text("Artık Hazırsınız!")
                 .size(30)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
             text("Corten Masaüstü ortamınız tüm bileşenleriyle kullanıma hazır.")
                 .size(15)
@@ -1358,10 +1307,7 @@ impl CortenWelcomeApp {
                 row![
                     text("Masaüstünü Başlat")
                         .size(16)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..Default::default()
-                        })
+                        .font(corten_theme::NOTO_SANS_BOLD)
                         .color(palette.on_primary().to_iced()),
                     text("→").size(18).color(palette.on_primary().to_iced()),
                 ]

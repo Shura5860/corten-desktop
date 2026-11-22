@@ -181,6 +181,7 @@ where
     let mut instance = Box::pin(run_instance::<A, E, C>(
         application,
         compositor_settings,
+        settings.fonts,
         runtime,
         debug,
         event_receiver,
@@ -312,6 +313,7 @@ where
 async fn run_instance<A, E, C>(
     mut application: A,
     compositor_settings: iced_graphics::Settings,
+    fonts: Vec<std::borrow::Cow<'static, [u8]>>,
     mut runtime: SingleRuntime<E, A::Message>,
     mut debug: Debug,
     mut event_receiver: mpsc::UnboundedReceiver<IcedLayerEvent<Action<A::Message>, ()>>,
@@ -331,6 +333,9 @@ async fn run_instance<A, E, C>(
     let mut compositor = C::new(compositor_settings, window.clone())
         .await
         .expect("Cannot create compositor");
+    for font in fonts {
+        compositor.load_font(font);
+    }
     let mut renderer = compositor.create_renderer();
 
     let physical_size = state.physical_size();

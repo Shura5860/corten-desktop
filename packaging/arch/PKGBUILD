@@ -1,6 +1,6 @@
 # Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
 pkgname=corten-desktop-git
-pkgver=0.5.6.r0.g0000000
+pkgver=0.5.7.r0.g0000000
 pkgrel=1
 pkgdesc="Pure-Rust Wayland desktop environment powered by Smithay, Iced & AURA-CORE"
 arch=('x86_64' 'aarch64')
@@ -19,7 +19,13 @@ depends=(
     'polkit'
     'xdg-desktop-portal'
     'wl-clipboard'
+    'cliphist'
     'grim'
+    'noto-fonts'
+    'noto-fonts-emoji'
+    'ttf-dejavu'
+    'hicolor-icon-theme'
+    'adwaita-cursors'
 )
 makedepends=(
     'cargo'
@@ -41,7 +47,7 @@ sha256sums=('SKIP')
 
 pkgver() {
     cd "${srcdir}/corten-desktop"
-    printf "0.5.6.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    printf "0.5.7.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
@@ -116,6 +122,18 @@ package() {
     if [ -d "assets/wallpapers" ]; then
         install -dm755 "${pkgdir}/usr/share/backgrounds/corten"
         cp -r assets/wallpapers/* "${pkgdir}/usr/share/backgrounds/corten/"
+    fi
+    if [ -d "assets/icons/hicolor" ]; then
+        install -dm755 "${pkgdir}/usr/share/icons/hicolor"
+        cp -r assets/icons/hicolor/* "${pkgdir}/usr/share/icons/hicolor/"
+    fi
+    if [ -d "assets/applications" ]; then
+        install -dm755 "${pkgdir}/usr/share/applications"
+        for desk in assets/applications/*.desktop; do
+            if [ -f "${desk}" ]; then
+                install -Dm644 "${desk}" "${pkgdir}/usr/share/applications/$(basename "${desk}")"
+            fi
+        done
     fi
 }
 

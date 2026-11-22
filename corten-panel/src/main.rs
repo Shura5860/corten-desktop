@@ -3002,10 +3002,7 @@ impl Application for CortenPanelApp {
                 }),
                 text(format!("{}", ws_num))
                     .size(11.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(if is_current {
                         palette.text_primary.to_iced()
                     } else {
@@ -3635,10 +3632,7 @@ impl Application for CortenPanelApp {
             iced::widget::column![
                 text(&self.current_time)
                     .size(15.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(palette.text_primary.to_iced()),
                 text(&self.current_date)
                     .size(10.5)
@@ -4124,10 +4118,7 @@ impl Application for CortenPanelApp {
                         column![
                             text(title)
                                 .size(12.0)
-                                .font(iced::Font {
-                                    weight: iced::font::Weight::Semibold,
-                                    ..Default::default()
-                                })
+                                .font(corten_theme::NOTO_SANS_SEMIBOLD)
                                 .color(palette.text_primary.to_iced()),
                             text(subtitle.to_string())
                                 .size(11.0)
@@ -5588,7 +5579,7 @@ impl Application for CortenPanelApp {
             let status_badge = container(
                 text(if is_running { "Çalışıyor" } else { "Hazır" })
                     .size(9.5)
-                    .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                    .font(corten_theme::NOTO_SANS_MEDIUM)
                     .color(if is_running {
                         palette.primary.to_iced()
                     } else {
@@ -5621,10 +5612,7 @@ impl Application for CortenPanelApp {
                     .color(palette.primary.to_iced()),
                 text(disp_title)
                     .size(13.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Semibold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_SEMIBOLD)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
                 status_badge,
@@ -6151,7 +6139,7 @@ impl Application for CortenPanelApp {
                 app_icon_view,
                 text(format!("Pencere Önizlemesi ({})", target_app_id))
                     .size(13.0)
-                    .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
                 button(text("✕").size(12.0).color(palette.text_muted.to_iced()))
@@ -6336,7 +6324,7 @@ impl Application for CortenPanelApp {
             let status_row = row![
                 text(if *is_online { "Bağlı" } else { "Çevrimdışı" })
                     .size(12.0)
-                    .font(iced::Font { weight: iced::font::Weight::Medium, ..Default::default() })
+                    .font(corten_theme::NOTO_SANS_MEDIUM)
                     .color(if *is_online { palette.primary.to_iced() } else { palette.danger.to_iced() }),
                 text(format!("{} ({})", net_name, ip_addr)).size(12.0).color(palette.text_primary.to_iced()),
             ]
@@ -6425,7 +6413,7 @@ impl Application for CortenPanelApp {
             let header = row![
                 text("Masaüstü Hızlı Tuvali (Desktop Canvas)")
                     .size(13.0)
-                    .font(iced::Font { weight: iced::font::Weight::Bold, ..Default::default() })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
                 button(text("✕").size(12.0).color(palette.text_muted.to_iced()))

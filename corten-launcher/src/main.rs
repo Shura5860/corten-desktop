@@ -229,10 +229,8 @@ fn render_app_icon<'a, M: 'a>(
                 .size(size * 0.55)
                 .color(primary),
         )
-        .width(Length::Fixed(size))
-        .height(Length::Fixed(size))
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
+        .center_x(Length::Fixed(size))
+        .center_y(Length::Fixed(size))
         .style(move |_| container::Style {
             background: Some(iced::Background::Color(iced::Color::from_rgba(
                 primary.r,
@@ -491,10 +489,7 @@ fn render_command_list<'a>(commands: &'a [QuickCommand], selected_index: usize, 
                 column![
                     text(format!("> {}", cmd.name))
                         .size(13.0)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Semibold,
-                            ..Default::default()
-                        })
+                        .font(corten_theme::NOTO_SANS_SEMIBOLD)
                         .color(palette.text_primary.to_iced()),
                     text(cmd.description)
                         .size(11.0)
@@ -1892,10 +1887,7 @@ impl Application for CortenLauncherApp {
                         iced::widget::column![
                             text(format!("= {}", calc_res))
                                 .size(15.0)
-                                .font(iced::Font {
-                                    weight: iced::font::Weight::Bold,
-                                    ..Default::default()
-                                })
+                                .font(corten_theme::NOTO_SANS_BOLD)
                                 .color(palette.primary.to_iced()),
                             text(format!("Hesaplama: {} (Kopyalamak için tıklayın)", expr))
                                 .size(11.0)
@@ -1954,10 +1946,8 @@ impl Application for CortenLauncherApp {
                         });
 
                     let app_icon_box = container(icon_view)
-                        .width(Length::Fixed(32.0))
-                        .height(Length::Fixed(32.0))
-                        .center_x(Length::Fill)
-                        .center_y(Length::Fill);
+                        .center_x(Length::Fixed(32.0))
+                        .center_y(Length::Fixed(32.0));
 
                     let item_btn = button(
                         row![
@@ -1966,10 +1956,7 @@ impl Application for CortenLauncherApp {
                             iced::widget::column![
                                 text(&entry.name)
                                     .size(13.0)
-                                    .font(iced::Font {
-                                        weight: iced::font::Weight::Semibold,
-                                        ..Default::default()
-                                    })
+                                    .font(corten_theme::NOTO_SANS_SEMIBOLD)
                                     .color(if is_sel {
                                         palette.primary.to_iced()
                                     } else {
@@ -2175,10 +2162,7 @@ impl Application for CortenLauncherApp {
                             }),
                         text(&sel_app.name)
                             .size(14.0)
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Bold,
-                                ..Default::default()
-                            })
+                            .font(corten_theme::NOTO_SANS_BOLD)
                             .color(palette.text_primary.to_iced()),
                         text(desc_txt)
                             .size(11.0)
@@ -2204,14 +2188,18 @@ impl Application for CortenLauncherApp {
                         }),
                         Space::new(Length::Fill, Length::Fill),
                         row![
-                            text("↑/↓ Seç • Enter Aç")
+                            text(Icon::ARROW_UP).font(LUCIDE_FONT).size(10.0).color(palette.text_muted.to_iced()),
+                            text(Icon::ARROW_DOWN).font(LUCIDE_FONT).size(10.0).color(palette.text_muted.to_iced()),
+                            text("Seç • Enter Aç")
                                 .size(10.0)
                                 .color(palette.text_muted.to_iced()),
-                        ],
+                        ]
+                        .spacing(3)
+                        .align_y(Alignment::Center),
                         button(
                             row![
                                 text(Icon::CHEVRON_RIGHT).font(LUCIDE_FONT).size(12.0),
-                                text("Uygulamayı Başlat ↵").size(11.5),
+                                text("Uygulamayı Başlat").size(11.5),
                             ]
                             .spacing(6)
                             .align_y(Alignment::Center),
@@ -2254,6 +2242,35 @@ impl Application for CortenLauncherApp {
 
             let split_apps_area = row![
                 scrollable(apps_list)
+                    .direction(scrollable::Direction::Vertical(
+                        scrollable::Scrollbar::new()
+                            .width(4.0)
+                            .scroller_width(4.0)
+                            .margin(2.0),
+                    ))
+                    .style(move |_, _| scrollable::Style {
+                        container: container::Style::default(),
+                        vertical_rail: scrollable::Rail {
+                            background: None,
+                            border: iced::Border::default(),
+                            scroller: scrollable::Scroller {
+                                color: palette.border.to_iced(),
+                                border: iced::Border {
+                                    radius: iced::border::Radius::from(Radius::FULL),
+                                    ..Default::default()
+                                },
+                            },
+                        },
+                        horizontal_rail: scrollable::Rail {
+                            background: None,
+                            border: iced::Border::default(),
+                            scroller: scrollable::Scroller {
+                                color: iced::Color::TRANSPARENT,
+                                border: iced::Border::default(),
+                            },
+                        },
+                        gap: None,
+                    })
                     .height(Length::Fixed(320.0))
                     .width(Length::FillPortion(3)),
                 start_preview_pane,
@@ -2268,10 +2285,7 @@ impl Application for CortenLauncherApp {
                     categories_row,
                     text(section_title)
                         .size(12.0)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Semibold,
-                            ..Default::default()
-                        })
+                        .font(corten_theme::NOTO_SANS_SEMIBOLD)
                         .color(palette.primary.to_iced()),
                     split_apps_area,
                     footer_row,
@@ -2541,7 +2555,15 @@ impl Application for CortenLauncherApp {
                 text_input(placeholder, &self.search_query)
                     .size(Typography::TITLE_SM)
                     .on_input(Message::SearchInputChanged)
-                    .width(Length::Fill),
+                    .width(Length::Fill)
+                    .style(move |_, _| text_input::Style {
+                        background: iced::Background::Color(iced::Color::TRANSPARENT),
+                        border: iced::Border::default(),
+                        icon: palette.text_muted.to_iced(),
+                        placeholder: palette.text_muted.to_iced(),
+                        value: palette.text_primary.to_iced(),
+                        selection: palette.primary.to_iced(),
+                    }),
             ]
             .spacing(Spacing::SM)
             .align_y(Alignment::Center),
@@ -2699,14 +2721,18 @@ impl Application for CortenLauncherApp {
                 // 2. Applications
                 if self.search_query.is_empty() && !self.filtered_entries.is_empty() {
                     let mut fav_row = row![
-                        text("★ Sık Kullanılanlar:")
+                        text(Icon::SPARKLES)
+                            .font(LUCIDE_FONT)
+                            .size(11.0)
+                            .color(palette.primary.to_iced()),
+                        text("Sık Kullanılanlar:")
                             .size(11.0)
                             .color(palette.primary.to_iced())
                     ]
                     .spacing(6)
                     .align_y(Alignment::Center);
 
-                    for fav in self.filtered_entries.iter().take(5) {
+                    for fav in self.filtered_entries.iter().take(3) {
                         let fav_clone = fav.clone();
                         let fav_icon: Element<'_, Self::Message> = if let Some(ref ip) = fav.icon_path {
                             iced::widget::image(image::Handle::from_path(ip))
@@ -3557,15 +3583,13 @@ impl Application for CortenLauncherApp {
             .align_y(Alignment::Center)
         } else {
             row![
-                key_badge("Tab", "Mod Değiştir"),
+                key_badge("Tab", "Mod"),
                 key_badge("?", "AI"),
                 key_badge(":clip", "Pano"),
-                key_badge(":p", "Projeler"),
                 key_badge(":e", "Emoji"),
-                key_badge(":n", "Notlar"),
                 key_badge("Esc", "Kapat"),
             ]
-            .spacing(Spacing::SM)
+            .spacing(Spacing::XS)
             .align_y(Alignment::Center)
         };
 

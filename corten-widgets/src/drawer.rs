@@ -162,10 +162,7 @@ impl CortenWidgetDrawerApp {
             row![
                 text(if is_enabled { "✓ Aktif" } else { "+ Ekle" })
                     .size(11.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Medium,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_MEDIUM)
                     .color(if is_enabled {
                         palette.primary.to_iced()
                     } else {
@@ -223,10 +220,7 @@ impl CortenWidgetDrawerApp {
             }),
             text(entry.title)
                 .size(12.5)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
         ]
         .spacing(8)
@@ -444,10 +438,7 @@ impl Application for CortenWidgetDrawerApp {
             iced::widget::column![
                 text("BİLEŞEN GALERİSİ")
                     .size(14.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    })
+                    .font(corten_theme::NOTO_SANS_BOLD)
                     .color(palette.text_primary.to_iced()),
                 text("Masaüstünüze eklemek veya kaldırmak istediğiniz modülleri seçin")
                     .size(11.0)
@@ -461,10 +452,7 @@ impl Application for CortenWidgetDrawerApp {
         let count_badge = container(
             text(format!("{} / {} Aktif", active_count, entries.len()))
                 .size(11.0)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Medium,
-                    ..Default::default()
-                })
+                .font(corten_theme::NOTO_SANS_MEDIUM)
                 .color(palette.primary.to_iced()),
         )
         .padding([4, 10])
