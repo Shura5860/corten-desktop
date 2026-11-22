@@ -161,6 +161,7 @@ pub enum Message {
     SearchChanged(String),
     ToggleThemeMode(ThemeModeChoice),
     SetPatina(String),
+    SetLanguage(String),
     SetDensity(String),
     UpdateWallpaperPath(String),
     SelectPresetWallpaper(String),
@@ -511,6 +512,13 @@ impl CortenSettingsApp {
                 );
                 self.status_message = Some(
                     "Patina rengi güncellendi. Uygulanması için 'Değişiklikleri Kaydet'e basın."
+                        .into(),
+                );
+            }
+            Message::SetLanguage(lang) => {
+                self.appearance.language = lang;
+                self.status_message = Some(
+                    "Sistem dili güncellendi. Uygulanması için 'Değişiklikleri Kaydet'e basın."
                         .into(),
                 );
             }
@@ -2265,12 +2273,15 @@ impl CortenSettingsApp {
                 swatch_dot(palette.warning.to_iced()),
                 button(text("Palet Çıkar").size(Typography::CAPTION))
                     .padding([5, 10])
+                    .style(move |_, status| corten_theme::iced_styles::secondary_button_style(palette, status))
                     .on_press(Message::ExtractWallpaperPalette),
                 button(text("Dışa Aktar").size(Typography::CAPTION))
                     .padding([5, 10])
+                    .style(move |_, status| corten_theme::iced_styles::secondary_button_style(palette, status))
                     .on_press(Message::ExportThemePack),
                 button(text("İçe Aktar").size(Typography::CAPTION))
                     .padding([5, 10])
+                    .style(move |_, status| corten_theme::iced_styles::secondary_button_style(palette, status))
                     .on_press(Message::ImportThemePack),
             ]
             .spacing(Spacing::XS)
@@ -2290,10 +2301,41 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let current_lang = self.appearance.language.to_lowercase();
+        let lang_row1 = row![
+            Self::segment_button("Türkçe (TR)", current_lang.starts_with("tr"), Message::SetLanguage("tr".into()), palette),
+            Self::segment_button("English (EN)", current_lang.starts_with("en"), Message::SetLanguage("en".into()), palette),
+            Self::segment_button("Deutsch (DE)", current_lang.starts_with("de"), Message::SetLanguage("de".into()), palette),
+            Self::segment_button("Français (FR)", current_lang.starts_with("fr"), Message::SetLanguage("fr".into()), palette),
+        ]
+        .spacing(Spacing::XS);
+        let lang_row2 = row![
+            Self::segment_button("Español (ES)", current_lang.starts_with("es"), Message::SetLanguage("es".into()), palette),
+            Self::segment_button("Русский (RU)", current_lang.starts_with("ru"), Message::SetLanguage("ru".into()), palette),
+            Self::segment_button("日本語 (JA)", current_lang.starts_with("ja"), Message::SetLanguage("ja".into()), palette),
+        ]
+        .spacing(Spacing::XS);
+        let lang_card = Self::bento_card(
+            Icon::GLOBE,
+            "Masaüstü Dili",
+            Some("7 Dil Desteği"),
+            column![
+                text("Panel, bildirimler, bileşenler ve sistem arayüzü için varsayılan dil")
+                    .size(Typography::CAPTION)
+                    .color(palette.text_muted.to_iced()),
+                lang_row1,
+                lang_row2,
+            ]
+            .spacing(Spacing::SM),
+            palette,
+        );
+
         column![
             heading,
             Self::section_header("SİSTEM TEMASI & RENK PALETİ", palette),
             theme_group,
+            Self::section_header("DİL VE BÖLGE", palette),
+            lang_card,
             Self::section_header("MASAÜSTÜ DUVAR KÂĞIDI", palette),
             wp_group,
         ]

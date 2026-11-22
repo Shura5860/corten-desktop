@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-0.5.7}"
+VERSION="${1:-0.5.8}"
 ARCH="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
 PKG_DIR="target/debian/corten-desktop_${VERSION}_${ARCH}"
 

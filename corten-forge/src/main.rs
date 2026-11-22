@@ -7,8 +7,8 @@ use tokio::sync::Mutex;
 use corten_config::{AppearanceConfig, ConfigManager};
 use corten_theme::iced_styles::card_style;
 use corten_theme::{
-    Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT, LUCIDE_FONT_BYTES,
-    NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT,
+    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
 };
 use iced::widget::{
     button, column, container, horizontal_space, row, scrollable, text, text_input, vertical_space,
@@ -58,6 +58,7 @@ pub enum SourceFilter {
 #[derive(Debug, Clone)]
 pub enum Message {
     CatalogLoaded(Vec<PackageItem>),
+    CategoryCatalogLoaded(Vec<PackageItem>),
     InstalledLoaded(Vec<PackageItem>),
     UpdatesLoaded(Vec<PackageItem>),
     PermissionsLoaded(String, Option<package::SandboxPermissions>),
@@ -122,6 +123,10 @@ impl CortenForgeApp {
         let app = Self::default();
         let init_task = Task::batch(vec![
             Task::perform(PackageManager::fetch_curated_catalog(), Message::CatalogLoaded),
+            Task::perform(
+                PackageManager::fetch_flathub_collection(ProductCategory::Featured),
+                Message::CategoryCatalogLoaded,
+            ),
             Task::perform(PackageManager::fetch_installed_flatpaks(), Message::InstalledLoaded),
             Task::perform(PackageManager::check_flatpak_updates(), Message::UpdatesLoaded),
         ]);
@@ -131,7 +136,20 @@ impl CortenForgeApp {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::CatalogLoaded(items) => {
-                self.catalog = items;
+                for item in items {
+                    if !self.catalog.iter().any(|existing| existing.id == item.id) {
+                        self.catalog.push(item);
+                    }
+                }
+                self.is_busy = false;
+                self.busy_message = None;
+            }
+            Message::CategoryCatalogLoaded(items) => {
+                for item in items {
+                    if !self.catalog.iter().any(|existing| existing.id == item.id) {
+                        self.catalog.push(item);
+                    }
+                }
                 self.is_busy = false;
                 self.busy_message = None;
             }
@@ -154,7 +172,13 @@ impl CortenForgeApp {
                 }
             }
             Message::NavigateTo(tab) => {
-                self.current_tab = tab;
+                self.current_tab = tab.clone();
+                if let NavigationTab::Categories(cat) = tab {
+                    return Task::perform(
+                        PackageManager::fetch_flathub_collection(cat),
+                        Message::CategoryCatalogLoaded,
+                    );
+                }
             }
             Message::SetSourceFilter(filter) => {
                 self.source_filter = filter;
@@ -326,8 +350,9 @@ impl CortenForgeApp {
         // App Branding
         let brand_block = column![
             row![
-                text("⬡")
-                    .size(Typography::TITLE)
+                text(Icon::LAYERS)
+                    .font(LUCIDE_FONT)
+                    .size(Typography::TITLE_SM)
                     .color(palette.primary.to_iced()),
                 text("CORTEN FORGE")
                     .size(Typography::TITLE_SM)
@@ -343,7 +368,7 @@ impl CortenForgeApp {
 
         // Navigation Items
         let nav_discover = Self::sidebar_nav_button(
-            "🌟",
+            Icon::SPARKLES,
             "Keşfet (Vitrin)",
             None,
             matches!(self.current_tab, NavigationTab::Discover),
@@ -352,7 +377,7 @@ impl CortenForgeApp {
         );
 
         let nav_installed = Self::sidebar_nav_button(
-            "📥",
+            Icon::DOWNLOAD,
             "Yüklü Uygulamalar",
             Some(self.installed.len()),
             matches!(self.current_tab, NavigationTab::Installed),
@@ -361,7 +386,7 @@ impl CortenForgeApp {
         );
 
         let nav_updates = Self::sidebar_nav_button(
-            "🔄",
+            Icon::REFRESH,
             "Güncellemeler",
             if self.updates.is_empty() { None } else { Some(self.updates.len()) },
             matches!(self.current_tab, NavigationTab::Updates),
@@ -506,9 +531,17 @@ impl CortenForgeApp {
         });
 
         let search_btn = button(
-            text("Ara ↵")
-                .size(Typography::BODY_SM)
-                .color(palette.text_primary.to_iced()),
+            row![
+                text(Icon::SEARCH)
+                    .font(LUCIDE_FONT)
+                    .size(13.0)
+                    .color(palette.on_primary().to_iced()),
+                text("Ara")
+                    .size(Typography::BODY_SM)
+                    .color(palette.on_primary().to_iced()),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
         )
         .padding([8, 14])
         .style(move |_, _| button::Style {
@@ -527,9 +560,17 @@ impl CortenForgeApp {
         let filter_arch = Self::source_filter_chip("Arch Depoları", SourceFilter::ArchOnly, self.source_filter, palette);
 
         let refresh_btn = button(
-            text("🔄 Yenile")
-                .size(Typography::CAPTION)
-                .color(palette.text_muted.to_iced()),
+            row![
+                text(Icon::REFRESH)
+                    .font(LUCIDE_FONT)
+                    .size(12.0)
+                    .color(palette.text_muted.to_iced()),
+                text("Yenile")
+                    .size(Typography::CAPTION)
+                    .color(palette.text_muted.to_iced()),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
         )
         .padding([6, 10])
         .style(move |_, status| {
@@ -1025,7 +1066,7 @@ impl CortenForgeApp {
             .on_press(Message::UninstallRequested(pkg_clone))
         } else {
             button(
-                text("Kurulum Yap ↵")
+                text("Kurulum Yap")
                     .size(Typography::BODY)
                     .color(palette.text_primary.to_iced()),
             )
@@ -1294,7 +1335,7 @@ impl CortenForgeApp {
             .on_press(Message::OpenPackageDetail(item_clone))
         } else {
             button(
-                text("Kur ↵")
+                text("Kur")
                     .size(11.0)
                     .color(palette.text_primary.to_iced()),
             )
@@ -1367,7 +1408,7 @@ impl CortenForgeApp {
     // ─────────────────────────────────────────────────────────────────────────────
 
     fn sidebar_nav_button<'a>(
-        icon: &'static str,
+        icon: char,
         label: &'static str,
         badge_count: Option<usize>,
         is_active: bool,
@@ -1397,7 +1438,11 @@ impl CortenForgeApp {
         button(
             container(
                 row![
-                    text(icon).size(14.0),
+                    text(icon).font(LUCIDE_FONT).size(14.0).color(if is_active {
+                        palette.primary.to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    }),
                     text(label)
                         .size(Typography::BODY_SM)
                         .color(if is_active {
@@ -1451,7 +1496,11 @@ impl CortenForgeApp {
         button(
             container(
                 row![
-                    text(cat.icon()).size(12.0),
+                    text(cat.icon()).font(LUCIDE_FONT).size(12.0).color(if is_active {
+                        palette.primary.to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    }),
                     text(cat.label())
                         .size(11.5)
                         .color(if is_active {

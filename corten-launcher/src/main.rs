@@ -1489,9 +1489,11 @@ impl Application for CortenLauncherApp {
                 }
             }
             Message::LockScreen => {
-                let _ = std::process::Command::new("loginctl")
-                    .arg("lock-session")
-                    .spawn();
+                if std::process::Command::new("corten-lock").spawn().is_err() {
+                    let _ = std::process::Command::new("loginctl")
+                        .arg("lock-session")
+                        .spawn();
+                }
                 if !self.stay_open {
                     self.should_exit = true;
                 }

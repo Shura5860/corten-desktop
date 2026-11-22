@@ -69,17 +69,47 @@ impl ProductCategory {
         }
     }
 
-    pub fn icon(&self) -> &'static str {
+    pub fn icon(&self) -> char {
+        use corten_theme::Icon;
         match self {
-            ProductCategory::All => "📦",
-            ProductCategory::Featured => "🌟",
-            ProductCategory::Development => "💻",
-            ProductCategory::Graphics => "🎨",
-            ProductCategory::AudioVideo => "🎬",
-            ProductCategory::Productivity => "📄",
-            ProductCategory::System => "⚙️",
-            ProductCategory::Gaming => "🎮",
-            ProductCategory::Internet => "🌐",
+            ProductCategory::All => Icon::LAYERS,
+            ProductCategory::Featured => Icon::SPARKLES,
+            ProductCategory::Development => Icon::CODE,
+            ProductCategory::Graphics => Icon::PALETTE,
+            ProductCategory::AudioVideo => Icon::MUSIC,
+            ProductCategory::Productivity => Icon::FILE_TEXT,
+            ProductCategory::System => Icon::SETTINGS,
+            ProductCategory::Gaming => Icon::GAMEPAD,
+            ProductCategory::Internet => Icon::GLOBE,
+        }
+    }
+
+    pub fn flathub_collection_url(&self) -> &'static str {
+        match self {
+            ProductCategory::All | ProductCategory::Featured => {
+                "https://flathub.org/api/v2/collection/popular?page=1&per_page=40"
+            }
+            ProductCategory::Development => {
+                "https://flathub.org/api/v2/collection/category/Development?page=1&per_page=40"
+            }
+            ProductCategory::Graphics => {
+                "https://flathub.org/api/v2/collection/category/Graphics?page=1&per_page=40"
+            }
+            ProductCategory::AudioVideo => {
+                "https://flathub.org/api/v2/collection/category/AudioVideo?page=1&per_page=40"
+            }
+            ProductCategory::Productivity => {
+                "https://flathub.org/api/v2/collection/category/Office?page=1&per_page=40"
+            }
+            ProductCategory::System => {
+                "https://flathub.org/api/v2/collection/category/System?page=1&per_page=40"
+            }
+            ProductCategory::Gaming => {
+                "https://flathub.org/api/v2/collection/category/Game?page=1&per_page=40"
+            }
+            ProductCategory::Internet => {
+                "https://flathub.org/api/v2/collection/category/Network?page=1&per_page=40"
+            }
         }
     }
 }
@@ -98,17 +128,17 @@ pub struct SandboxPermissions {
 }
 
 pub const ICON_CODE: &str = "\u{e093}";
-pub const ICON_APP: &str = "\u{e04b}";
-pub const ICON_MUSIC: &str = "\u{e122}";
-pub const ICON_USER: &str = "\u{e0c6}";
-pub const ICON_CAMERA: &str = "\u{e067}";
+pub const ICON_APP: &str = "\u{e426}";
+pub const ICON_MUSIC: &str = "\u{e34c}";
+pub const ICON_USER: &str = "\u{e19f}";
+pub const ICON_CAMERA: &str = "\u{e064}";
 pub const ICON_TERMINAL: &str = "\u{e181}";
-pub const ICON_ACTIVITY: &str = "\u{e03b}";
-pub const ICON_CPU: &str = "\u{e09c}";
-pub const ICON_DOWNLOAD: &str = "\u{e0b9}";
-pub const ICON_ZAP: &str = "\u{e1c5}";
+pub const ICON_ACTIVITY: &str = "\u{e038}";
+pub const ICON_CPU: &str = "\u{e0a9}";
+pub const ICON_DOWNLOAD: &str = "\u{e0b2}";
+pub const ICON_ZAP: &str = "\u{e1b4}";
 #[allow(dead_code)]
-pub const ICON_SETTINGS: &str = "\u{e167}";
+pub const ICON_SETTINGS: &str = "\u{e154}";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItem {
@@ -578,7 +608,111 @@ impl PackageManager {
         list
     }
 
-    /// Searches packages across Flatpak and Arch Repositories
+    /// Parses Flathub API v2 `hits` array into `PackageItem` entries.
+    fn parse_flathub_hits(
+        body: &str,
+        fallback_cat: ProductCategory,
+        installed_flatpaks: &HashSet<String>,
+    ) -> Vec<PackageItem> {
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(body) else {
+            return Vec::new();
+        };
+        let Some(hits) = json.get("hits").and_then(|v| v.as_array()) else {
+            return Vec::new();
+        };
+
+        let mut items = Vec::with_capacity(hits.len());
+        for hit in hits {
+            let Some(app_id) = hit.get("app_id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let name = hit
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(app_id)
+                .to_string();
+            let summary = hit
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let developer = hit
+                .get("developer_name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let license = hit
+                .get("project_license")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let is_installed = installed_flatpaks.contains(app_id);
+
+            let icon_char = match fallback_cat {
+                ProductCategory::Development => ICON_CODE,
+                ProductCategory::Graphics => ICON_CAMERA,
+                ProductCategory::AudioVideo => ICON_MUSIC,
+                ProductCategory::System => ICON_SETTINGS,
+                ProductCategory::Gaming => ICON_ACTIVITY,
+                _ => ICON_APP,
+            };
+
+            items.push(PackageItem {
+                id: app_id.to_string(),
+                name,
+                summary: summary.clone(),
+                description: if summary.is_empty() {
+                    format!("Flathub üzerinden sağlanan {} uygulaması.", app_id)
+                } else {
+                    summary
+                },
+                version: "Flathub".to_string(),
+                source: PackageSource::Flatpak,
+                state: if is_installed {
+                    PackageState::Installed
+                } else {
+                    PackageState::Available
+                },
+                category: fallback_cat,
+                icon_char,
+                download_size: None,
+                installed_size: None,
+                developer,
+                license,
+                permissions: None,
+            });
+        }
+        items
+    }
+
+    /// Fetches live applications for a category directly from Flathub API v2.
+    pub async fn fetch_flathub_collection(category: ProductCategory) -> Vec<PackageItem> {
+        let url = category.flathub_collection_url();
+        let installed_flatpaks = Self::get_installed_flatpak_ids().await;
+
+        let Ok(out) = Command::new("curl")
+            .args([
+                "-sS",
+                "--max-time",
+                "8",
+                "-H",
+                "User-Agent: CortenForge/0.5.8",
+                "-H",
+                "Accept: application/json",
+                url,
+            ])
+            .output()
+            .await
+        else {
+            return Vec::new();
+        };
+
+        if !out.status.success() {
+            return Vec::new();
+        }
+        let body = String::from_utf8_lossy(&out.stdout);
+        Self::parse_flathub_hits(&body, category, &installed_flatpaks)
+    }
+
+    /// Searches packages across live Flathub API v2, local Flatpak CLI, and Arch Repositories
     pub async fn search_packages(query: &str) -> Vec<PackageItem> {
         let q = query.trim();
         if q.is_empty() {
@@ -586,10 +720,42 @@ impl PackageManager {
         }
 
         let mut results = Vec::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
         let installed_flatpaks = Self::get_installed_flatpak_ids().await;
         let installed_pacmans = Self::get_installed_pacman_pkgs().await;
 
-        // 1. Flatpak Search
+        // 0. Live Flathub API v2 Search (works even if flatpak CLI is not installed yet)
+        let payload = serde_json::json!({ "query": q }).to_string();
+        if let Ok(flathub_out) = Command::new("curl")
+            .args([
+                "-sS",
+                "--max-time",
+                "8",
+                "-X",
+                "POST",
+                "https://flathub.org/api/v2/search",
+                "-H",
+                "Content-Type: application/json",
+                "-H",
+                "User-Agent: CortenForge/0.5.8",
+                "-d",
+                &payload,
+            ])
+            .output()
+            .await
+        {
+            if flathub_out.status.success() {
+                let body = String::from_utf8_lossy(&flathub_out.stdout);
+                for item in Self::parse_flathub_hits(&body, ProductCategory::All, &installed_flatpaks)
+                {
+                    if seen_ids.insert(item.id.clone()) {
+                        results.push(item);
+                    }
+                }
+            }
+        }
+
+        // 1. Local Flatpak CLI Search (merges any extra remotes / versions)
         if let Ok(flatpak_out) = Command::new("flatpak")
             .args(["search", q, "--columns=application,name,description,version,branch,remotes"])
             .output()
@@ -605,7 +771,7 @@ impl PackageManager {
                         let desc = cols[2].trim().to_string();
                         let ver = cols[3].trim().to_string();
 
-                        if id.is_empty() || id == "Application ID" {
+                        if id.is_empty() || id == "Application ID" || !seen_ids.insert(id.clone()) {
                             continue;
                         }
 
@@ -806,12 +972,29 @@ impl PackageManager {
 
         match pkg.source {
             PackageSource::Flatpak => {
+                // Ensure Flathub user remote exists so fresh installs work seamlessly
+                let _ = Command::new("flatpak")
+                    .args([
+                        "remote-add",
+                        "--if-not-exists",
+                        "--user",
+                        "flathub",
+                        "https://dl.flathub.org/repo/flathub.flatpakrepo",
+                    ])
+                    .output()
+                    .await;
+
                 let mut child = Command::new("flatpak")
-                    .args(["install", "-y", "flathub", &pkg.id])
+                    .args(["install", "--user", "-y", "flathub", &pkg.id])
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()
-                    .map_err(|e| format!("Flatpak komutu çalıştırılamadı: {}", e))?;
+                    .map_err(|e| {
+                        format!(
+                            "Flatpak kurulu değil veya çalıştırılamadı (kurmak için: sudo pacman -S flatpak): {}",
+                            e
+                        )
+                    })?;
 
                 if let Some(stdout) = child.stdout.take() {
                     let mut reader = BufReader::new(stdout).lines();
@@ -1152,8 +1335,8 @@ mod tests {
     fn test_category_labels_and_icons() {
         assert_eq!(ProductCategory::Development.label(), "Geliştirici Araçları");
         assert_eq!(ProductCategory::Graphics.label(), "Grafik & Tasarım");
-        assert_eq!(ProductCategory::AudioVideo.icon(), "🎬");
-        assert_eq!(ProductCategory::Gaming.icon(), "🎮");
+        assert_eq!(ProductCategory::AudioVideo.icon(), corten_theme::Icon::MUSIC);
+        assert_eq!(ProductCategory::Gaming.icon(), corten_theme::Icon::GAMEPAD);
     }
 
     #[test]

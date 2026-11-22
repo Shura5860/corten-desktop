@@ -48,7 +48,7 @@ jobs:
 
       - name: Package Release Tarball & SHA256
         run: |
-          VERSION="${GITHUB_REF_NAME:-v0.5.7}"
+          VERSION="${GITHUB_REF_NAME:-v0.5.8}"
           if [[ "${VERSION}" == "main" || "${VERSION}" == "master" ]]; then
             VERSION="v$(date +'%Y.%m.%d')"
           fi
@@ -63,7 +63,8 @@ jobs:
             cp "target/release/${bin}" "${PKG_NAME}/bin/"
           done
           cp scripts/corten-terminal "${PKG_NAME}/bin/corten-terminal"
-          chmod +x "${PKG_NAME}/bin/corten-terminal"
+          cp scripts/corten-enable-greeter "${PKG_NAME}/bin/corten-enable-greeter"
+          chmod +x "${PKG_NAME}/bin/corten-terminal" "${PKG_NAME}/bin/corten-enable-greeter"
           cp -r scripts/* "${PKG_NAME}/scripts/"
           cp -r assets/* "${PKG_NAME}/assets/"
           cp -r systemd/* "${PKG_NAME}/systemd/"

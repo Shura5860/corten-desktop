@@ -1,6 +1,6 @@
 # Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
 pkgname=corten-desktop-bin
-pkgver=0.5.7
+pkgver=0.5.8
 pkgrel=1
 pkgdesc="Pure-Rust Wayland desktop environment powered by Smithay, Iced & AURA-CORE (precompiled binary release)"
 arch=('x86_64')
@@ -26,6 +26,13 @@ depends=(
     'ttf-dejavu'
     'hicolor-icon-theme'
     'adwaita-cursors'
+)
+optdepends=(
+    'greetd: Display manager for Corten Greeter login screen (run: sudo corten-enable-greeter)'
+    'cage: Wayland kiosk compositor for Corten Greeter'
+    'flatpak: Install Flathub applications directly from Corten Forge'
+    'xorg-xwayland: X11 application compatibility via XWayland'
+    'networkmanager: Wi-Fi, VPN & Hotspot management in Corten Panel/Settings'
 )
 provides=('corten-desktop')
 conflicts=('corten-desktop' 'corten-desktop-git')
@@ -67,6 +74,9 @@ EOF
         chmod 755 "${pkgdir}/usr/bin/corten-terminal"
     fi
 
+    if [ -f "scripts/corten-enable-greeter" ]; then
+        install -Dm755 "scripts/corten-enable-greeter" "${pkgdir}/usr/bin/corten-enable-greeter"
+    fi
     if [ -f "corten-portal/corten.portal" ]; then
         install -Dm644 "corten-portal/corten.portal" \
             "${pkgdir}/usr/share/xdg-desktop-portal/portals/corten.portal"
@@ -108,4 +118,6 @@ Exec=/usr/bin/corten-session
 Type=Application
 DesktopNames=corten
 EOF
+    install -dm755 "${pkgdir}/etc/pam.d"
+    printf '#%%PAM-1.0\nauth include system-auth\n' > "${pkgdir}/etc/pam.d/corten-lock"
 }

@@ -69,6 +69,9 @@ else
 fi
 EOF
 sudo chmod 755 "${BIN_DIR}/corten-terminal"
+if [[ -f scripts/corten-enable-greeter ]]; then
+    sudo install -m 755 scripts/corten-enable-greeter "${BIN_DIR}/corten-enable-greeter"
+fi
 
 echo "==> Installing system wallpapers and icons..."
 sudo install -d /usr/share/backgrounds/corten
@@ -195,4 +198,10 @@ Categories=Utility;
 EOF
 
 echo "==> Corten Desktop Environment installed successfully!"
-echo "You can now log in via any Display Manager (GDM, SDDM, LightDM) by selecting 'Corten Desktop' or launch directly from TTY using: corten-session"
+if [[ -t 0 && -x "${BIN_DIR}/corten-enable-greeter" ]]; then
+    read -r -p "Corten Greeter (greetd) giriş ekranı otomatik kurulup etkinleştirilsin mi? [E/h]: " enable_greeter
+    if [[ -z "${enable_greeter}" || "${enable_greeter}" =~ ^[EeYy]$ ]]; then
+        sudo "${BIN_DIR}/corten-enable-greeter"
+    fi
+fi
+echo "You can now log in via Corten Greeter / Display Manager by selecting 'Corten Desktop' or launch directly from TTY using: corten-session"

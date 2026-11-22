@@ -7,7 +7,7 @@
 **A purpose-built, process-isolated Wayland desktop ecosystem forged in pure Rust.**  
 *Zero C display wrappers (`wlroots`), zero Electron/WebKit runtimes, and zero fragile glue scripts.*
 
-[![Version](https://img.shields.io/badge/Release-v0.5.7-d96b43.svg?style=flat-square)](https://github.com/Shura5860/corten-desktop/releases/tag/v0.5.7)
+[![Version](https://img.shields.io/badge/Release-v0.5.8-d96b43.svg?style=flat-square)](https://github.com/Shura5860/corten-desktop/releases/tag/v0.5.8)
 [![Language](https://img.shields.io/badge/Language-Rust%202021-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Display Protocol](https://img.shields.io/badge/Protocol-Wayland-blue.svg?style=flat-square&logo=wayland)](https://wayland.freedesktop.org/)
 [![Compositor Engine](https://img.shields.io/badge/Engine-Smithay%200.7-red.svg?style=flat-square)](https://github.com/Smithay/smithay)

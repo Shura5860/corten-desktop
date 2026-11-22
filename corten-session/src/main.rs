@@ -802,11 +802,8 @@ fn main() -> Result<()> {
     const MAX_COMPOSITOR_RESTARTS: u8 = 3;
 
     while running.load(Ordering::SeqCst) && RUNNING_FLAG.load(Ordering::SeqCst) {
-        for process in &mut session_processes {
-            process.supervise();
-        }
-
-        // Compositor supervision: Auto-recover on unexpected crash!
+        // Compositor supervision FIRST: if compositor exited cleanly, break immediately
+        // instead of respawning layer-shell components into a closed Wayland socket.
         match compositor_child.try_wait() {
             Ok(Some(status)) => {
                 let session_active =
@@ -864,6 +861,10 @@ fn main() -> Result<()> {
                 error!("Error waiting on compositor: {}", e);
                 break;
             }
+        }
+
+        for process in &mut session_processes {
+            process.supervise();
         }
 
         thread::sleep(Duration::from_millis(100));

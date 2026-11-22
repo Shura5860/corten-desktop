@@ -1,6 +1,6 @@
 # Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
 pkgname=corten-desktop-git
-pkgver=0.5.7.r0.g0000000
+pkgver=0.5.8.r0.g0000000
 pkgrel=1
 pkgdesc="Pure-Rust Wayland desktop environment powered by Smithay, Iced & AURA-CORE"
 arch=('x86_64' 'aarch64')
@@ -47,7 +47,7 @@ sha256sums=('SKIP')
 
 pkgver() {
     cd "${srcdir}/corten-desktop"
-    printf "0.5.7.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    printf "0.5.8.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
@@ -111,6 +111,7 @@ package() {
         install -Dm755 "target/release/${bin}" "${pkgdir}/usr/bin/${bin}"
     done
     install -Dm755 "scripts/corten-terminal" "${pkgdir}/usr/bin/corten-terminal"
+    install -Dm755 "scripts/corten-enable-greeter" "${pkgdir}/usr/bin/corten-enable-greeter"
 
     install -Dm644 "corten-session/corten.desktop" \
         "${pkgdir}/usr/share/wayland-sessions/corten.desktop"
@@ -135,5 +136,7 @@ package() {
             fi
         done
     fi
+    install -dm755 "${pkgdir}/etc/pam.d"
+    printf '#%%PAM-1.0\nauth include system-auth\n' > "${pkgdir}/etc/pam.d/corten-lock"
 }
 
