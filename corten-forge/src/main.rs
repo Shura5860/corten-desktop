@@ -307,10 +307,65 @@ impl CortenForgeApp {
             }
         };
 
-        let right_pane = column![top_bar, content]
+        let mut right_col = column![top_bar, content]
             .width(Length::Fill)
             .height(Length::Fill)
             .spacing(Spacing::MD);
+
+        if self.is_busy || self.busy_message.is_some() || !self.active_logs.is_empty() {
+            let last_line = self
+                .active_logs
+                .iter()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .map(|l| l.trim().to_string());
+            let status_text = if let Some(ref msg) = self.busy_message {
+                if let Some(ref line) = last_line {
+                    format!("{} — {}", msg, line)
+                } else {
+                    msg.clone()
+                }
+            } else {
+                last_line.unwrap_or_default()
+            };
+            let is_err = status_text.contains("Hata:") || status_text.contains("başarısız");
+            let accent = if is_err {
+                palette.danger.to_iced()
+            } else if self.is_busy {
+                palette.primary.to_iced()
+            } else {
+                palette.success.to_iced()
+            };
+            let status_bar = container(
+                row![
+                    text(if self.is_busy { Icon::REFRESH } else { Icon::CHECK })
+                        .font(LUCIDE_FONT)
+                        .size(13.0)
+                        .color(accent),
+                    text(status_text)
+                        .size(11.5)
+                        .color(palette.text_primary.to_iced()),
+                ]
+                .spacing(Spacing::SM)
+                .align_y(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding([8, 12])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.09, 0.10, 0.13, 0.96,
+                ))),
+                border: iced::Border {
+                    color: accent,
+                    width: 1.0,
+                    radius: iced::border::Radius::from(Radius::MD),
+                },
+                ..Default::default()
+            });
+            right_col = right_col.push(status_bar);
+        }
+
+        let right_pane = right_col;
 
         container(row![sidebar, right_pane].spacing(Spacing::LG).padding(Spacing::LG))
             .width(Length::Fill)

@@ -26,6 +26,7 @@ depends=(
     'ttf-dejavu'
     'hicolor-icon-theme'
     'adwaita-cursors'
+    'flatpak'
 )
 makedepends=(
     'cargo'

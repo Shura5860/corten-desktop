@@ -836,7 +836,7 @@ pub fn run_drm(
 
     let keyboard = state
         .seat
-        .add_keyboard(xkb_config, 25, 600)
+        .add_keyboard(xkb_config, 400, 25)
         .map_err(|e| anyhow::anyhow!("Failed to add keyboard: {:?}", e))?;
     let pointer = state.seat.add_pointer();
 
@@ -2019,296 +2019,7 @@ pub fn run_drm(
 
                             let focused_surface = find_surface_under_loc(&mut state, loc);
 
-                            // If currently adjusting tiling split ratio
-                            if let Some((drag_start, initial_ratio)) = state.split_drag {
-                                let target_output = state.output_at(loc);
-                                let usable_area = {
-                                    let mut map = layer_map_for_output(&target_output);
-                                    map.arrange();
-                                    map.non_exclusive_zone()
-                                };
-                                let delta_x = (loc.x - drag_start.x) as f32;
-                                let new_ratio =
-                                    initial_ratio + delta_x / (usable_area.size.w.max(1) as f32);
-                                state
-                                    .layout_for_output_mut(&target_output)
-                                    .set_master_ratio(new_ratio);
-                            } else if let Some((ref window, drag_start_cursor, initial_rect)) =
-                                state.dragged_window.clone()
-                            {
-                                // If currently dragging a window, update its floating position smoothly across displays
-                                let delta_x = (loc.x - drag_start_cursor.x).round() as i32;
-                                let delta_y = (loc.y - drag_start_cursor.y).round() as i32;
-
-                                let start_output = state.output_at(drag_start_cursor);
-                                let start_output_loc = start_output.current_location();
-
-                                let target_output = state.output_at(loc);
-                                let target_output_loc = target_output.current_location();
-
-                                let global_x = start_output_loc.x + initial_rect.loc.x + delta_x;
-                                let global_y = start_output_loc.y + initial_rect.loc.y + delta_y;
-
-                                let mut new_rect = initial_rect;
-                                new_rect.loc.x = global_x - target_output_loc.x;
-                                new_rect.loc.y = global_y - target_output_loc.y;
-
-                                if !state.layout_for_output(&target_output).contains_window(window) {
-                                    state.remove_window_from_all_outputs(window);
-                                    state
-                                        .layout_for_output_mut(&target_output)
-                                        .add_floating_window(window.clone());
-                                }
-
-                                let usable_area = {
-                                    let mut map = layer_map_for_output(&target_output);
-                                    map.arrange();
-                                    map.non_exclusive_zone()
-                                };
-                                let screen_bounds = {
-                                    let scale = target_output.current_scale().fractional_scale();
-                                    let size = target_output
-                                        .current_mode()
-                                        .map(|m| smithay::utils::Size::from(((m.size.w as f64 / scale).round() as i32, (m.size.h as f64 / scale).round() as i32)))
-                                        .unwrap_or(usable_area.size);
-                                    Rectangle::new(smithay::utils::Point::from((0, 0)), size)
-                                };
-                                let other_windows: Vec<Rectangle<i32, smithay::utils::Logical>> = state
-                                    .layout_for_output(&target_output)
-                                    .arrange(usable_area)
-                                    .into_iter()
-                                    .filter(|(w, _)| w != window)
-                                    .map(|(_, r)| r)
-                                    .collect();
-
-                                // Apply 14px magnetic edge snapping to screen borders, dock, and neighboring windows
-                                let snapped_rect = crate::layout::snap_window_to_edges(
-                                    new_rect,
-                                    usable_area,
-                                    screen_bounds,
-                                    &other_windows,
-                                    14,
-                                );
-
-                                state
-                                    .layout_for_output_mut(&target_output)
-                                    .set_floating_geometry(window, snapped_rect);
-                                let out_loc = target_output.current_location();
-                                let rel_x = loc.x - out_loc.x as f64;
-                                let rel_y = loc.y - out_loc.y as f64;
-                                let is_near_left = rel_x <= (usable_area.loc.x + 35) as f64;
-                                let is_near_right =
-                                    rel_x >= (usable_area.loc.x + usable_area.size.w - 35) as f64;
-                                let is_near_top = rel_y <= (usable_area.loc.y + 35) as f64;
-                                let is_near_bottom =
-                                    rel_y >= (usable_area.loc.y + usable_area.size.h - 35) as f64;
-
-                                let half_w = usable_area.size.w / 2;
-                                let half_h = usable_area.size.h / 2;
-
-                                if is_near_left && is_near_top {
-                                    // Top-left quarter tile
-                                    state.snap_preview = Some(Rectangle::new(
-                                        usable_area.loc,
-                                        Size::from((half_w, half_h)),
-                                    ));
-                                    state.drag_split_target = None;
-                                } else if is_near_right && is_near_top {
-                                    // Top-right quarter tile
-                                    state.snap_preview = Some(Rectangle::new(
-                                        Point::from((
-                                            usable_area.loc.x + half_w,
-                                            usable_area.loc.y,
-                                        )),
-                                        Size::from((half_w, half_h)),
-                                    ));
-                                    state.drag_split_target = None;
-                                } else if is_near_left && is_near_bottom {
-                                    // Bottom-left quarter tile
-                                    state.snap_preview = Some(Rectangle::new(
-                                        Point::from((
-                                            usable_area.loc.x,
-                                            usable_area.loc.y + half_h,
-                                        )),
-                                        Size::from((half_w, half_h)),
-                                    ));
-                                    state.drag_split_target = None;
-                                } else if is_near_right && is_near_bottom {
-                                    // Bottom-right quarter tile
-                                    state.snap_preview = Some(Rectangle::new(
-                                        Point::from((
-                                            usable_area.loc.x + half_w,
-                                            usable_area.loc.y + half_h,
-                                        )),
-                                        Size::from((half_w, half_h)),
-                                    ));
-                                    state.drag_split_target = None;
-                                } else if is_near_left {
-                                    // Left half
-                                    state.snap_preview = Some(Rectangle::new(
-                                        usable_area.loc,
-                                        Size::from((half_w, usable_area.size.h)),
-                                    ));
-                                    state.drag_split_target = None;
-                                } else if is_near_right {
-                                    // Right half
-                                    state.snap_preview = Some(Rectangle::new(
-                                        Point::from((
-                                            usable_area.loc.x + half_w,
-                                            usable_area.loc.y,
-                                        )),
-                                        Size::from((half_w, usable_area.size.h)),
-                                    ));
-                                    state.drag_split_target = None;
-                                } else if is_near_top {
-                                    // Full maximize
-                                    state.snap_preview = Some(usable_area);
-                                    state.drag_split_target = None;
-                                } else {
-                                    let window_rects = state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
-                                    let out_rel_loc = Point::from((rel_x, rel_y));
-                                    if let Some((_tab_win, tab_rect)) =
-                                        crate::layout::detect_drag_tab_target(out_rel_loc, &window_rects, window)
-                                    {
-                                        state.snap_preview = Some(tab_rect);
-                                        state.drag_split_target = None;
-                                    } else if let Some((target_win, dir, new_on_first, preview_rect)) =
-                                        crate::layout::detect_drag_split_target(out_rel_loc, &window_rects, window)
-                                    {
-                                        state.snap_preview = Some(preview_rect);
-                                        state.drag_split_target = Some((target_win, dir, new_on_first, preview_rect));
-                                    } else {
-                                        state.snap_preview = None;
-                                        state.drag_split_target = None;
-                                    }
-                                }
-                            } else if let Some((ref window, resize_start_cursor, initial_rect, resize_edge)) =
-                                state.resized_window.clone()
-                            {
-                                // If currently resizing a window, update its floating size and notify the client
-                                let delta = smithay::utils::Point::from((
-                                    loc.x - resize_start_cursor.x,
-                                    loc.y - resize_start_cursor.y,
-                                ));
-                                let min_size = crate::layout::window_min_size(window);
-                                let max_size = crate::layout::window_max_size(window);
-                                let target_output = state.output_at(loc);
-                                let is_fs = state.layout_for_output(&target_output).is_fullscreen(window);
-                                let titlebar_h = crate::layout::window_titlebar_height(window, is_fs);
-                                let new_rect = crate::layout::compute_resized_rect(
-                                    initial_rect,
-                                    resize_edge,
-                                    delta,
-                                    min_size,
-                                    max_size,
-                                    titlebar_h,
-                                );
-                                let usable_area = {
-                                    let mut map = layer_map_for_output(&target_output);
-                                    map.arrange();
-                                    map.non_exclusive_zone()
-                                };
-                                let screen_bounds = {
-                                    let scale = target_output.current_scale().fractional_scale();
-                                    let size = target_output
-                                        .current_mode()
-                                        .map(|m| smithay::utils::Size::from(((m.size.w as f64 / scale).round() as i32, (m.size.h as f64 / scale).round() as i32)))
-                                        .unwrap_or(usable_area.size);
-                                    Rectangle::new(smithay::utils::Point::from((0, 0)), size)
-                                };
-                                let other_windows: Vec<Rectangle<i32, smithay::utils::Logical>> = state
-                                    .layout_for_output(&target_output)
-                                    .arrange(usable_area)
-                                    .into_iter()
-                                    .filter(|(w, _)| w != window)
-                                    .map(|(_, r)| r)
-                                    .collect();
-
-                                // Apply 14px magnetic snapping to right and bottom resizing edges
-                                let snapped_rect = crate::layout::snap_window_resize(
-                                    new_rect,
-                                    usable_area,
-                                    screen_bounds,
-                                    &other_windows,
-                                    14,
-                                );
-
-                                state
-                                    .layout_for_output_mut(&target_output)
-                                    .set_floating_geometry(window, snapped_rect);
-                                crate::layout::configure_window_geometry(window, snapped_rect);
-                            } else {
-                                if let Some((_, ref mut end_pt)) = state.selection_box {
-                                    *end_pt = loc;
-                                }
-                                let target_output = state.output_at(loc);
-                                let usable_area = {
-                                    let mut map = layer_map_for_output(&target_output);
-                                    map.arrange();
-                                    map.non_exclusive_zone()
-                                };
-                                let out_loc = target_output.current_location();
-                                let rel_x = loc.x - out_loc.x as f64;
-                                let rel_y = loc.y - out_loc.y as f64;
-                                let out_rel_loc = Point::from((rel_x, rel_y));
-
-                                // Hover detection for window borders / corner resizing or Snap Layouts Flyout
-                                let gap = state.layout_for_output(&target_output).gap();
-                                let window_rects =
-                                    state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
-                                if let Some((_, rect)) = window_rects
-                                    .into_iter()
-                                    .rev()
-                                    .find(|(_, r)| r.to_f64().contains(out_rel_loc))
-                                {
-                                    if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
-                                        state.snap_preview = Some(crate::layout::compute_snap_zone_rect(
-                                            usable_area,
-                                            zone,
-                                            gap,
-                                        ));
-                                    } else {
-                                        state.snap_preview = None;
-                                    }
-                                    let rw_x = out_rel_loc.x - rect.loc.x as f64;
-                                    let rw_y = out_rel_loc.y - rect.loc.y as f64;
-                                    let w_f = rect.size.w as f64;
-                                    let h_f = rect.size.h as f64;
-                                    if rw_x >= (w_f - 16.0) && rw_y >= (h_f - 16.0) {
-                                        state.cursor_status =
-                                            smithay::input::pointer::CursorImageStatus::Named(
-                                                smithay::input::pointer::CursorIcon::NwseResize,
-                                            );
-                                    } else if rw_x <= 16.0 && rw_y >= (h_f - 16.0) {
-                                        state.cursor_status =
-                                            smithay::input::pointer::CursorImageStatus::Named(
-                                                smithay::input::pointer::CursorIcon::NeswResize,
-                                            );
-                                    } else if rw_x >= (w_f - 8.0) || rw_x <= 8.0 {
-                                        state.cursor_status =
-                                            smithay::input::pointer::CursorImageStatus::Named(
-                                                smithay::input::pointer::CursorIcon::EwResize,
-                                            );
-                                    } else if rw_y >= (h_f - 8.0) || rw_y <= 8.0 {
-                                        state.cursor_status =
-                                            smithay::input::pointer::CursorImageStatus::Named(
-                                                smithay::input::pointer::CursorIcon::NsResize,
-                                            );
-                                    }
-                                } else if let Some(sx) =
-                                    state.layout_for_output(&target_output).split_x(usable_area)
-                                {
-                                    if (rel_x as i32 - sx).abs() <= 8
-                                        && rel_y >= usable_area.loc.y as f64
-                                        && rel_y <= (usable_area.loc.y + usable_area.size.h) as f64
-                                    {
-                                        state.cursor_status =
-                                            smithay::input::pointer::CursorImageStatus::Named(
-                                                smithay::input::pointer::CursorIcon::EwResize,
-                                            );
-                                    }
-                                }
-                            }
+                            handle_pointer_motion_interactions(&mut state, loc);
 
                             let rel_event = RelativeMotionEvent {
                                 delta: (m.dx(), m.dy()).into(),
@@ -2333,9 +2044,7 @@ pub fn run_drm(
                                 .clamp(0.0, max_y);
                             let loc = state.apply_pointer_constraint(loc);
                             state.cursor_location = loc;
-                            if let Some((_, ref mut end_pt)) = state.selection_box {
-                                *end_pt = loc;
-                            }
+                            handle_pointer_motion_interactions(&mut state, loc);
 
                             let serial = SERIAL_COUNTER.next_serial();
                             let time = (m.time_usec() / 1000) as u32;
@@ -4034,6 +3743,302 @@ pub fn run_drm(
     drop(renderer);
     info!("Corten Compositor DRM engine exited cleanly.");
     Ok(())
+}
+
+fn handle_pointer_motion_interactions(
+    state: &mut CortenCompositor,
+    loc: Point<f64, smithay::utils::Logical>,
+) {
+    // If currently adjusting tiling split ratio
+    if let Some((drag_start, initial_ratio)) = state.split_drag {
+        let target_output = state.output_at(loc);
+        let usable_area = {
+            let mut map = layer_map_for_output(&target_output);
+            map.arrange();
+            map.non_exclusive_zone()
+        };
+        let delta_x = (loc.x - drag_start.x) as f32;
+        let new_ratio =
+            initial_ratio + delta_x / (usable_area.size.w.max(1) as f32);
+        state
+            .layout_for_output_mut(&target_output)
+            .set_master_ratio(new_ratio);
+    } else if let Some((ref window, drag_start_cursor, initial_rect)) =
+        state.dragged_window.clone()
+    {
+        // If currently dragging a window, update its floating position smoothly across displays
+        let delta_x = (loc.x - drag_start_cursor.x).round() as i32;
+        let delta_y = (loc.y - drag_start_cursor.y).round() as i32;
+
+        let start_output = state.output_at(drag_start_cursor);
+        let start_output_loc = start_output.current_location();
+
+        let target_output = state.output_at(loc);
+        let target_output_loc = target_output.current_location();
+
+        let global_x = start_output_loc.x + initial_rect.loc.x + delta_x;
+        let global_y = start_output_loc.y + initial_rect.loc.y + delta_y;
+
+        let mut new_rect = initial_rect;
+        new_rect.loc.x = global_x - target_output_loc.x;
+        new_rect.loc.y = global_y - target_output_loc.y;
+
+        if !state.layout_for_output(&target_output).contains_window(window) {
+            state.remove_window_from_all_outputs(window);
+            state
+                .layout_for_output_mut(&target_output)
+                .add_floating_window(window.clone());
+        }
+
+        let usable_area = {
+            let mut map = layer_map_for_output(&target_output);
+            map.arrange();
+            map.non_exclusive_zone()
+        };
+        let screen_bounds = {
+            let scale = target_output.current_scale().fractional_scale();
+            let size = target_output
+                .current_mode()
+                .map(|m| smithay::utils::Size::from(((m.size.w as f64 / scale).round() as i32, (m.size.h as f64 / scale).round() as i32)))
+                .unwrap_or(usable_area.size);
+            Rectangle::new(smithay::utils::Point::from((0, 0)), size)
+        };
+        let other_windows: Vec<Rectangle<i32, smithay::utils::Logical>> = state
+            .layout_for_output(&target_output)
+            .arrange(usable_area)
+            .into_iter()
+            .filter(|(w, _)| w != window)
+            .map(|(_, r)| r)
+            .collect();
+
+        // Apply 14px magnetic edge snapping to screen borders, dock, and neighboring windows
+        let snapped_rect = crate::layout::snap_window_to_edges(
+            new_rect,
+            usable_area,
+            screen_bounds,
+            &other_windows,
+            14,
+        );
+
+        state
+            .layout_for_output_mut(&target_output)
+            .set_floating_geometry(window, snapped_rect);
+        let out_loc = target_output.current_location();
+        let rel_x = loc.x - out_loc.x as f64;
+        let rel_y = loc.y - out_loc.y as f64;
+        let is_near_left = rel_x <= (usable_area.loc.x + 35) as f64;
+        let is_near_right =
+            rel_x >= (usable_area.loc.x + usable_area.size.w - 35) as f64;
+        let is_near_top = rel_y <= (usable_area.loc.y + 35) as f64;
+        let is_near_bottom =
+            rel_y >= (usable_area.loc.y + usable_area.size.h - 35) as f64;
+
+        let half_w = usable_area.size.w / 2;
+        let half_h = usable_area.size.h / 2;
+
+        if is_near_left && is_near_top {
+            // Top-left quarter tile
+            state.snap_preview = Some(Rectangle::new(
+                usable_area.loc,
+                Size::from((half_w, half_h)),
+            ));
+            state.drag_split_target = None;
+        } else if is_near_right && is_near_top {
+            // Top-right quarter tile
+            state.snap_preview = Some(Rectangle::new(
+                Point::from((
+                    usable_area.loc.x + half_w,
+                    usable_area.loc.y,
+                )),
+                Size::from((half_w, half_h)),
+            ));
+            state.drag_split_target = None;
+        } else if is_near_left && is_near_bottom {
+            // Bottom-left quarter tile
+            state.snap_preview = Some(Rectangle::new(
+                Point::from((
+                    usable_area.loc.x,
+                    usable_area.loc.y + half_h,
+                )),
+                Size::from((half_w, half_h)),
+            ));
+            state.drag_split_target = None;
+        } else if is_near_right && is_near_bottom {
+            // Bottom-right quarter tile
+            state.snap_preview = Some(Rectangle::new(
+                Point::from((
+                    usable_area.loc.x + half_w,
+                    usable_area.loc.y + half_h,
+                )),
+                Size::from((half_w, half_h)),
+            ));
+            state.drag_split_target = None;
+        } else if is_near_left {
+            // Left half
+            state.snap_preview = Some(Rectangle::new(
+                usable_area.loc,
+                Size::from((half_w, usable_area.size.h)),
+            ));
+            state.drag_split_target = None;
+        } else if is_near_right {
+            // Right half
+            state.snap_preview = Some(Rectangle::new(
+                Point::from((
+                    usable_area.loc.x + half_w,
+                    usable_area.loc.y,
+                )),
+                Size::from((half_w, usable_area.size.h)),
+            ));
+            state.drag_split_target = None;
+        } else if is_near_top {
+            // Full maximize
+            state.snap_preview = Some(usable_area);
+            state.drag_split_target = None;
+        } else {
+            let window_rects = state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
+            let out_rel_loc = Point::from((rel_x, rel_y));
+            if let Some((_tab_win, tab_rect)) =
+                crate::layout::detect_drag_tab_target(out_rel_loc, &window_rects, window)
+            {
+                state.snap_preview = Some(tab_rect);
+                state.drag_split_target = None;
+            } else if let Some((target_win, dir, new_on_first, preview_rect)) =
+                crate::layout::detect_drag_split_target(out_rel_loc, &window_rects, window)
+            {
+                state.snap_preview = Some(preview_rect);
+                state.drag_split_target = Some((target_win, dir, new_on_first, preview_rect));
+            } else {
+                state.snap_preview = None;
+                state.drag_split_target = None;
+            }
+        }
+    } else if let Some((ref window, resize_start_cursor, initial_rect, resize_edge)) =
+        state.resized_window.clone()
+    {
+        // If currently resizing a window, update its floating size and notify the client
+        let delta = smithay::utils::Point::from((
+            loc.x - resize_start_cursor.x,
+            loc.y - resize_start_cursor.y,
+        ));
+        let min_size = crate::layout::window_min_size(window);
+        let max_size = crate::layout::window_max_size(window);
+        let target_output = state.output_at(loc);
+        let is_fs = state.layout_for_output(&target_output).is_fullscreen(window);
+        let titlebar_h = crate::layout::window_titlebar_height(window, is_fs);
+        let new_rect = crate::layout::compute_resized_rect(
+            initial_rect,
+            resize_edge,
+            delta,
+            min_size,
+            max_size,
+            titlebar_h,
+        );
+        let usable_area = {
+            let mut map = layer_map_for_output(&target_output);
+            map.arrange();
+            map.non_exclusive_zone()
+        };
+        let screen_bounds = {
+            let scale = target_output.current_scale().fractional_scale();
+            let size = target_output
+                .current_mode()
+                .map(|m| smithay::utils::Size::from(((m.size.w as f64 / scale).round() as i32, (m.size.h as f64 / scale).round() as i32)))
+                .unwrap_or(usable_area.size);
+            Rectangle::new(smithay::utils::Point::from((0, 0)), size)
+        };
+        let other_windows: Vec<Rectangle<i32, smithay::utils::Logical>> = state
+            .layout_for_output(&target_output)
+            .arrange(usable_area)
+            .into_iter()
+            .filter(|(w, _)| w != window)
+            .map(|(_, r)| r)
+            .collect();
+
+        // Apply 14px magnetic snapping to right and bottom resizing edges
+        let snapped_rect = crate::layout::snap_window_resize(
+            new_rect,
+            usable_area,
+            screen_bounds,
+            &other_windows,
+            14,
+        );
+
+        state
+            .layout_for_output_mut(&target_output)
+            .set_floating_geometry(window, snapped_rect);
+        crate::layout::configure_window_geometry(window, snapped_rect);
+    } else {
+        if let Some((_, ref mut end_pt)) = state.selection_box {
+            *end_pt = loc;
+        }
+        let target_output = state.output_at(loc);
+        let usable_area = {
+            let mut map = layer_map_for_output(&target_output);
+            map.arrange();
+            map.non_exclusive_zone()
+        };
+        let out_loc = target_output.current_location();
+        let rel_x = loc.x - out_loc.x as f64;
+        let rel_y = loc.y - out_loc.y as f64;
+        let out_rel_loc = Point::from((rel_x, rel_y));
+
+        // Hover detection for window borders / corner resizing or Snap Layouts Flyout
+        let gap = state.layout_for_output(&target_output).gap();
+        let window_rects =
+            state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
+        if let Some((_, rect)) = window_rects
+            .into_iter()
+            .rev()
+            .find(|(_, r)| r.to_f64().contains(out_rel_loc))
+        {
+            if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
+                state.snap_preview = Some(crate::layout::compute_snap_zone_rect(
+                    usable_area,
+                    zone,
+                    gap,
+                ));
+            } else {
+                state.snap_preview = None;
+            }
+            let rw_x = out_rel_loc.x - rect.loc.x as f64;
+            let rw_y = out_rel_loc.y - rect.loc.y as f64;
+            let w_f = rect.size.w as f64;
+            let h_f = rect.size.h as f64;
+            if rw_x >= (w_f - 16.0) && rw_y >= (h_f - 16.0) {
+                state.cursor_status =
+                    smithay::input::pointer::CursorImageStatus::Named(
+                        smithay::input::pointer::CursorIcon::NwseResize,
+                    );
+            } else if rw_x <= 16.0 && rw_y >= (h_f - 16.0) {
+                state.cursor_status =
+                    smithay::input::pointer::CursorImageStatus::Named(
+                        smithay::input::pointer::CursorIcon::NeswResize,
+                    );
+            } else if rw_x >= (w_f - 8.0) || rw_x <= 8.0 {
+                state.cursor_status =
+                    smithay::input::pointer::CursorImageStatus::Named(
+                        smithay::input::pointer::CursorIcon::EwResize,
+                    );
+            } else if rw_y >= (h_f - 8.0) || rw_y <= 8.0 {
+                state.cursor_status =
+                    smithay::input::pointer::CursorImageStatus::Named(
+                        smithay::input::pointer::CursorIcon::NsResize,
+                    );
+            }
+        } else if let Some(sx) =
+            state.layout_for_output(&target_output).split_x(usable_area)
+        {
+            if (rel_x as i32 - sx).abs() <= 8
+                && rel_y >= usable_area.loc.y as f64
+                && rel_y <= (usable_area.loc.y + usable_area.size.h) as f64
+            {
+                state.cursor_status =
+                    smithay::input::pointer::CursorImageStatus::Named(
+                        smithay::input::pointer::CursorIcon::EwResize,
+                    );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

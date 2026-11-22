@@ -1005,6 +1005,15 @@ impl PackageManager {
                         }
                     });
                 }
+                if let Some(stderr) = child.stderr.take() {
+                    let mut reader = BufReader::new(stderr).lines();
+                    let tx_err = tx.clone();
+                    tokio::spawn(async move {
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            let _ = tx_err.send(format!("  {}\n", line));
+                        }
+                    });
+                }
 
                 let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
                 if status.success() {
@@ -1036,6 +1045,15 @@ impl PackageManager {
                     tokio::spawn(async move {
                         while let Ok(Some(line)) = reader.next_line().await {
                             let _ = tx_out.send(format!("  {}\n", line));
+                        }
+                    });
+                }
+                if let Some(stderr) = child.stderr.take() {
+                    let mut reader = BufReader::new(stderr).lines();
+                    let tx_err = tx.clone();
+                    tokio::spawn(async move {
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            let _ = tx_err.send(format!("  {}\n", line));
                         }
                     });
                 }
@@ -1071,6 +1089,15 @@ impl PackageManager {
                     tokio::spawn(async move {
                         while let Ok(Some(line)) = reader.next_line().await {
                             let _ = tx_out.send(format!("  {}\n", line));
+                        }
+                    });
+                }
+                if let Some(stderr) = child.stderr.take() {
+                    let mut reader = BufReader::new(stderr).lines();
+                    let tx_err = tx.clone();
+                    tokio::spawn(async move {
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            let _ = tx_err.send(format!("  {}\n", line));
                         }
                     });
                 }
@@ -1155,6 +1182,15 @@ impl PackageManager {
                         }
                     });
                 }
+                if let Some(stderr) = child.stderr.take() {
+                    let mut reader = BufReader::new(stderr).lines();
+                    let tx_err = tx.clone();
+                    tokio::spawn(async move {
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            let _ = tx_err.send(format!("  {}\n", line));
+                        }
+                    });
+                }
 
                 let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
                 if status.success() {
@@ -1178,6 +1214,15 @@ impl PackageManager {
                     tokio::spawn(async move {
                         while let Ok(Some(line)) = reader.next_line().await {
                             let _ = tx_out.send(format!("  {}\n", line));
+                        }
+                    });
+                }
+                if let Some(stderr) = child.stderr.take() {
+                    let mut reader = BufReader::new(stderr).lines();
+                    let tx_err = tx.clone();
+                    tokio::spawn(async move {
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            let _ = tx_err.send(format!("  {}\n", line));
                         }
                     });
                 }

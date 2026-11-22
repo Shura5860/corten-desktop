@@ -26,6 +26,7 @@ depends=(
     'ttf-dejavu'
     'hicolor-icon-theme'
     'adwaita-cursors'
+    'flatpak'
 )
 optdepends=(
     'greetd: Display manager for Corten Greeter login screen (run: sudo corten-enable-greeter)'

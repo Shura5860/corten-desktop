@@ -477,7 +477,6 @@ pub struct CortenPanelApp {
     panel_visible: bool,
     show_launcher_modal: bool,
     popover_transition: Transition,
-    surface_height: f32,
     launcher_search: String,
     active_workspace: usize,
     occupied_workspaces: Vec<u32>,
@@ -1301,11 +1300,9 @@ impl Application for CortenPanelApp {
                 eq_tick: 0,
                 osd_display_level: 50.0,
                 last_tick_sec: 0,
-                surface_height: 60.0,
             };
         let init_dock_w = app.calculate_dock_width();
         app.last_dock_width = init_dock_w;
-        app.surface_height = app.config.height as f32;
         let initial_config_task = app.layer_config_task();
         (
             app,
@@ -2889,9 +2886,6 @@ impl Application for CortenPanelApp {
                 self.pending_power_action = None;
                 return self.layer_config_task();
             }
-            Message::IcedEvent(Event::Window(iced::window::Event::Resized(size))) => {
-                self.surface_height = size.height;
-            }
             Message::IcedEvent(_) | Message::LayerAction(_) | Message::NoOp => {}
         }
         Task::none()
@@ -3830,8 +3824,7 @@ impl Application for CortenPanelApp {
             .align_y(Alignment::Center);
 
         // ==================== CONTROL CENTER POPUP CARD ====================
-        let popover_surface_ready = self.surface_height >= 160.0;
-        let content: Element<'_, Self::Message> = if popover_surface_ready && self.show_control_center {
+        let content: Element<'_, Self::Message> = if self.show_control_center {
             // Power quick buttons: Lock, Logout, Reboot, Poweroff
             let power_btn = |label: &'static str, action: SystemPowerAction, color: iced::Color| {
                 button(
@@ -4799,7 +4792,7 @@ impl Application for CortenPanelApp {
                 .spacing(popover_lift_gap)
                 .align_x(Alignment::Center)
                 .into()
-        } else if popover_surface_ready && self.show_power_menu {
+        } else if self.show_power_menu {
             let t = self.language.t();
             // Elevated Corten Güç & Oturum Merkezi (Power & Session Hub)
             let action_card = |icon_char: char, label: &'static str, desc: &'static str, action: SystemPowerAction, is_danger: bool| {
@@ -4974,7 +4967,7 @@ impl Application for CortenPanelApp {
                 .spacing(12)
                 .align_x(Alignment::Center)
                 .into()
-        } else if popover_surface_ready && self.show_calendar {
+        } else if self.show_calendar {
             let t = self.language.t();
             // Corten Takvim & Hava Durumu Modülü
             let header = row![
@@ -5218,7 +5211,7 @@ impl Application for CortenPanelApp {
             mouse_area(content_col)
                 .on_press(Message::ToggleCalendar)
                 .into()
-        } else if popover_surface_ready && self.show_clipboard_modal {
+        } else if self.show_clipboard_modal {
             let title_row = row![
                 text("Pano Geçmişi (Super+V)")
                     .size(13.0)
@@ -5387,7 +5380,7 @@ impl Application for CortenPanelApp {
                 .spacing(12)
                 .align_x(Alignment::Center)
                 .into()
-        } else if popover_surface_ready && self.show_notification_center {
+        } else if self.show_notification_center {
             let title_row = row![
                 text("Bildirim Merkezi")
                     .size(13.0)
@@ -5466,7 +5459,7 @@ impl Application for CortenPanelApp {
                 .spacing(12)
                 .align_x(Alignment::Center)
                 .into()
-        } else if popover_surface_ready && self.show_downloads_stack {
+        } else if self.show_downloads_stack {
             let header = row![
                 text(Icon::DOWNLOAD)
                     .font(LUCIDE_FONT)
@@ -6020,7 +6013,7 @@ impl Application for CortenPanelApp {
             mouse_area(content_col)
                 .on_press(Message::CloseDockContextMenu)
                 .into()
-        } else if popover_surface_ready && self.show_mini_task_manager {
+        } else if self.show_mini_task_manager {
             let header = row![
                 text(Icon::ACTIVITY)
                     .font(LUCIDE_FONT)
@@ -6317,7 +6310,7 @@ impl Application for CortenPanelApp {
                 .spacing(12)
                 .align_x(Alignment::Center)
                 .into()
-        } else if popover_surface_ready && self.show_net_speed_details {
+        } else if self.show_net_speed_details {
             let (is_online, net_name, ip_addr) = &self.network_status;
             let header = row![
                 text(Icon::GLOBE)
@@ -6395,7 +6388,7 @@ impl Application for CortenPanelApp {
                 .spacing(12)
                 .align_x(Alignment::Center)
                 .into()
-        } else if popover_surface_ready && self.show_desktop_context_hub {
+        } else if self.show_desktop_context_hub {
             let hub_action_btn = |icon_char: char, label_text: &'static str, msg: Message, pal: Palette| {
                 button(
                     column![

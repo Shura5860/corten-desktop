@@ -1221,7 +1221,7 @@ fn main() -> anyhow::Result<()> {
 
     let keyboard = state
         .seat
-        .add_keyboard(xkb_config, 25, 600)
+        .add_keyboard(xkb_config, 400, 25)
         .map_err(|e| anyhow::anyhow!("Failed to add keyboard: {:?}", e))?;
     let pointer = state.seat.add_pointer();
 
