@@ -60,7 +60,7 @@ It is an integrated, cohesive desktop environment engineered from the kernel DRM
 ---
 
 ### Corten Forge & AURA Copilot
-> *Left: **Corten Forge**, a unified package manager orchestrating Flatpak sandboxes, Arch repositories, and Corten Core OTA releases.  
+> *Left: **Corten Forge**, a unified package manager with live Flathub API v2 browsing & search, Arch repositories, sandbox inspection, and Corten Core OTA releases.  
 > Right: **Corten AURA**, an embedded, zero-cloud desktop copilot powered by pure-Rust GGUF tensor inference and a 23-tool ReAct automation engine with Dynamic Semantic Tool Pruning.*
 
 ![Corten Forge & AURA](assets/screenshots/corten-forge-aura.jpg)
@@ -69,7 +69,7 @@ It is an integrated, cohesive desktop environment engineered from the kernel DRM
 
 ### Corten Files & System Settings
 > *Left: **Corten Files**, a dual-pane file manager with spacebar Quick Look, inline terminal drawer, and AI safety inspection.  
-> Right: **Corten Settings**, featuring an interactive multi-monitor topology canvas, hardware audio/display management, and Patina theme accents.*
+> Right: **Corten Settings**, featuring an interactive multi-monitor topology canvas, 7-language UI switcher, hardware audio/display management, and custom Patina theme accents.*
 
 ![Corten Files & Settings](assets/screenshots/corten-files-settings.jpg)
 
@@ -240,7 +240,7 @@ For Arch-based systems, Corten can be installed in a single automated step:
 
 ---
 
-### Distribution Packages (`v0.5.0`)
+### Distribution Packages (`v0.5.8`)
 
 * **Arch Linux (PKGBUILD):**
   ```bash
@@ -290,9 +290,13 @@ cargo build --release --workspace
 sudo ./install.sh
 ```
 
-Once installed, select **Corten Desktop** from your display manager (GDM, SDDM, greetd) or launch directly from a TTY:
+Once installed, enable the built-in **Corten Greeter** login screen with one command (`greetd` + `cage`), select **Corten Desktop** from any display manager, or launch directly from a TTY:
 
 ```bash
+# Optional: enable Corten Greeter login screen automatically
+sudo corten-enable-greeter
+
+# Or launch directly from a TTY
 corten-session
 ```
 
