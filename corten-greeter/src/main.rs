@@ -279,6 +279,7 @@ impl CortenGreeterApp {
         let user_input = text_input("Kullanıcı Adı", self.auth.username())
             .size(16.0)
             .padding([14, 20])
+            .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status))
             .on_input(Message::UsernameChanged)
             .on_submit(Message::SubmitLogin);
 
@@ -286,11 +287,12 @@ impl CortenGreeterApp {
             .size(16.0)
             .secure(true)
             .padding([14, 20])
+            .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status))
             .on_input(Message::PasswordChanged)
             .on_submit(Message::SubmitLogin);
 
         let submit_btn = button(
-            text("Giriş Yap ↵")
+            text("Giriş Yap")
                 .size(16.0)
                 .color(palette.background.to_iced()),
         )

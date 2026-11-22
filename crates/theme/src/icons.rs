@@ -24,7 +24,7 @@ pub const NOTO_SANS_BOLD: iced::Font = iced::Font {
 #[cfg(feature = "iced")]
 pub const NOTO_SANS_SEMIBOLD: iced::Font = iced::Font {
     family: iced::font::Family::Name("Noto Sans"),
-    weight: iced::font::Weight::Semibold,
+    weight: iced::font::Weight::Bold,
     stretch: iced::font::Stretch::Normal,
     style: iced::font::Style::Normal,
 };
@@ -32,7 +32,7 @@ pub const NOTO_SANS_SEMIBOLD: iced::Font = iced::Font {
 #[cfg(feature = "iced")]
 pub const NOTO_SANS_MEDIUM: iced::Font = iced::Font {
     family: iced::font::Family::Name("Noto Sans"),
-    weight: iced::font::Weight::Medium,
+    weight: iced::font::Weight::Normal,
     stretch: iced::font::Stretch::Normal,
     style: iced::font::Style::Normal,
 };

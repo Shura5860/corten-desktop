@@ -363,7 +363,8 @@ impl Application for CortenWelcomeApp {
                 text("Masaüstüne Geç")
                     .size(12)
                     .color(palette.text_muted.to_iced()),
-                text("→")
+                text(Icon::CHEVRON_RIGHT)
+                    .font(LUCIDE_FONT)
                     .size(14)
                     .color(palette.primary.to_iced()),
             ]
@@ -536,7 +537,10 @@ impl Application for CortenWelcomeApp {
                         .size(14)
                         .font(corten_theme::NOTO_SANS_SEMIBOLD)
                         .color(palette.on_primary().to_iced()),
-                    text("→").size(15).color(palette.on_primary().to_iced()),
+                    text(Icon::CHEVRON_RIGHT)
+                        .font(LUCIDE_FONT)
+                        .size(15)
+                        .color(palette.on_primary().to_iced()),
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center),

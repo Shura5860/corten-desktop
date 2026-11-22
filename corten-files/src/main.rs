@@ -1977,6 +1977,8 @@ impl CortenFilesApp {
                 .color(palette.primary.to_iced()),
             text_input("Komut girin...", &self.terminal_input)
                 .size(12.0)
+                .padding([5, 10])
+                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status))
                 .on_input(Message::TerminalInputChanged)
                 .on_submit(Message::ExecuteTerminalCommand),
             button(
@@ -2215,9 +2217,10 @@ impl CortenFilesApp {
                 text_input("Dizin yolunu girin...", &self.address_input)
                     .on_input(Message::AddressInputChanged)
                     .on_submit(Message::AddressSubmitted)
-                    .padding([5, 10])
+                    .padding([6, 10])
                     .size(Typography::BODY_SM)
-                    .width(Length::Fill),
+                    .width(Length::Fill)
+                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
                 Self::small_button("Git", "", Message::AddressSubmitted, palette),
                 Self::small_button("İptal", "", Message::ToggleAddressEdit, palette),
             ]
@@ -2402,9 +2405,10 @@ impl CortenFilesApp {
                     .color(palette.text_muted.to_iced()),
                 text_input("Filtrele (Ctrl+F)...", &self.search_query)
                     .on_input(Message::SearchChanged)
-                    .padding([3, 6])
+                    .padding([5, 10])
                     .size(12.0)
-                    .width(Length::Fixed(145.0)),
+                    .width(Length::Fixed(145.0))
+                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
                 match_count,
             ]
             .spacing(Spacing::XS)
@@ -2572,9 +2576,10 @@ impl CortenFilesApp {
                 text_input("Klasör adı...", val)
                     .on_input(Message::ModalInputChanged)
                     .on_submit(Message::ConfirmModal)
-                    .padding([5, 10])
+                    .padding([6, 10])
                     .size(Typography::BODY_SM)
-                    .width(Length::Fixed(280.0)),
+                    .width(Length::Fixed(280.0))
+                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
                 Self::accent_button("Oluştur", Message::ConfirmModal, palette),
                 Self::small_button("İptal", "", Message::CancelModal, palette),
             ]
@@ -2588,9 +2593,10 @@ impl CortenFilesApp {
                 text_input("Dosya adı...", val)
                     .on_input(Message::ModalInputChanged)
                     .on_submit(Message::ConfirmModal)
-                    .padding([5, 10])
+                    .padding([6, 10])
                     .size(Typography::BODY_SM)
-                    .width(Length::Fixed(280.0)),
+                    .width(Length::Fixed(280.0))
+                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
                 Self::accent_button("Oluştur", Message::ConfirmModal, palette),
                 Self::small_button("İptal", "", Message::CancelModal, palette),
             ]
@@ -2604,9 +2610,10 @@ impl CortenFilesApp {
                 text_input("Yeni ad...", val)
                     .on_input(Message::ModalInputChanged)
                     .on_submit(Message::ConfirmModal)
-                    .padding([5, 10])
+                    .padding([6, 10])
                     .size(Typography::BODY_SM)
-                    .width(Length::Fixed(280.0)),
+                    .width(Length::Fixed(280.0))
+                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
                 Self::accent_button("Kaydet", Message::ConfirmModal, palette),
                 Self::small_button("İptal", "", Message::CancelModal, palette),
             ]

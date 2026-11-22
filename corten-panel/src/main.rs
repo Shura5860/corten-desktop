@@ -799,6 +799,8 @@ fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
 
     let candidates: &[&str] = if lower.contains("corten-ai") || lower.contains("ai") || lower.contains("assistant") {
         &[
+            "/usr/share/icons/hicolor/64x64/apps/corten-ai.png",
+            "/usr/share/icons/hicolor/48x48/apps/corten-ai.png",
             "assets/icons/hicolor/64x64/apps/corten-ai.png",
             "assets/icons/hicolor/48x48/apps/corten-ai.png",
             "/usr/share/pixmaps/corten-ai.png",
@@ -808,6 +810,8 @@ fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
         ]
     } else if lower.contains("corten-terminal") || lower.contains("term") || lower.contains("alacritty") || lower.contains("kitty") || lower.contains("foot") || lower.contains("konsole") {
         &[
+            "/usr/share/icons/hicolor/64x64/apps/corten-terminal.png",
+            "/usr/share/icons/hicolor/48x48/apps/corten-terminal.png",
             "assets/icons/hicolor/64x64/apps/corten-terminal.png",
             "assets/icons/hicolor/48x48/apps/corten-terminal.png",
             "/usr/share/icons/oxygen/base/48x48/apps/utilities-terminal.png",
@@ -817,6 +821,8 @@ fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
         ]
     } else if lower.contains("corten-files") || lower.contains("file") || lower.contains("nautilus") || lower.contains("dolphin") || lower.contains("thunar") {
         &[
+            "/usr/share/icons/hicolor/64x64/apps/corten-files.png",
+            "/usr/share/icons/hicolor/48x48/apps/corten-files.png",
             "assets/icons/hicolor/64x64/apps/corten-files.png",
             "assets/icons/hicolor/48x48/apps/corten-files.png",
             "/usr/share/icons/oxygen/base/48x48/apps/system-file-manager.png",
@@ -825,6 +831,8 @@ fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
         ]
     } else if lower.contains("corten-settings") || lower.contains("setting") || lower.contains("config") || lower.contains("control") {
         &[
+            "/usr/share/icons/hicolor/64x64/apps/corten-settings.png",
+            "/usr/share/icons/hicolor/48x48/apps/corten-settings.png",
             "assets/icons/hicolor/64x64/apps/corten-settings.png",
             "assets/icons/hicolor/48x48/apps/corten-settings.png",
             "/usr/share/icons/oxygen/base/48x48/categories/preferences-system.png",
@@ -833,6 +841,8 @@ fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
         ]
     } else if lower.contains("corten-monitor") || lower.contains("monitor") || lower.contains("htop") || lower.contains("btop") {
         &[
+            "/usr/share/icons/hicolor/64x64/apps/corten-monitor.png",
+            "/usr/share/icons/hicolor/48x48/apps/corten-monitor.png",
             "assets/icons/hicolor/64x64/apps/corten-monitor.png",
             "assets/icons/hicolor/48x48/apps/corten-monitor.png",
             "/usr/share/icons/oxygen/base/48x48/apps/utilities-system-monitor.png",
@@ -840,11 +850,15 @@ fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
         ]
     } else if lower.contains("corten-welcome") || lower.contains("welcome") {
         &[
+            "/usr/share/icons/hicolor/64x64/apps/corten-welcome.png",
+            "/usr/share/icons/hicolor/48x48/apps/corten-welcome.png",
             "assets/icons/hicolor/64x64/apps/corten-welcome.png",
             "assets/icons/hicolor/48x48/apps/corten-welcome.png",
         ]
     } else if lower.contains("editor") || lower.contains("code") || lower.contains("nvim") || lower.contains("rust") || lower.contains("text") || lower.contains("kate") {
         &[
+            "/usr/share/icons/hicolor/64x64/apps/corten-editor.png",
+            "/usr/share/icons/hicolor/48x48/apps/corten-editor.png",
             "assets/icons/hicolor/64x64/apps/corten-editor.png",
             "assets/icons/hicolor/48x48/apps/corten-editor.png",
             "/usr/share/icons/oxygen/base/48x48/apps/accessories-text-editor.png",
@@ -854,6 +868,8 @@ fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
         ]
     } else if lower.contains("browser") || lower.contains("firefox") || lower.contains("chrom") || lower.contains("brave") || lower.contains("zen") || lower.contains("web") {
         &[
+            "/usr/share/icons/hicolor/64x64/apps/corten-browser.png",
+            "/usr/share/icons/hicolor/48x48/apps/corten-browser.png",
             "assets/icons/hicolor/64x64/apps/corten-browser.png",
             "assets/icons/hicolor/48x48/apps/corten-browser.png",
             "/usr/share/icons/hicolor/48x48/apps/firefox.png",
@@ -862,6 +878,8 @@ fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
         ]
     } else if lower.contains("corten-forge") || lower.contains("forge") || lower.contains("store") || lower.contains("software") || lower.contains("package") {
         &[
+            "/usr/share/icons/hicolor/64x64/apps/corten-forge.png",
+            "/usr/share/icons/hicolor/48x48/apps/corten-forge.png",
             "assets/icons/hicolor/64x64/apps/corten-forge.png",
             "assets/icons/hicolor/48x48/apps/corten-forge.png",
             "/usr/share/icons/oxygen/base/48x48/apps/system-software-install.png",
@@ -2985,31 +3003,19 @@ impl Application for CortenPanelApp {
             let is_current = self.active_workspace == ws_num;
             let is_occupied = self.occupied_workspaces.contains(&(ws_num as u32));
 
-            let ws_icon = match ws_num {
-                1 => Icon::CODE,
-                2 => Icon::GLOBE,
-                3 => Icon::APP_WINDOW,
-                4 => Icon::MUSIC,
-                5 => Icon::SETTINGS,
-                _ => Icon::MONITOR,
-            };
-
             let ws_content = row![
-                text(ws_icon).font(LUCIDE_FONT).size(11.0).color(if is_current {
-                    palette.primary.to_iced()
-                } else {
-                    palette.text_muted.to_iced()
-                }),
                 text(format!("{}", ws_num))
-                    .size(11.0)
+                    .size(11.5)
                     .font(corten_theme::NOTO_SANS_BOLD)
                     .color(if is_current {
+                        palette.on_primary().to_iced()
+                    } else if is_occupied {
                         palette.text_primary.to_iced()
                     } else {
                         palette.text_muted.to_iced()
                     }),
             ]
-            .spacing(3)
+            .spacing(0)
             .align_y(Alignment::Center);
 
             let ws_btn = button(
@@ -4398,9 +4404,10 @@ impl Application for CortenPanelApp {
                         text_input("Wi-Fi parolasını girin...", &self.wifi_password_input)
                             .on_input(Message::WifiPasswordChanged)
                             .on_submit(Message::ConnectWifiSubmit)
-                            .padding([4, 8])
+                            .padding([6, 10])
                             .size(11.0)
-                            .secure(true),
+                            .secure(true)
+                            .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
                         button(
                             container(
                                 text("Bağlan")
@@ -5224,7 +5231,8 @@ impl Application for CortenPanelApp {
             let search_input = text_input("Panoda ara...", &self.clipboard_search)
                 .on_input(Message::ClipboardSearchChanged)
                 .padding([6, 10])
-                .size(12.0);
+                .size(12.0)
+                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
 
             let filter_tabs = row![
                 for_clip_tab("Tümü", "all", &self.clipboard_filter, palette),

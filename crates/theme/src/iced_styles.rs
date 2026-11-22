@@ -1,4 +1,4 @@
-use iced::widget::{button, container};
+use iced::widget::{button, container, text_input};
 use iced::{border, Background, Border, Shadow};
 
 use crate::color::Palette;
@@ -179,9 +179,53 @@ pub fn input_style(palette: Palette) -> container::Style {
         border: Border {
             color: palette.border.to_iced(),
             width: 1.0,
-            radius: border::Radius::from(Radius::SM),
+            radius: border::Radius::from(Radius::MD),
         },
         shadow: Shadow::default(),
+    }
+}
+
+/// Unified Corten styled `text_input` with soft rounded corners, subtle surface fill,
+/// hover highlight, and warm accent focus ring.
+pub fn corten_text_input_style(palette: Palette, status: text_input::Status) -> text_input::Style {
+    let (bg, border_color, border_width) = match status {
+        text_input::Status::Active => (
+            palette.background.to_iced(),
+            palette.border.to_iced(),
+            1.0,
+        ),
+        text_input::Status::Hovered => (
+            palette.surface_hover.to_iced(),
+            iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.55),
+            1.0,
+        ),
+        text_input::Status::Focused => (
+            palette.background.to_iced(),
+            palette.primary.to_iced(),
+            1.5,
+        ),
+        text_input::Status::Disabled => (
+            palette.surface.to_iced(),
+            palette.border.to_iced(),
+            1.0,
+        ),
+    };
+    text_input::Style {
+        background: Background::Color(bg),
+        border: Border {
+            color: border_color,
+            width: border_width,
+            radius: border::Radius::from(Radius::MD),
+        },
+        icon: palette.text_muted.to_iced(),
+        placeholder: palette.text_muted.to_iced(),
+        value: palette.text_primary.to_iced(),
+        selection: iced::Color::from_rgba(
+            palette.primary.r,
+            palette.primary.g,
+            palette.primary.b,
+            0.35,
+        ),
     }
 }
 

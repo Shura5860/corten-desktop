@@ -791,9 +791,10 @@ impl CortenMonitorApp {
                         .color(palette.text_muted.to_iced()),
                     text_input("Süreç, PID veya servis ara...", &self.search_query)
                         .on_input(Message::SearchChanged)
-                        .padding([6, 8])
+                        .padding([7, 12])
                         .size(Typography::BODY_SM)
-                        .width(Length::Fixed(240.0)),
+                        .width(Length::Fixed(240.0))
+                        .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
                 ]
                 .spacing(Spacing::XS)
                 .align_y(Alignment::Center),

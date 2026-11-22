@@ -2720,17 +2720,19 @@ impl Application for CortenLauncherApp {
 
                 // 2. Applications
                 if self.search_query.is_empty() && !self.filtered_entries.is_empty() {
-                    let mut fav_row = row![
+                    let fav_label = row![
                         text(Icon::SPARKLES)
                             .font(LUCIDE_FONT)
                             .size(11.0)
                             .color(palette.primary.to_iced()),
-                        text("Sık Kullanılanlar:")
+                        text("Sık Kullanılanlar")
                             .size(11.0)
                             .color(palette.primary.to_iced())
                     ]
-                    .spacing(6)
+                    .spacing(5)
                     .align_y(Alignment::Center);
+
+                    let mut fav_row = row![].spacing(6).align_y(Alignment::Center);
 
                     for fav in self.filtered_entries.iter().take(3) {
                         let fav_clone = fav.clone();
@@ -2756,7 +2758,7 @@ impl Application for CortenLauncherApp {
                             .spacing(5)
                             .align_y(Alignment::Center),
                         )
-                        .padding([2, 8])
+                        .padding([3, 8])
                         .style(move |_, _| button::Style {
                             background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
                             border: iced::Border {
@@ -2768,7 +2770,9 @@ impl Application for CortenLauncherApp {
                         .on_press(Message::LaunchSpecificApp(fav_clone));
                         fav_row = fav_row.push(fav_btn);
                     }
-                    results_column = results_column.push(container(fav_row).padding([4, 6]));
+                    results_column = results_column.push(
+                        container(column![fav_label, fav_row].spacing(5)).padding([4, 6]),
+                    );
                 }
 
                 if self.search_query.starts_with('>') {
@@ -3873,7 +3877,7 @@ impl Application for CortenLauncherApp {
                     let launch_btn = button(
                         row![
                             text(Icon::APP_WINDOW).font(LUCIDE_FONT).size(12.0),
-                            text("Uygulamayı Başlat ↵").size(12.0),
+                            text("Uygulamayı Başlat").size(12.0),
                         ]
                         .spacing(6)
                         .align_y(Alignment::Center),

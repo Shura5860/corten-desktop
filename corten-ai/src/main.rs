@@ -1392,7 +1392,7 @@ impl CortenAiApp {
                 text(title)
                     .size(11.0)
                     .font(iced::Font {
-                        weight: if is_active { iced::font::Weight::Semibold } else { iced::font::Weight::Normal },
+                        weight: if is_active { iced::font::Weight::Bold } else { iced::font::Weight::Normal },
                         ..Default::default()
                     })
                     .color(if is_active {

@@ -1290,7 +1290,19 @@ impl CortenSettingsApp {
         let search_box = text_input("Ayarlarda ara...", &self.search_query)
             .on_input(Message::SearchChanged)
             .padding([6, 10])
-            .size(Typography::BODY_SM);
+            .size(Typography::BODY_SM)
+            .style(move |_, _| text_input::Style {
+                background: iced::Background::Color(palette.background.to_iced()),
+                border: Border {
+                    color: palette.border.to_iced(),
+                    width: 1.0,
+                    radius: border::Radius::from(Radius::SM),
+                },
+                icon: palette.text_muted.to_iced(),
+                placeholder: palette.text_muted.to_iced(),
+                value: palette.text_primary.to_iced(),
+                selection: palette.primary.to_iced(),
+            });
 
         let query = self.search_query.trim().to_lowercase();
 
@@ -1397,6 +1409,35 @@ impl CortenSettingsApp {
         }
 
         let nav_scrollable = scrollable(column(nav_items_vec).spacing(4))
+            .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new()
+                    .width(4.0)
+                    .scroller_width(4.0)
+                    .margin(2.0),
+            ))
+            .style(move |_, _| scrollable::Style {
+                container: container::Style::default(),
+                vertical_rail: scrollable::Rail {
+                    background: None,
+                    border: Border::default(),
+                    scroller: scrollable::Scroller {
+                        color: palette.border.to_iced(),
+                        border: Border {
+                            radius: border::Radius::from(Radius::FULL),
+                            ..Default::default()
+                        },
+                    },
+                },
+                horizontal_rail: scrollable::Rail {
+                    background: None,
+                    border: Border::default(),
+                    scroller: scrollable::Scroller {
+                        color: iced::Color::TRANSPARENT,
+                        border: Border::default(),
+                    },
+                },
+                gap: None,
+            })
             .width(Length::Fill)
             .height(Length::Fill);
 
@@ -2131,8 +2172,9 @@ impl CortenSettingsApp {
             &self.appearance.wallpaper_path,
         )
         .on_input(Message::UpdateWallpaperPath)
-        .padding([6, 10])
-        .width(Length::Fixed(240.0));
+        .padding([7, 12])
+        .width(Length::Fixed(240.0))
+        .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
 
         let browse_btn = button(
             row![
@@ -2142,7 +2184,8 @@ impl CortenSettingsApp {
             .spacing(Spacing::XS)
             .align_y(Alignment::Center),
         )
-        .padding([6, 12])
+        .padding([7, 12])
+        .style(move |_, status| corten_theme::iced_styles::secondary_button_style(palette, status))
         .on_press(Message::ChooseWallpaper);
 
         let wp_custom_row = Self::settings_row(
@@ -2160,8 +2203,9 @@ impl CortenSettingsApp {
             &self.appearance.secondary_wallpaper_path,
         )
         .on_input(Message::UpdateSecondaryWallpaperPath)
-        .padding([6, 10])
-        .width(Length::Fixed(240.0));
+        .padding([7, 12])
+        .width(Length::Fixed(240.0))
+        .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
         let wp_secondary_row = Self::settings_row(
             Some(Icon::MONITOR),
             "İkincil Monitör Duvar Kâğıdı",
@@ -3471,11 +3515,9 @@ impl CortenSettingsApp {
                 .spacing(2)
                 .align_x(Alignment::Center),
             )
-            .width(Length::Fixed(150.0))
-            .height(Length::Fixed(92.0))
             .padding(Spacing::SM)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
+            .center_x(Length::Fixed(150.0))
+            .center_y(Length::Fixed(92.0)),
         )
         .style(move |_, status| {
             let border_color = if is_disp1_selected {
@@ -3540,11 +3582,9 @@ impl CortenSettingsApp {
                 .spacing(2)
                 .align_x(Alignment::Center),
             )
-            .width(Length::Fixed(150.0))
-            .height(Length::Fixed(92.0))
             .padding(Spacing::SM)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
+            .center_x(Length::Fixed(150.0))
+            .center_y(Length::Fixed(92.0)),
         )
         .style(move |_, status| {
             let border_color = if is_disp2_selected {
@@ -3625,10 +3665,8 @@ impl CortenSettingsApp {
                     .size(Typography::CAPTION)
                     .color(palette.text_muted.to_iced()),
                 container(visual_stage)
-                    .width(Length::Fill)
-                    .height(Length::Fixed(150.0))
                     .center_x(Length::Fill)
-                    .center_y(Length::Fill),
+                    .center_y(Length::Fixed(150.0)),
                 row![
                     Self::segment_button(
                         "← Sol",
@@ -3736,7 +3774,8 @@ impl CortenSettingsApp {
 
         let resolution_input = text_input("Örn. 1920x1080@60Hz", &self.displays.resolution)
             .on_input(Message::SetDisplayResolution)
-            .padding([Spacing::SM, Spacing::MD]);
+            .padding([Spacing::SM, Spacing::MD])
+            .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
 
         let night_light_cb = Self::pill_switch(
             self.displays.night_light,
@@ -4146,7 +4185,8 @@ impl CortenSettingsApp {
         )
         .on_input(Message::SetOutputDevice)
         .width(Length::Fixed(240.0))
-        .padding([6, 10]);
+        .padding([7, 12])
+        .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
 
         // Output Group
         let out_vol_row = Self::settings_row(
@@ -4366,12 +4406,14 @@ impl CortenSettingsApp {
         let hotspot_ctrl = row![
             text_input("SSID", &self.hotspot_ssid)
                 .on_input(Message::HotspotSsidChanged)
-                .padding([4, 8])
-                .width(Length::Fixed(130.0)),
+                .padding([6, 10])
+                .width(Length::Fixed(130.0))
+                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
             text_input("Parola", &self.hotspot_password)
                 .on_input(Message::HotspotPasswordChanged)
-                .padding([4, 8])
-                .width(Length::Fixed(120.0)),
+                .padding([6, 10])
+                .width(Length::Fixed(120.0))
+                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
             button(
                 text(if self.hotspot_active {
                     "Hotspot Kapat"
@@ -5163,12 +5205,19 @@ impl CortenSettingsApp {
             Icon::APP_WINDOW,
             "Varsayılan Döşeme Düzeni",
             Some("Yerleşim Algoritması"),
-            column![Self::setting_item(
-                "Algoritma Seçimi",
-                "Açılan yeni pencerelerin ekrana otomatik dağıtım düzeni",
+            column![
+                column![
+                    text("Algoritma Seçimi")
+                        .size(Typography::BODY)
+                        .font(NOTO_SANS_BOLD)
+                        .color(palette.text_primary.to_iced()),
+                    text("Açılan yeni pencerelerin ekrana otomatik dağıtım düzeni")
+                        .size(Typography::CAPTION)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(2),
                 layout_control,
-                palette,
-            ),]
+            ]
             .spacing(Spacing::SM),
             palette,
         );
@@ -5193,12 +5242,14 @@ impl CortenSettingsApp {
                 &self.new_rule_app_id
             )
             .on_input(Message::RuleAppIdChanged)
-            .padding([5, 8])
-            .width(Length::Fixed(180.0)),
+            .padding([6, 10])
+            .width(Length::Fixed(180.0))
+            .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
             text_input("Alan (1-9)", &self.new_rule_workspace)
                 .on_input(Message::RuleWorkspaceChanged)
-                .padding([5, 8])
-                .width(Length::Fixed(70.0)),
+                .padding([6, 10])
+                .width(Length::Fixed(70.0))
+                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
             Self::segment_button(
                 if self.new_rule_floating {
                     "Yüzen"
@@ -5314,9 +5365,10 @@ impl CortenSettingsApp {
             let key_owned = action_key.to_string();
             let editor = text_input("Super+...", chord)
                 .on_input(move |val| Message::UpdateShortcut(key_owned.clone(), val))
-                .padding([4, 8])
+                .padding([6, 10])
                 .size(Typography::BODY_SM)
-                .width(Length::Fixed(140.0));
+                .width(Length::Fixed(140.0))
+                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
 
             container(
                 row![
