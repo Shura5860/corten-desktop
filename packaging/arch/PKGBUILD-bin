@@ -27,15 +27,26 @@ source=("${url}/releases/download/v${pkgver}/corten-desktop-v${pkgver}-x86_64-li
 sha256sums=('SKIP')
 
 package() {
-    cd "${srcdir}"
+    local root="${srcdir}/corten-desktop-v${pkgver}-x86_64-linux"
+    if [ -d "${root}/bin" ]; then
+        cd "${root}"
+    else
+        cd "${srcdir}"
+    fi
+
     install -dm755 "${pkgdir}/usr/bin"
-    for bin in corten-*; do
+    local bindir="."
+    if [ -d "bin" ]; then
+        bindir="bin"
+    fi
+
+    for bin in "${bindir}"/corten-*; do
         if [ -f "${bin}" ] && [ -x "${bin}" ]; then
-            install -Dm755 "${bin}" "${pkgdir}/usr/bin/${bin}"
+            install -Dm755 "${bin}" "${pkgdir}/usr/bin/$(basename "${bin}")"
         fi
     done
-    if [ -f "cortenctl" ]; then
-        install -Dm755 "cortenctl" "${pkgdir}/usr/bin/cortenctl"
+    if [ -f "${bindir}/cortenctl" ]; then
+        install -Dm755 "${bindir}/cortenctl" "${pkgdir}/usr/bin/cortenctl"
     fi
     if [ ! -f "${pkgdir}/usr/bin/corten-terminal" ]; then
         cat > "${pkgdir}/usr/bin/corten-terminal" << 'EOF'
@@ -49,4 +60,34 @@ else exec xterm "$@"; fi
 EOF
         chmod 755 "${pkgdir}/usr/bin/corten-terminal"
     fi
+
+    if [ -f "corten-portal/corten.portal" ]; then
+        install -Dm644 "corten-portal/corten.portal" \
+            "${pkgdir}/usr/share/xdg-desktop-portal/portals/corten.portal"
+    fi
+    if [ -f "corten-portal/corten-portals.conf" ]; then
+        install -Dm644 "corten-portal/corten-portals.conf" \
+            "${pkgdir}/usr/share/xdg-desktop-portal/corten-portals.conf"
+    fi
+    if [ -d "assets/wallpapers" ]; then
+        install -dm755 "${pkgdir}/usr/share/backgrounds/corten"
+        cp -r assets/wallpapers/* "${pkgdir}/usr/share/backgrounds/corten/"
+    fi
+    if [ -d "systemd" ]; then
+        for unit in systemd/*.service systemd/*.target; do
+            if [ -f "${unit}" ]; then
+                install -Dm644 "${unit}" "${pkgdir}/usr/lib/systemd/user/$(basename "${unit}")"
+            fi
+        done
+    fi
+
+    install -dm755 "${pkgdir}/usr/share/wayland-sessions"
+    cat > "${pkgdir}/usr/share/wayland-sessions/corten.desktop" << 'EOF'
+[Desktop Entry]
+Name=Corten Desktop
+Comment=Pure-Rust Wayland Desktop Environment
+Exec=/usr/bin/corten-session
+Type=Application
+DesktopNames=corten
+EOF
 }
