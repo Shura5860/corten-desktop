@@ -559,12 +559,18 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
 pub fn scan_desktop_entries() -> Vec<AppEntry> {
     let mut search_paths = Vec::new();
 
-    // 1. User local applications
+    // 1. User local applications & user Flatpak exports
     if let Some(base_dirs) = directories::BaseDirs::new() {
         search_paths.push(base_dirs.data_dir().join("applications"));
+        search_paths.push(
+            base_dirs
+                .data_dir()
+                .join("flatpak/exports/share/applications"),
+        );
     }
 
-    // 2. System application directories
+    // 2. System & system Flatpak application directories
+    search_paths.push(PathBuf::from("/var/lib/flatpak/exports/share/applications"));
     search_paths.push(PathBuf::from("/usr/local/share/applications"));
     search_paths.push(PathBuf::from("/usr/share/applications"));
 

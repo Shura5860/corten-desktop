@@ -406,7 +406,7 @@ fn main() -> Result<()> {
         .init();
 
     info!("==========================================");
-    info!("   CORTEN DESKTOP ENVIRONMENT v0.1.0      ");
+    info!("   CORTEN DESKTOP ENVIRONMENT v{}      ", env!("CARGO_PKG_VERSION"));
     info!("   Pure Rust Wayland Session Orchestrator ");
     info!("==========================================");
 
@@ -470,6 +470,25 @@ fn main() -> Result<()> {
     env::set_var("GDK_BACKEND", "wayland,x11,*");
     env::set_var("QT_QPA_PLATFORM", "wayland;xcb");
     env::set_var("WINIT_UNIX_BACKEND", "wayland");
+    env::set_var("ELECTRON_OZONE_PLATFORM_HINT", "auto");
+    env::set_var("OZONE_PLATFORM", "wayland");
+    // Ensure Flatpak exported .desktop entries and icons are discoverable via XDG_DATA_DIRS
+    {
+        let home = env::var("HOME").unwrap_or_default();
+        let user_fp = format!("{}/.local/share/flatpak/exports/share", home);
+        let sys_fp = "/var/lib/flatpak/exports/share";
+        let cur = env::var("XDG_DATA_DIRS")
+            .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
+        let mut parts: Vec<String> = Vec::new();
+        if !home.is_empty() && !cur.split(':').any(|p| p == user_fp) {
+            parts.push(user_fp);
+        }
+        if !cur.split(':').any(|p| p == sys_fp) {
+            parts.push(sys_fp.to_string());
+        }
+        parts.push(cur);
+        env::set_var("XDG_DATA_DIRS", parts.join(":"));
+    }
     let cursor_theme = if std::path::Path::new("/usr/share/icons/breeze_cursors").exists() {
         "breeze_cursors"
     } else if std::path::Path::new("/usr/share/icons/Adwaita").exists() {

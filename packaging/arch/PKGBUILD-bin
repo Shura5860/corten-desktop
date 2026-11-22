@@ -27,12 +27,11 @@ depends=(
     'hicolor-icon-theme'
     'adwaita-cursors'
     'flatpak'
+    'xorg-xwayland'
 )
 optdepends=(
     'greetd: Display manager for Corten Greeter login screen (run: sudo corten-enable-greeter)'
     'cage: Wayland kiosk compositor for Corten Greeter'
-    'flatpak: Install Flathub applications directly from Corten Forge'
-    'xorg-xwayland: X11 application compatibility via XWayland'
     'networkmanager: Wi-Fi, VPN & Hotspot management in Corten Panel/Settings'
 )
 provides=('corten-desktop')

@@ -410,9 +410,19 @@ impl CortenForgeApp {
             Message::LaunchApp(pkg) => {
                 match pkg.source {
                     PackageSource::Flatpak => {
-                        let _ = std::process::Command::new("flatpak")
-                            .args(["run", &pkg.id])
-                            .spawn();
+                        let mut cmd = std::process::Command::new("flatpak");
+                        cmd.args([
+                            "run",
+                            "--env=ELECTRON_OZONE_PLATFORM_HINT=auto",
+                            &pkg.id,
+                        ]);
+                        if pkg.id == "com.spotify.Client" {
+                            cmd.args([
+                                "--enable-features=UseOzonePlatform",
+                                "--ozone-platform=wayland",
+                            ]);
+                        }
+                        let _ = cmd.spawn();
                     }
                     PackageSource::ArchRepo | PackageSource::Aur => {
                         let _ = std::process::Command::new(&pkg.id).spawn();

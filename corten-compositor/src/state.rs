@@ -163,6 +163,7 @@ pub struct CortenCompositor {
     )>,
     pub split_drag: Option<(Point<f64, smithay::utils::Logical>, f32)>,
     pub snap_preview: Option<Rectangle<i32, smithay::utils::Logical>>,
+    pub snap_flyout_window: Option<u64>,
     pub drag_split_target: Option<(
         smithay::desktop::Window,
         crate::layout::SplitDirection,
@@ -1241,6 +1242,7 @@ impl CortenCompositor {
             resized_window: None,
             split_drag: None,
             snap_preview: None,
+            snap_flyout_window: None,
             drag_split_target: None,
             selection_box: None,
             alt_tab_active: false,

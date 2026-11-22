@@ -243,6 +243,23 @@ pub fn compute_resized_rect(
 
 /// Configures a window's logical geometry for either Wayland or XWayland surfaces.
 pub fn configure_window_geometry(window: &Window, rect: Rectangle<i32, Logical>) {
+    configure_window_geometry_ex(window, rect, None, false);
+}
+
+pub fn configure_window_geometry_force(
+    window: &Window,
+    rect: Rectangle<i32, Logical>,
+    maximized: Option<bool>,
+) {
+    configure_window_geometry_ex(window, rect, maximized, true);
+}
+
+fn configure_window_geometry_ex(
+    window: &Window,
+    rect: Rectangle<i32, Logical>,
+    maximized: Option<bool>,
+    force_send: bool,
+) {
     if let Some(toplevel) = window.toplevel() {
         let uses_ssd = window_uses_ssd(window);
         let needs_configure = toplevel.with_pending_state(|pending| {
@@ -251,10 +268,24 @@ pub fn configure_window_geometry(window: &Window, rect: Rectangle<i32, Logical>)
             let titlebar_h = if is_fs || !uses_ssd { 0 } else { TITLEBAR_HEIGHT };
             let client_h = (rect.size.h - titlebar_h).max(100);
             let new_size = Some((rect.size.w.max(160), client_h).into());
-            let mut changed = false;
+            let mut changed = force_send;
             if pending.size != new_size {
                 pending.size = new_size;
                 changed = true;
+            }
+            if pending.bounds != new_size {
+                pending.bounds = new_size;
+                changed = true;
+            }
+            if let Some(max) = maximized {
+                let was_max = pending.states.contains(State::Maximized);
+                if max && !was_max {
+                    pending.states.set(State::Maximized);
+                    changed = true;
+                } else if !max && was_max {
+                    pending.states.unset(State::Maximized);
+                    changed = true;
+                }
             }
             changed
         });
@@ -267,7 +298,7 @@ pub fn configure_window_geometry(window: &Window, rect: Rectangle<i32, Logical>)
             Point::from((rect.loc.x, rect.loc.y + titlebar_h)),
             Size::from((rect.size.w.max(160), (rect.size.h - titlebar_h).max(100))),
         );
-        if x11.geometry() != x11_rect {
+        if force_send || x11.geometry() != x11_rect {
             let _ = x11.configure(x11_rect);
         }
     }
@@ -2989,8 +3020,8 @@ pub fn snap_flyout_bounds(win_rect: Rectangle<i32, Logical>) -> Rectangle<i32, L
     Rectangle::new(Point::from((fx, fy)), Size::from((flyout_w, flyout_h)))
 }
 
-/// Returns `true` if `cursor` is hovering the Maximize (`□`) button or the Snap Layouts Flyout below it.
-pub fn is_maximize_or_flyout_hovered(
+/// Returns `true` strictly when `cursor` is directly over the Maximize (`□`) titlebar button.
+pub fn is_maximize_button_hovered(
     win_rect: Rectangle<i32, Logical>,
     cursor: Point<f64, Logical>,
 ) -> bool {
@@ -2999,10 +3030,21 @@ pub fn is_maximize_or_flyout_hovered(
     }
     let rel_x = cursor.x - win_rect.loc.x as f64;
     let rel_y = cursor.y - win_rect.loc.y as f64;
-    let on_max_btn =
-        (0.0..=36.0).contains(&rel_y) && rel_x >= (win_rect.size.w as f64 - 62.0) && rel_x <= (win_rect.size.w as f64 - 32.0);
-    if on_max_btn {
+    (4.0..=32.0).contains(&rel_y)
+        && rel_x >= (win_rect.size.w as f64 - 58.0)
+        && rel_x <= (win_rect.size.w as f64 - 34.0)
+}
+
+/// Returns `true` if `cursor` is hovering the Maximize (`□`) button or the Snap Layouts Flyout below it.
+pub fn is_maximize_or_flyout_hovered(
+    win_rect: Rectangle<i32, Logical>,
+    cursor: Point<f64, Logical>,
+) -> bool {
+    if is_maximize_button_hovered(win_rect, cursor) {
         return true;
+    }
+    if win_rect.size.w <= 160 {
+        return false;
     }
     let flyout = snap_flyout_bounds(win_rect);
     flyout.to_f64().contains(cursor)

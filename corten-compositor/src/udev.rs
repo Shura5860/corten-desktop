@@ -420,6 +420,7 @@ fn build_secondary_scene(
                 is_tiled,
                 &tabs,
                 None,
+                false,
             );
         }
 
@@ -2236,26 +2237,30 @@ pub fn run_drm(
                                         let w_f64 = rect.size.w as f64;
 
                                         if b.button() == 272 {
-                                            if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
-                                                let usable_area = {
-                                                    let mut map = layer_map_for_output(&target_output);
-                                                    map.arrange();
-                                                    map.non_exclusive_zone()
-                                                };
-                                                let gap = state.layout_for_output(&target_output).gap();
-                                                let snap_target = crate::layout::compute_snap_zone_rect(
-                                                    usable_area,
-                                                    zone,
-                                                    gap,
-                                                );
-                                                let layout = state.layout_for_output_mut(&target_output);
-                                                layout.set_fullscreen(&window, false);
-                                                layout.set_maximized(&window, usable_area, false);
-                                                layout.set_floating_geometry(&window, snap_target);
-                                                crate::layout::configure_window_geometry(&window, snap_target);
-                                                state.snap_preview = None;
-                                                state.sync_ipc_snapshot();
-                                                continue;
+                                            let win_id = crate::layout::window_stable_id(&window);
+                                            if state.snap_flyout_window == Some(win_id) {
+                                                if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
+                                                    let usable_area = {
+                                                        let mut map = layer_map_for_output(&target_output);
+                                                        map.arrange();
+                                                        map.non_exclusive_zone()
+                                                    };
+                                                    let gap = state.layout_for_output(&target_output).gap();
+                                                    let snap_target = crate::layout::compute_snap_zone_rect(
+                                                        usable_area,
+                                                        zone,
+                                                        gap,
+                                                    );
+                                                    let layout = state.layout_for_output_mut(&target_output);
+                                                    layout.set_fullscreen(&window, false);
+                                                    layout.set_maximized(&window, usable_area, false);
+                                                    layout.set_floating_geometry(&window, snap_target);
+                                                    crate::layout::configure_window_geometry_force(&window, snap_target, Some(false));
+                                                    state.snap_preview = None;
+                                                    state.snap_flyout_window = None;
+                                                    state.sync_ipc_snapshot();
+                                                    continue;
+                                                }
                                             }
                                             let titlebar_h = crate::layout::window_titlebar_height(
                                                 &window,
@@ -2462,14 +2467,16 @@ pub fn run_drm(
                                                 state.layout_for_output_mut(&target_output);
                                             layout.swap_windows(&window, &target_win);
                                         } else {
-                                            state
-                                                .layout_for_output_mut(&target_output)
-                                                .set_fullscreen(&window, false);
-                                            state
-                                                .layout_for_output_mut(&target_output)
-                                                .set_floating_geometry(&window, snap_rect);
-                                            crate::layout::configure_window_geometry(
-                                                &window, snap_rect,
+                                            let is_full_max = snap_rect == usable_area;
+                                            let layout =
+                                                state.layout_for_output_mut(&target_output);
+                                            layout.set_fullscreen(&window, false);
+                                            layout.set_maximized(&window, usable_area, is_full_max);
+                                            layout.set_floating_geometry(&window, snap_rect);
+                                            crate::layout::configure_window_geometry_force(
+                                                &window,
+                                                snap_rect,
+                                                Some(is_full_max),
                                             );
                                         }
                                     } else if state
@@ -3352,6 +3359,7 @@ pub fn run_drm(
                     is_tiled,
                     &tabs,
                     rounded_header,
+                    state.snap_flyout_window == Some(win_id),
                 );
             }
 
@@ -3440,66 +3448,35 @@ pub fn run_drm(
         }
 
         if !has_fullscreen {
-            // Render Ghost Acrylic Snap Silhouette overlay when snapping/docking a window
+            // Render silky translucent luminous mist preview when snapping/docking a window
             if let Some(snap_rect) = state.snap_preview {
-                let snap_margin = 8;
+                let snap_margin = 10;
                 let inset_loc = smithay::utils::Point::from((snap_rect.loc.x + snap_margin, snap_rect.loc.y + snap_margin));
                 let inset_size = smithay::utils::Size::from(((snap_rect.size.w - snap_margin * 2).max(50), (snap_rect.size.h - snap_margin * 2).max(50)));
                 let inset_log = Rectangle::new(inset_loc, inset_size);
-                let phys_snap = Rectangle::new(
-                    inset_loc.to_physical_precise_round(fractional_scale),
-                    inset_size.to_physical_precise_round(fractional_scale),
-                );
                 if let Some(manager) = glow_shader.as_ref() {
-                    let ghost_glow = manager.create_styled_element(
+                    let mist_elem = manager.create_snap_preview_element(
                         inset_log,
-                        16,
-                        (10.0, 10.0),
-                        [palette.primary.r, palette.primary.g, palette.primary.b, 0.14],
-                        [palette.primary.r, palette.primary.g, palette.primary.b, 0.65],
-                        1.5,
+                        12.0,
+                        [palette.primary.r, palette.primary.g, palette.primary.b, 1.0],
                     );
-                    elements.push(CustomRenderElement::from(ghost_glow));
+                    elements.push(CustomRenderElement::from(mist_elem));
                 } else {
-                    let snap_border = Color32F::new(
+                    let phys_snap = Rectangle::new(
+                        inset_loc.to_physical_precise_round(fractional_scale),
+                        inset_size.to_physical_precise_round(fractional_scale),
+                    );
+                    let snap_color = Color32F::new(
                         palette.primary.r,
                         palette.primary.g,
                         palette.primary.b,
-                        0.72,
+                        0.10,
                     );
-                    draw_glow_ring(&mut elements, phys_snap, 0, 2, snap_border, 4);
-                }
-                let snap_color = Color32F::new(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.12,
-                );
-                elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                    Id::new(),
-                    phys_snap,
-                    CommitCounter::default(),
-                    snap_color,
-                    Kind::Unspecified,
-                )));
-                let brk_len = (18.0 * fractional_scale).round().max(8.0) as i32;
-                let brk_thk = (3.0 * fractional_scale).round().max(2.0) as i32;
-                let brk_col = Color32F::new(1.0, 0.85, 0.65, 0.92);
-                for (bx, by, bw, bh) in [
-                    (phys_snap.loc.x, phys_snap.loc.y, brk_len, brk_thk),
-                    (phys_snap.loc.x, phys_snap.loc.y, brk_thk, brk_len),
-                    (phys_snap.loc.x + phys_snap.size.w - brk_len, phys_snap.loc.y, brk_len, brk_thk),
-                    (phys_snap.loc.x + phys_snap.size.w - brk_thk, phys_snap.loc.y, brk_thk, brk_len),
-                    (phys_snap.loc.x, phys_snap.loc.y + phys_snap.size.h - brk_thk, brk_len, brk_thk),
-                    (phys_snap.loc.x, phys_snap.loc.y + phys_snap.size.h - brk_len, brk_thk, brk_len),
-                    (phys_snap.loc.x + phys_snap.size.w - brk_len, phys_snap.loc.y + phys_snap.size.h - brk_thk, brk_len, brk_thk),
-                    (phys_snap.loc.x + phys_snap.size.w - brk_thk, phys_snap.loc.y + phys_snap.size.h - brk_len, brk_thk, brk_len),
-                ] {
                     elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                         Id::new(),
-                        Rectangle::new(smithay::utils::Point::from((bx, by)), (bw, bh).into()),
-                        cursor_commit,
-                        brk_col,
+                        phys_snap,
+                        CommitCounter::default(),
+                        snap_color,
                         Kind::Unspecified,
                     )));
                 }
@@ -4116,18 +4093,29 @@ fn handle_pointer_motion_interactions(
         let gap = state.layout_for_output(&target_output).gap();
         let window_rects =
             state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
-        if let Some((_, rect)) = window_rects
+        if let Some((win, rect)) = window_rects
             .into_iter()
             .rev()
             .find(|(_, r)| r.to_f64().contains(out_rel_loc))
         {
-            if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
-                state.snap_preview = Some(crate::layout::compute_snap_zone_rect(
-                    usable_area,
-                    zone,
-                    gap,
-                ));
+            let win_id = crate::layout::window_stable_id(&win);
+            if crate::layout::is_maximize_button_hovered(rect, out_rel_loc) {
+                state.snap_flyout_window = Some(win_id);
+                state.snap_preview = None;
+            } else if state.snap_flyout_window == Some(win_id)
+                && crate::layout::is_maximize_or_flyout_hovered(rect, out_rel_loc)
+            {
+                if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
+                    state.snap_preview = Some(crate::layout::compute_snap_zone_rect(
+                        usable_area,
+                        zone,
+                        gap,
+                    ));
+                } else {
+                    state.snap_preview = None;
+                }
             } else {
+                state.snap_flyout_window = None;
                 state.snap_preview = None;
             }
             let rw_x = out_rel_loc.x - rect.loc.x as f64;

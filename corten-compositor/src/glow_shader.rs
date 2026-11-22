@@ -617,9 +617,60 @@ void main() {
 }
 "#;
 
+pub const SNAP_PREVIEW_SHADER_SRC: &str = r#"
+precision mediump float;
+varying vec2 v_coords;
+uniform vec2 size;
+uniform float alpha;
+
+#if defined(DEBUG_FLAGS)
+uniform float tint;
+#endif
+
+uniform vec4 u_color;
+uniform float u_radius;
+
+float sd_rounded(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+void main() {
+    vec2 pixel_coord = v_coords * size;
+    vec2 half_size = size * 0.5;
+    vec2 p = pixel_coord - half_size;
+    float pad = 12.0;
+    vec2 inner_half = max(half_size - vec2(pad), vec2(4.0));
+
+    float dist = sd_rounded(p, inner_half, u_radius);
+
+    // Soft outer luminous mist halo (0..12px outside the rounded snap zone)
+    float outer_mist = (dist > 0.0)
+        ? exp(-(dist * dist) / 28.0) * 0.16 * (1.0 - smoothstep(pad * 0.5, pad, dist))
+        : 0.0;
+
+    // Inside the rounded snap zone: delicate translucent glass mist + subtle inner glow near edges
+    float inside_mask = 1.0 - smoothstep(-0.7, 0.7, dist);
+    float edge_glow = inside_mask * exp(dist * 0.055) * 0.11;
+    float base_mist = inside_mask * 0.065;
+
+    // Whisper-soft 1.2px luminous rim along the rounded contour
+    float rim = (1.0 - smoothstep(0.0, 1.4, abs(dist))) * 0.42;
+
+    vec3 warm_tint = mix(u_color.rgb, vec3(1.0, 0.96, 0.92), 0.25);
+    float total_a = clamp((base_mist + edge_glow + outer_mist + rim) * u_color.a * alpha, 0.0, 0.75);
+    if (total_a <= 0.001) {
+        discard;
+    }
+    vec3 rgb = mix(u_color.rgb, warm_tint, clamp(rim * 1.4, 0.0, 1.0));
+    gl_FragColor = vec4(rgb * total_a, total_a);
+}
+"#;
+
 pub struct GlowShaderManager {
     program: GlesPixelProgram,
     header_program: GlesPixelProgram,
+    snap_program: GlesPixelProgram,
 }
 
 impl GlowShaderManager {
@@ -639,14 +690,50 @@ impl GlowShaderManager {
             UniformName::new("u_rim_color", UniformType::_4f),
             UniformName::new("u_radius", UniformType::_1f),
         ];
+        let snap_uniforms = [
+            UniformName::new("u_color", UniformType::_4f),
+            UniformName::new("u_radius", UniformType::_1f),
+        ];
 
         let program = renderer.compile_custom_pixel_shader(GLOW_SHADER_SRC, &uniforms)?;
         let header_program =
             renderer.compile_custom_pixel_shader(ROUNDED_HEADER_SHADER_SRC, &header_uniforms)?;
+        let snap_program =
+            renderer.compile_custom_pixel_shader(SNAP_PREVIEW_SHADER_SRC, &snap_uniforms)?;
         Ok(Self {
             program,
             header_program,
+            snap_program,
         })
+    }
+
+    /// Creates a silky translucent luminous mist preview for window snap / tiling zones.
+    pub fn create_snap_preview_element(
+        &self,
+        snap_rect: Rectangle<i32, Logical>,
+        radius: f32,
+        color: [f32; 4],
+    ) -> PixelShaderElement {
+        let pad = 12;
+        let area = Rectangle::new(
+            Point::from((snap_rect.loc.x - pad, snap_rect.loc.y - pad)),
+            (snap_rect.size.w + pad * 2, snap_rect.size.h + pad * 2).into(),
+        );
+        let uniforms = vec![
+            Uniform::new(
+                Cow::Borrowed("u_color"),
+                UniformValue::_4f(color[0], color[1], color[2], color[3]),
+            ),
+            Uniform::new(Cow::Borrowed("u_radius"), UniformValue::_1f(radius)),
+        ];
+        PixelShaderElement::new(
+            self.snap_program.clone(),
+            area,
+            None,
+            1.0,
+            uniforms,
+            Kind::Unspecified,
+        )
     }
 
     pub fn create_styled_element(

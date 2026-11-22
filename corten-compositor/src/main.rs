@@ -3059,6 +3059,7 @@ fn main() -> anyhow::Result<()> {
                             is_tiled,
                             &tabs,
                             rounded_header,
+                            state.snap_flyout_window == Some(win_id),
                         );
                     }
                 }
@@ -3079,68 +3080,36 @@ fn main() -> anyhow::Result<()> {
                 elements.extend(or_elements.into_iter().map(CustomRenderElement::from));
             }
 
-            // Render Ghost Acrylic Snap Silhouette overlay when snapping/docking a window
+            // Render silky translucent luminous mist preview when snapping/docking a window
             if fullscreen_win.is_none() {
                 if let Some(snap_rect) = state.snap_preview {
-                    let snap_margin = 8;
+                    let snap_margin = 10;
                     let inset_loc = Point::from((snap_rect.loc.x + snap_margin, snap_rect.loc.y + snap_margin));
                     let inset_size = Size::from(((snap_rect.size.w - snap_margin * 2).max(50), (snap_rect.size.h - snap_margin * 2).max(50)));
                     let inset_log = Rectangle::new(inset_loc, inset_size);
-                    let phys_snap = Rectangle::new(
-                        inset_loc.to_physical_precise_round(fractional_scale),
-                        inset_size.to_physical_precise_round(fractional_scale),
-                    );
                     if let Some(manager) = glow_shader.as_ref() {
-                        let ghost_glow = manager.create_styled_element(
+                        let mist_elem = manager.create_snap_preview_element(
                             inset_log,
-                            16,
-                            (10.0, 10.0),
-                            [palette.primary.r, palette.primary.g, palette.primary.b, 0.14],
-                            [palette.primary.r, palette.primary.g, palette.primary.b, 0.65],
-                            1.5,
+                            12.0,
+                            [palette.primary.r, palette.primary.g, palette.primary.b, 1.0],
                         );
-                        elements.push(CustomRenderElement::from(ghost_glow));
+                        elements.push(CustomRenderElement::from(mist_elem));
                     } else {
-                        let snap_border = Color32F::new(
+                        let phys_snap = Rectangle::new(
+                            inset_loc.to_physical_precise_round(fractional_scale),
+                            inset_size.to_physical_precise_round(fractional_scale),
+                        );
+                        let snap_color = Color32F::new(
                             palette.primary.r,
                             palette.primary.g,
                             palette.primary.b,
-                            0.72,
+                            0.10,
                         );
-                        draw_glow_ring(&mut elements, phys_snap, 0, 2, snap_border, 4);
-                    }
-                    let snap_color = Color32F::new(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.12,
-                    );
-                    elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-                        Id::new(),
-                        phys_snap,
-                        CommitCounter::default(),
-                        snap_color,
-                        Kind::Unspecified,
-                    )));
-                    // Industrial HUD corner alignment brackets
-                    let brk_len = (18.0 * fractional_scale).round().max(8.0) as i32;
-                    let brk_thk = (3.0 * fractional_scale).round().max(2.0) as i32;
-                    let brk_col = Color32F::new(1.0, 0.85, 0.65, 0.92);
-                    for (bx, by, bw, bh) in [
-                        (phys_snap.loc.x, phys_snap.loc.y, brk_len, brk_thk),
-                        (phys_snap.loc.x, phys_snap.loc.y, brk_thk, brk_len),
-                        (phys_snap.loc.x + phys_snap.size.w - brk_len, phys_snap.loc.y, brk_len, brk_thk),
-                        (phys_snap.loc.x + phys_snap.size.w - brk_thk, phys_snap.loc.y, brk_thk, brk_len),
-                        (phys_snap.loc.x, phys_snap.loc.y + phys_snap.size.h - brk_thk, brk_len, brk_thk),
-                        (phys_snap.loc.x, phys_snap.loc.y + phys_snap.size.h - brk_len, brk_thk, brk_len),
-                        (phys_snap.loc.x + phys_snap.size.w - brk_len, phys_snap.loc.y + phys_snap.size.h - brk_thk, brk_len, brk_thk),
-                        (phys_snap.loc.x + phys_snap.size.w - brk_thk, phys_snap.loc.y + phys_snap.size.h - brk_len, brk_thk, brk_len),
-                    ] {
                         elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                             Id::new(),
-                            Rectangle::new(Point::from((bx, by)), (bw, bh).into()),
-                            cursor_commit,
-                            brk_col,
+                            phys_snap,
+                            CommitCounter::default(),
+                            snap_color,
                             Kind::Unspecified,
                         )));
                     }
@@ -4259,6 +4228,7 @@ pub(crate) fn draw_window_titlebar(
     is_tiled: bool,
     tabs: &[(u64, String, bool)],
     rounded_header: Option<PixelShaderElement>,
+    show_snap_flyout: bool,
 ) {
     let mut tb_elements: Vec<CustomRenderElement> = Vec::with_capacity(96);
 
@@ -4523,7 +4493,8 @@ pub(crate) fn draw_window_titlebar(
             let rel_cy = cursor_loc.y - log_rect.loc.y as f64;
             let w_log = log_rect.size.w as f64;
 
-            let flyout_hovered = crate::layout::is_maximize_or_flyout_hovered(log_rect, cursor_loc);
+            let flyout_hovered =
+                show_snap_flyout && crate::layout::is_maximize_or_flyout_hovered(log_rect, cursor_loc);
 
             let hover_close = (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 32.0) && rel_cx <= w_log;
             let hover_max = ((0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 60.0) && rel_cx < (w_log - 32.0))
