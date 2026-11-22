@@ -1596,6 +1596,25 @@ impl LayoutManager {
         self.active_window()
     }
 
+    /// Swap two specific tiled windows in the tiling order (used for drag-to-swap).
+    pub fn swap_windows(&mut self, a: &Window, b: &Window) -> bool {
+        if a == b {
+            return false;
+        }
+        let pos_a = self.windows.iter().position(|w| w == a);
+        let pos_b = self.windows.iter().position(|w| w == b);
+        if let (Some(ia), Some(ib)) = (pos_a, pos_b) {
+            self.windows.swap(ia, ib);
+            if self.active_index == ia {
+                self.active_index = ib;
+            } else if self.active_index == ib {
+                self.active_index = ia;
+            }
+            return true;
+        }
+        false
+    }
+
     /// Swap the active window with the next window in the tiling order.
     pub fn swap_next(&mut self) {
         if self.windows.len() < 2 {
@@ -2471,8 +2490,8 @@ impl LayoutManager {
         let targets = self.arrange(usable_area);
         let mut animated_results = Vec::with_capacity(targets.len());
 
-        let spring_stiffness = 0.32; // Responsive 60-120fps smooth spring dampening factor
-        let alpha_stiffness = 0.28_f32;
+        let spring_stiffness = 0.28; // Silky critically-damped 60-120fps spring interpolation
+        let alpha_stiffness = 0.26_f32;
         self.workspace_slide_offset *= 0.68;
         if self.workspace_slide_offset.abs() < 0.75 {
             self.workspace_slide_offset = 0.0;
@@ -2494,12 +2513,12 @@ impl LayoutManager {
             let target_fh = target_rect.size.h as f32;
 
             let current_entry = self.animated_rects.entry(win_id).or_insert_with(|| {
-                // Initial spawn animation: start slightly smaller (92% scale) and centered
-                let spawn_inset_x = target_fw * 0.04;
-                let spawn_inset_y = target_fh * 0.04;
+                // Smooth slide-in + scale-up spawn animation (90% scale, slight slide offset)
+                let spawn_inset_x = target_fw * 0.05 + 28.0;
+                let spawn_inset_y = target_fh * 0.05 + 14.0;
                 Rectangle::new(
                     Point::from((target_fx + spawn_inset_x, target_fy + spawn_inset_y)),
-                    Size::from((target_fw * 0.92, target_fh * 0.92)),
+                    Size::from((target_fw * 0.90, target_fh * 0.90)),
                 )
             });
 

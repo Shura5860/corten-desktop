@@ -163,6 +163,9 @@ pub enum Message {
     SetPatina(String),
     SetLanguage(String),
     SetDensity(String),
+    SetWindowCornerRadius(u16),
+    SetWindowGap(i32),
+    SetWindowBorderStyle(String),
     UpdateWallpaperPath(String),
     SelectPresetWallpaper(String),
     ChooseWallpaper,
@@ -526,6 +529,27 @@ impl CortenSettingsApp {
                 self.appearance.density = density;
                 self.status_message = Some(
                     "Bilgi yoğunluğu güncellendi. Uygulanması için 'Değişiklikleri Kaydet'e basın."
+                        .into(),
+                );
+            }
+            Message::SetWindowCornerRadius(r) => {
+                self.appearance.window_corner_radius = r;
+                self.status_message = Some(format!(
+                    "Pencere köşe yarıçapı {} px yapıldı. 'Değişiklikleri Kaydet' ile uygulayın.",
+                    r
+                ));
+            }
+            Message::SetWindowGap(gap) => {
+                self.appearance.window_gap = gap;
+                self.status_message = Some(format!(
+                    "Tiling pencere boşluğu {} px yapıldı. 'Değişiklikleri Kaydet' ile uygulayın.",
+                    gap
+                ));
+            }
+            Message::SetWindowBorderStyle(style) => {
+                self.appearance.window_border_style = style;
+                self.status_message = Some(
+                    "Pencere kenarlık stili güncellendi. 'Değişiklikleri Kaydet' ile uygulayın."
                         .into(),
                 );
             }
@@ -2087,8 +2111,86 @@ impl CortenSettingsApp {
             palette,
         );
 
+        // 4. Window Corner Radius
+        let cur_r = self.appearance.window_corner_radius;
+        let corner_toggle = Self::segmented_pill(
+            vec![
+                ("Sivri", cur_r == 0, Message::SetWindowCornerRadius(0)),
+                ("6 px", cur_r == 6, Message::SetWindowCornerRadius(6)),
+                ("10 px", cur_r == 10, Message::SetWindowCornerRadius(10)),
+                ("14 px", cur_r == 14, Message::SetWindowCornerRadius(14)),
+            ],
+            palette,
+        );
+        let corner_row = Self::settings_row(
+            Some(Icon::SQUARE),
+            "Pencere Köşeleri",
+            Some("Pencere başlık ve gölge köşe yuvarlaklığı"),
+            corner_toggle,
+            palette,
+        );
+
+        // 5. Tiling Window Gap
+        let cur_gap = self.appearance.window_gap;
+        let gap_toggle = Self::segmented_pill(
+            vec![
+                ("0 px", cur_gap == 0, Message::SetWindowGap(0)),
+                ("6 px", cur_gap == 6, Message::SetWindowGap(6)),
+                ("12 px", cur_gap == 12, Message::SetWindowGap(12)),
+                ("18 px", cur_gap == 18, Message::SetWindowGap(18)),
+            ],
+            palette,
+        );
+        let gap_row = Self::settings_row(
+            Some(Icon::LAYOUT_GRID),
+            "Tiling Boşluğu",
+            Some("Yan yana dizili pencereler arasındaki boşluk"),
+            gap_toggle,
+            palette,
+        );
+
+        // 6. Window Border Style
+        let cur_border = self.appearance.window_border_style.as_str();
+        let border_toggle = Self::segmented_pill(
+            vec![
+                (
+                    "Kapalı",
+                    cur_border == "none",
+                    Message::SetWindowBorderStyle("none".into()),
+                ),
+                (
+                    "İnce Cam",
+                    cur_border == "subtle",
+                    Message::SetWindowBorderStyle("subtle".into()),
+                ),
+                (
+                    "Bakır",
+                    cur_border == "copper",
+                    Message::SetWindowBorderStyle("copper".into()),
+                ),
+            ],
+            palette,
+        );
+        let border_row = Self::settings_row(
+            Some(Icon::LAYERS),
+            "Pencere Kenarlığı",
+            Some("Aktif pencere kenar çizgisi yoğunluğu"),
+            border_toggle,
+            palette,
+        );
+
         // Group 1: Theme & Style
-        let theme_group = Self::settings_group(vec![theme_row, patina_row, density_row], palette);
+        let theme_group = Self::settings_group(
+            vec![
+                theme_row,
+                patina_row,
+                density_row,
+                corner_row,
+                gap_row,
+                border_row,
+            ],
+            palette,
+        );
 
         // Group 2: Wallpaper
         let current_wp = &self.appearance.wallpaper_path;

@@ -515,10 +515,11 @@ impl MultiApplication for CortenLockApp {
         let events = event::listen().map(Message::IcedEvent);
         let interval = if !self.shake_transition.is_complete()
             || !self.entrance_transition.is_complete()
+            || self.shake_count > 0
         {
             Duration::from_millis(16)
         } else {
-            Duration::from_millis(100)
+            Duration::from_millis(1000)
         };
         let timer = iced::time::every(interval).map(|_| Message::Tick);
         Subscription::batch(vec![events, timer])

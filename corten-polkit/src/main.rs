@@ -50,6 +50,7 @@ fn get_current_uid() -> u32 {
 pub struct PolkitAgentShared {
     pub active_request: Arc<Mutex<Option<AuthRequest>>>,
     pub dbus_connection: Arc<Mutex<Option<zbus::Connection>>>,
+    pub wake_notify: Arc<tokio::sync::Notify>,
 }
 
 pub struct PolkitDbusAgent {
@@ -101,6 +102,8 @@ impl PolkitDbusAgent {
             target_user,
             target_uid,
         });
+        drop(guard);
+        self.shared.wake_notify.notify_one();
         Ok(())
     }
 
@@ -109,6 +112,8 @@ impl PolkitDbusAgent {
         let mut guard = self.shared.active_request.lock().await;
         if guard.as_ref().is_some_and(|r| r.cookie == cookie) {
             *guard = None;
+            drop(guard);
+            self.shared.wake_notify.notify_one();
         }
         Ok(())
     }
@@ -257,7 +262,14 @@ impl Application for CortenPolkitApp {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        let timer = iced::time::every(std::time::Duration::from_millis(200)).map(|_| Message::CheckPending);
+        let notify = Arc::clone(&self.shared.wake_notify);
+        let wake_sub = Subscription::run_with_id(
+            "corten-polkit-wake",
+            futures_lite::stream::unfold(notify, |n| async move {
+                n.notified().await;
+                Some((Message::CheckPending, n))
+            }),
+        );
         if self.current_request.is_some() {
             let esc = iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
@@ -269,9 +281,9 @@ impl Application for CortenPolkitApp {
                     None
                 }
             });
-            Subscription::batch(vec![timer, esc])
+            Subscription::batch(vec![wake_sub, esc])
         } else {
-            timer
+            wake_sub
         }
     }
 
@@ -552,6 +564,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shared = PolkitAgentShared {
         active_request: Arc::new(Mutex::new(None)),
         dbus_connection: Arc::new(Mutex::new(None)),
+        wake_notify: Arc::new(tokio::sync::Notify::new()),
     };
 
     let dbus_shared = shared.clone();

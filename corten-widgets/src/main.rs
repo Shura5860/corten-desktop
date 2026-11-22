@@ -577,9 +577,13 @@ impl Application for CortenWidgetsApp {
             }),
         );
 
-        let slow_sub = iced::time::every(Duration::from_secs(1)).map(|_| Message::SlowTick);
-        let fast_sub = if self.current_track.is_playing {
-            iced::time::every(Duration::from_millis(50)).map(|_| Message::FastTick)
+        let slow_sub = if self.is_visible {
+            iced::time::every(Duration::from_secs(1)).map(|_| Message::SlowTick)
+        } else {
+            Subscription::none()
+        };
+        let fast_sub = if self.is_visible && self.current_track.is_playing {
+            iced::time::every(Duration::from_millis(100)).map(|_| Message::FastTick)
         } else {
             Subscription::none()
         };

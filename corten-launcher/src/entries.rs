@@ -301,6 +301,24 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
         .or_else(|| raw_icon.strip_suffix(".svg"))
         .unwrap_or(raw_icon);
 
+    // 1.6 Flatpak exports & Corten Forge cached PNG icons
+    if !clean_icon.is_empty() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let flatpak_candidates = [
+            format!("{}/.local/share/flatpak/exports/share/icons/hicolor/128x128/apps/{}.png", home, clean_icon),
+            format!("{}/.local/share/flatpak/exports/share/icons/hicolor/64x64/apps/{}.png", home, clean_icon),
+            format!("/var/lib/flatpak/exports/share/icons/hicolor/128x128/apps/{}.png", clean_icon),
+            format!("/var/lib/flatpak/exports/share/icons/hicolor/64x64/apps/{}.png", clean_icon),
+            format!("{}/.cache/corten-forge/icons/{}.img", home, clean_icon),
+        ];
+        for fp in &flatpak_candidates {
+            let p = PathBuf::from(fp);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
     let lower_name = name.to_lowercase();
     let lower_exec = exec.to_lowercase();
     let lower_icon = clean_icon.to_lowercase();

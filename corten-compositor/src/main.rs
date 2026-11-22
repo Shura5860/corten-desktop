@@ -1241,12 +1241,17 @@ fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
 
     let (mut theme_mode, mut active_patina) = (ThemeMode::Dark, PatinaVariant::Rust);
+    let mut window_corner_radius: f32 = 10.0;
+    let mut window_border_style: String = "subtle".to_string();
     if let Ok(app_cfg) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
         theme_mode = match app_cfg.get().theme_mode {
             corten_config::ThemeModeChoice::Light => ThemeMode::Light,
             corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
         };
         active_patina = PatinaVariant::from_code(&app_cfg.get().patina);
+        window_corner_radius = app_cfg.get().window_corner_radius as f32;
+        window_border_style = app_cfg.get().window_border_style.clone();
+        state.set_gap_for_all_outputs(app_cfg.get().window_gap);
     }
     let mut cursor_theme_manager = cursor::CursorThemeManager::new();
 
@@ -1348,6 +1353,9 @@ fn main() -> anyhow::Result<()> {
                     corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
                 };
                 active_patina = PatinaVariant::from_code(&app_cfg.get().patina);
+                window_corner_radius = app_cfg.get().window_corner_radius as f32;
+                window_border_style = app_cfg.get().window_border_style.clone();
+                state.set_gap_for_all_outputs(app_cfg.get().window_gap);
                 palette_dirty = true;
                 info!("Compositor: Theme and Patina updated: {:?}", active_patina);
             }
@@ -2860,34 +2868,54 @@ fn main() -> anyhow::Result<()> {
                         base_scale,
                     );
 
+                    let is_fs = state.layout.is_fullscreen(window);
+                    let titlebar_h = layout::window_titlebar_height(window, is_fs);
+                    let is_tiled = state.layout.is_window_tiled(window);
+                    let is_max = state.layout.is_maximized(window);
+                    let zero_radius = is_fs || is_max || (is_tiled && state.layout.gap() == 0);
+                    let corner_radii: (f32, f32) = if zero_radius || window_corner_radius <= 0.5 {
+                        (0.0, 0.0)
+                    } else if titlebar_h > 0 {
+                        (window_corner_radius, 2.0)
+                    } else {
+                        (window_corner_radius, window_corner_radius)
+                    };
+
                     if is_active {
                         let is_high_vis = state.accessibility.high_vis_focus_ring
                             || state.accessibility.high_contrast;
-                        let (ring_width, ring_color, halo_radiance) = if is_high_vis {
+                        let (border_alpha, border_w, halo_radiance) = if is_high_vis {
+                            (0.95_f32, 2.0_f32, 0.16_f32)
+                        } else {
+                            match window_border_style.as_str() {
+                                "none" => (0.0, 0.0, 0.0),
+                                "copper" => (0.82, 1.5, 0.0),
+                                _ => (0.48, 1.25, 0.0),
+                            }
+                        };
+                        let (ring_width, ring_color) = if is_high_vis {
                             (
                                 3,
                                 Color32F::new(
                                     palette.primary.r,
                                     palette.primary.g,
                                     palette.primary.b,
-                                    1.0,
+                                    0.95,
                                 ),
-                                0.95,
                             )
                         } else {
                             (
-                                2,
+                                1,
                                 Color32F::new(
                                     palette.primary.r,
                                     palette.primary.g,
                                     palette.primary.b,
-                                    1.0,
+                                    border_alpha,
                                 ),
-                                0.72,
                             )
                         };
 
-                        // Render true GLSL hardware-accelerated Dual-Layer Elevation Shadow + Squircle Halo
+                        // Render clean GLSL elevation shadow + subtle hairline glass rim
                         if let Some(manager) = glow_shader.as_ref() {
                             let halo_color = [
                                 palette.primary.r,
@@ -2895,32 +2923,39 @@ fn main() -> anyhow::Result<()> {
                                 palette.primary.b,
                                 halo_radiance,
                             ];
-                            // 22px soft radiant blur halo + 16dp elevation shadow with 8px squircle corners
-                            let glow_elem =
-                                manager.create_element(glow_rect, 22, 8.0, halo_color);
+                            let border_color = [
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                border_alpha,
+                            ];
+                            let glow_elem = manager.create_styled_element(
+                                glow_rect,
+                                38,
+                                corner_radii,
+                                halo_color,
+                                border_color,
+                                border_w,
+                            );
                             elements.push(CustomRenderElement::from(glow_elem));
+                        } else if border_alpha > 0.01 {
+                            draw_glow_ring(&mut elements, phys_rect, 0, ring_width, ring_color, 2);
                         }
-
-                        // Sleek, clean Corten Patina inner core border (2px default, 3px high-vis)
-                        draw_glow_ring(&mut elements, phys_rect, 0, ring_width, ring_color, 4);
                     } else {
-                        // Grounded 4dp Dual-Layer shadow + subtle 1px border for inactive windows
+                        // Grounded elevation shadow + subtle 1px glass rim for inactive windows
                         if let Some(manager) = glow_shader.as_ref() {
-                            let shadow_elem =
-                                manager.create_inactive_shadow_element(glow_rect, 8.0);
+                            let shadow_elem = manager.create_inactive_shadow_element(
+                                glow_rect,
+                                corner_radii,
+                                [1.0, 1.0, 1.0, 0.09],
+                            );
                             elements.push(CustomRenderElement::from(shadow_elem));
+                        } else {
+                            let inactive_color = Color32F::new(1.0, 1.0, 1.0, 0.12);
+                            draw_glow_ring(&mut elements, phys_rect, 0, 1, inactive_color, 2);
                         }
-                        let inactive_color = Color32F::new(
-                            palette.border.r,
-                            palette.border.g,
-                            palette.border.b,
-                            0.45,
-                        );
-                        draw_glow_ring(&mut elements, phys_rect, 0, 1, inactive_color, 3);
                     }
 
-                    let is_fs = state.layout.is_fullscreen(window);
-                    let titlebar_h = layout::window_titlebar_height(window, is_fs);
                     let csd_offset = layout::window_csd_offset(window);
 
                     // Render window surface content (both Wayland toplevels and XWayland surfaces)
@@ -2969,11 +3004,45 @@ fn main() -> anyhow::Result<()> {
 
                     // Render clean Corten titlebar & controls ONLY for Server-Side Decorated (SSD) windows
                     if titlebar_h > 0 {
-                        let is_max = state.layout.is_maximized(window);
-                        let is_tiled = state.layout.is_window_tiled(window);
                         let win_id = layout::window_stable_id(window);
                         let tabs = state.layout.window_tabs_metadata(win_id);
                         let (app_id, title) = layout::window_metadata(window);
+                        let rounded_header = glow_shader.as_ref().map(|manager| {
+                            let (header_bg, _, _) =
+                                crate::render::compute_titlebar_colors(&palette, is_active, false);
+                            let bg_top = if is_active {
+                                [
+                                    (header_bg.r() + 0.035).min(1.0),
+                                    (header_bg.g() + 0.038).min(1.0),
+                                    (header_bg.b() + 0.048).min(1.0),
+                                    0.98,
+                                ]
+                            } else {
+                                [
+                                    (header_bg.r() + 0.018).min(1.0),
+                                    (header_bg.g() + 0.020).min(1.0),
+                                    (header_bg.b() + 0.025).min(1.0),
+                                    0.95,
+                                ]
+                            };
+                            let bg_bottom = [header_bg.r(), header_bg.g(), header_bg.b(), 0.98];
+                            let rim = if is_active {
+                                [1.0, 1.0, 1.0, 0.16]
+                            } else {
+                                [1.0, 1.0, 1.0, 0.07]
+                            };
+                            let header_log = Rectangle::new(
+                                glow_rect.loc,
+                                Size::from((glow_rect.size.w, titlebar_h)),
+                            );
+                            manager.create_rounded_header_element(
+                                header_log,
+                                corner_radii.0,
+                                bg_top,
+                                bg_bottom,
+                                rim,
+                            )
+                        });
                         draw_window_titlebar(
                             &mut elements,
                             renderer,
@@ -2989,6 +3058,7 @@ fn main() -> anyhow::Result<()> {
                             state.cursor_location,
                             is_tiled,
                             &tabs,
+                            rounded_header,
                         );
                     }
                 }
@@ -3021,35 +3091,37 @@ fn main() -> anyhow::Result<()> {
                         inset_size.to_physical_precise_round(fractional_scale),
                     );
                     if let Some(manager) = glow_shader.as_ref() {
-                        let ghost_glow = manager.create_element(
+                        let ghost_glow = manager.create_styled_element(
                             inset_log,
                             16,
-                            12.0,
-                            [palette.primary.r, palette.primary.g, palette.primary.b, 0.78],
+                            (10.0, 10.0),
+                            [palette.primary.r, palette.primary.g, palette.primary.b, 0.14],
+                            [palette.primary.r, palette.primary.g, palette.primary.b, 0.65],
+                            1.5,
                         );
                         elements.push(CustomRenderElement::from(ghost_glow));
+                    } else {
+                        let snap_border = Color32F::new(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.72,
+                        );
+                        draw_glow_ring(&mut elements, phys_snap, 0, 2, snap_border, 4);
                     }
                     let snap_color = Color32F::new(
                         palette.primary.r,
                         palette.primary.g,
                         palette.primary.b,
-                        0.16,
+                        0.12,
                     );
-                    let snap_border = Color32F::new(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.82,
-                    );
-                    draw_glow_ring(
-                        &mut elements,
+                    elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                        Id::new(),
                         phys_snap,
-                        0,
-                        phys_snap.size.w.min(phys_snap.size.h) / 2,
+                        CommitCounter::default(),
                         snap_color,
-                        14,
-                    );
-                    draw_glow_ring(&mut elements, phys_snap, 0, 2, snap_border, 14);
+                        Kind::Unspecified,
+                    )));
                     // Industrial HUD corner alignment brackets
                     let brk_len = (18.0 * fractional_scale).round().max(8.0) as i32;
                     let brk_thk = (3.0 * fractional_scale).round().max(2.0) as i32;
@@ -4186,6 +4258,7 @@ pub(crate) fn draw_window_titlebar(
     cursor_loc: Point<f64, smithay::utils::Logical>,
     is_tiled: bool,
     tabs: &[(u64, String, bool)],
+    rounded_header: Option<PixelShaderElement>,
 ) {
     let mut tb_elements: Vec<CustomRenderElement> = Vec::with_capacity(96);
 
@@ -4199,75 +4272,35 @@ pub(crate) fn draw_window_titlebar(
     } else {
         Color32F::new(palette.border.r, palette.border.g, palette.border.b, 0.25)
     };
-    draw_glow_ring(&mut tb_elements, rect, 0, if is_active { 2 } else { 1 }, accent, 4);
 
     let header_h = (36.0 * scale).round() as i32;
     if rect.size.w > 40 && rect.size.h > 20 {
-        // 1. Fused two-stage gradient header plate background (Backmost layer of the titlebar)
-        let header_bar = Rectangle::new(rect.loc, (rect.size.w, header_h).into());
-        let (header_bg, _, _) = crate::render::compute_titlebar_colors(palette, is_active, false);
-        tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-            Id::new(),
-            header_bar,
-            CommitCounter::default(),
-            header_bg,
-            Kind::Unspecified,
-        )));
-
-        // Subtle upper sheen band for fused glass depth
-        let sheen_h = (header_h / 2).max(2);
-        let sheen_bar = Rectangle::new(rect.loc, (rect.size.w, sheen_h).into());
-        let sheen_bg = if is_active {
-            Color32F::new(0.13, 0.15, 0.20, 0.42)
+        if let Some(header_elem) = rounded_header {
+            // Single-pass GPU rounded top-corners glass header plate
+            tb_elements.push(CustomRenderElement::from(header_elem));
         } else {
-            Color32F::new(0.10, 0.11, 0.15, 0.22)
-        };
-        tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-            Id::new(),
-            sheen_bar,
-            CommitCounter::default(),
-            sheen_bg,
-            Kind::Unspecified,
-        )));
+            // Software fallback solid header bar
+            let header_bar = Rectangle::new(rect.loc, (rect.size.w, header_h).into());
+            let (header_bg, _, _) = crate::render::compute_titlebar_colors(palette, is_active, false);
+            tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                Id::new(),
+                header_bar,
+                CommitCounter::default(),
+                header_bg,
+                Kind::Unspecified,
+            )));
+        }
 
-        // 2. Top accent line + 1px Specular Glass Rim Highlight across the window header
-        let top_line_h = (2.0 * scale).max(1.0) as i32;
-        let header_line = Rectangle::new(rect.loc, (rect.size.w, top_line_h).into());
-        tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-            Id::new(),
-            header_line,
-            CommitCounter::default(),
-            accent,
-            Kind::Unspecified,
-        )));
-
-        let specular_line = Rectangle::new(
-            Point::from((rect.loc.x + 2, rect.loc.y + top_line_h)),
-            ((rect.size.w - 4).max(2), 1).into(),
-        );
-        let specular_color = if is_active {
-            Color32F::new(1.0, 1.0, 1.0, 0.22)
-        } else {
-            Color32F::new(1.0, 1.0, 1.0, 0.09)
-        };
-        tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
-            Id::new(),
-            specular_line,
-            CommitCounter::default(),
-            specular_color,
-            Kind::Unspecified,
-        )));
-
-        // Bottom dark bevel on window frame
-        let bottom_bevel = Rectangle::new(
-            Point::from((rect.loc.x + 1, rect.loc.y + rect.size.h - 1)),
-            ((rect.size.w - 2).max(2), 1).into(),
+        // Subtle 1px divider between titlebar and window content
+        let divider_bar = Rectangle::new(
+            Point::from((rect.loc.x, rect.loc.y + header_h - 1)),
+            (rect.size.w, 1).into(),
         );
         tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
             Id::new(),
-            bottom_bevel,
+            divider_bar,
             CommitCounter::default(),
-            Color32F::new(0.02, 0.02, 0.04, 0.65),
+            Color32F::new(1.0, 1.0, 1.0, if is_active { 0.06 } else { 0.03 }),
             Kind::Unspecified,
         )));
 

@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::process::Stdio;
+use futures::stream::{self, StreamExt};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
@@ -140,6 +142,20 @@ pub const ICON_ZAP: &str = "\u{e1b4}";
 #[allow(dead_code)]
 pub const ICON_SETTINGS: &str = "\u{e154}";
 
+#[derive(Debug, Clone, Default)]
+pub struct AppDetails {
+    pub app_id: String,
+    pub description: Option<String>,
+    pub version: Option<String>,
+    pub developer: Option<String>,
+    pub license: Option<String>,
+    pub homepage: Option<String>,
+    pub download_size: Option<String>,
+    pub installed_size: Option<String>,
+    pub icon_url: Option<String>,
+    pub screenshots: Vec<(String, Option<String>)>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageItem {
     pub id: String,
@@ -151,6 +167,8 @@ pub struct PackageItem {
     pub state: PackageState,
     pub category: ProductCategory,
     pub icon_char: &'static str,
+    #[serde(default)]
+    pub icon_url: Option<String>,
     pub download_size: Option<String>,
     pub installed_size: Option<String>,
     pub developer: Option<String>,
@@ -178,6 +196,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::Development,
                 icon_char: ICON_CODE,
+                icon_url: None,
                 download_size: Some("110 MB".into()),
                 installed_size: Some("360 MB".into()),
                 developer: Some("Microsoft".into()),
@@ -204,6 +223,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::Graphics,
                 icon_char: ICON_APP,
+                icon_url: None,
                 download_size: Some("320 MB".into()),
                 installed_size: Some("890 MB".into()),
                 developer: Some("Blender Foundation".into()),
@@ -230,6 +250,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::AudioVideo,
                 icon_char: ICON_MUSIC,
+                icon_url: None,
                 download_size: Some("175 MB".into()),
                 installed_size: Some("420 MB".into()),
                 developer: Some("Spotify AB".into()),
@@ -256,6 +277,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::Internet,
                 icon_char: ICON_USER,
+                icon_url: None,
                 download_size: Some("95 MB".into()),
                 installed_size: Some("280 MB".into()),
                 developer: Some("Discord Inc.".into()),
@@ -282,6 +304,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::Gaming,
                 icon_char: ICON_APP,
+                icon_url: None,
                 download_size: Some("35 MB".into()),
                 installed_size: Some("120 MB".into()),
                 developer: Some("Valve Corporation".into()),
@@ -308,6 +331,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::AudioVideo,
                 icon_char: ICON_CAMERA,
+                icon_url: None,
                 download_size: Some("130 MB".into()),
                 installed_size: Some("390 MB".into()),
                 developer: Some("OBS Project".into()),
@@ -334,6 +358,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::AudioVideo,
                 icon_char: ICON_CAMERA,
+                icon_url: None,
                 download_size: Some("160 MB".into()),
                 installed_size: Some("480 MB".into()),
                 developer: Some("KDE Topluluğu".into()),
@@ -360,6 +385,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::Graphics,
                 icon_char: ICON_APP,
+                icon_url: None,
                 download_size: Some("180 MB".into()),
                 installed_size: Some("520 MB".into()),
                 developer: Some("The GIMP Team".into()),
@@ -386,6 +412,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::AudioVideo,
                 icon_char: ICON_CAMERA,
+                icon_url: None,
                 download_size: Some("68 MB".into()),
                 installed_size: Some("210 MB".into()),
                 developer: Some("VideoLAN".into()),
@@ -412,6 +439,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::Graphics,
                 icon_char: ICON_APP,
+                icon_url: None,
                 download_size: Some("190 MB".into()),
                 installed_size: Some("580 MB".into()),
                 developer: Some("Krita Foundation".into()),
@@ -438,6 +466,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::Development,
                 icon_char: ICON_TERMINAL,
+                icon_url: None,
                 download_size: Some("6.8 MB".into()),
                 installed_size: Some("28 MB".into()),
                 developer: Some("Neovim Core Team".into()),
@@ -454,6 +483,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::Development,
                 icon_char: ICON_CODE,
+                icon_url: None,
                 download_size: Some("32 MB".into()),
                 installed_size: Some("98 MB".into()),
                 developer: Some("Zed Industries".into()),
@@ -470,6 +500,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::System,
                 icon_char: ICON_ACTIVITY,
+                icon_url: None,
                 download_size: Some("1.4 MB".into()),
                 installed_size: Some("4.2 MB".into()),
                 developer: Some("aristocratos".into()),
@@ -486,6 +517,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::System,
                 icon_char: ICON_CPU,
+                icon_url: None,
                 download_size: Some("0.9 MB".into()),
                 installed_size: Some("2.8 MB".into()),
                 developer: Some("Fastfetch Team".into()),
@@ -502,6 +534,7 @@ impl PackageManager {
                 state: PackageState::Available,
                 category: ProductCategory::Development,
                 icon_char: ICON_CODE,
+                icon_url: None,
                 download_size: Some("986 MB".into()),
                 installed_size: Some("986 MB".into()),
                 developer: Some("Corten & Qwen Open Team".into()),
@@ -596,6 +629,7 @@ impl PackageManager {
                     state: PackageState::Installed,
                     category: ProductCategory::All,
                     icon_char: ICON_DOWNLOAD,
+                icon_url: None,
                     download_size: None,
                     installed_size: None,
                     developer: None,
@@ -655,6 +689,12 @@ impl PackageManager {
                 _ => ICON_APP,
             };
 
+            let icon_url = hit
+                .get("icon")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+
             items.push(PackageItem {
                 id: app_id.to_string(),
                 name,
@@ -673,6 +713,7 @@ impl PackageManager {
                 },
                 category: fallback_cat,
                 icon_char,
+                icon_url,
                 download_size: None,
                 installed_size: None,
                 developer,
@@ -683,10 +724,25 @@ impl PackageManager {
         items
     }
 
-    /// Fetches live applications for a category directly from Flathub API v2.
+    /// Fetches live applications for a category directly from Flathub API v2 (with 10-min disk cache).
     pub async fn fetch_flathub_collection(category: ProductCategory) -> Vec<PackageItem> {
         let url = category.flathub_collection_url();
         let installed_flatpaks = Self::get_installed_flatpak_ids().await;
+
+        let cache_key = format!("{:?}.json", category).to_lowercase();
+        let cache_path = Self::cache_subdir("catalog").join(cache_key);
+        if let Ok(meta) = tokio::fs::metadata(&cache_path).await {
+            if let Ok(modified) = meta.modified() {
+                if modified.elapsed().map(|d| d.as_secs() < 600).unwrap_or(false) {
+                    if let Ok(cached_body) = tokio::fs::read_to_string(&cache_path).await {
+                        let parsed = Self::parse_flathub_hits(&cached_body, category, &installed_flatpaks);
+                        if !parsed.is_empty() {
+                            return parsed;
+                        }
+                    }
+                }
+            }
+        }
 
         let Ok(out) = Command::new("curl")
             .args([
@@ -709,7 +765,11 @@ impl PackageManager {
             return Vec::new();
         }
         let body = String::from_utf8_lossy(&out.stdout);
-        Self::parse_flathub_hits(&body, category, &installed_flatpaks)
+        let parsed = Self::parse_flathub_hits(&body, category, &installed_flatpaks);
+        if !parsed.is_empty() {
+            let _ = tokio::fs::write(&cache_path, body.as_bytes()).await;
+        }
+        parsed
     }
 
     /// Searches packages across live Flathub API v2, local Flatpak CLI, and Arch Repositories
@@ -786,6 +846,7 @@ impl PackageManager {
                             state: if is_installed { PackageState::Installed } else { PackageState::Available },
                             category: ProductCategory::All,
                             icon_char: ICON_DOWNLOAD,
+                icon_url: None,
                             download_size: None,
                             installed_size: None,
                             developer: None,
@@ -833,6 +894,7 @@ impl PackageManager {
                             state: if is_installed { PackageState::Installed } else { PackageState::Available },
                             category: ProductCategory::All,
                             icon_char: ICON_ZAP,
+                icon_url: None,
                             download_size: None,
                             installed_size: None,
                             developer: None,
@@ -1274,6 +1336,7 @@ impl PackageManager {
                     },
                     category: ProductCategory::System,
                     icon_char: ICON_ZAP,
+                icon_url: None,
                     download_size: size_str,
                     installed_size: None,
                     developer: Some("Corten Desktop Contributors".into()),
@@ -1311,6 +1374,7 @@ impl PackageManager {
                                 },
                                 category: ProductCategory::All,
                                 icon_char: ICON_DOWNLOAD,
+                icon_url: None,
                                 download_size: None,
                                 installed_size: None,
                                 developer: None,
@@ -1359,6 +1423,348 @@ impl PackageManager {
             }
         }
         pkgs
+    }
+
+    fn cache_subdir(sub: &str) -> PathBuf {
+        let base = std::env::var("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(|_| std::env::var("HOME").map(|h| PathBuf::from(h).join(".cache")))
+            .unwrap_or_else(|_| PathBuf::from("/tmp"));
+        let dir = base.join("corten-forge").join(sub);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    fn safe_cache_name(id: &str) -> String {
+        id.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    }
+
+    fn is_valid_image_bytes(bytes: &[u8]) -> bool {
+        if bytes.len() < 12 {
+            return false;
+        }
+        // PNG, JPEG, or WebP (RIFF....WEBP)
+        bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])
+            || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
+            || (bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP")
+    }
+
+    pub fn strip_html_to_text(html: &str) -> String {
+        let mut s = html
+            .replace("</p>", "\n\n")
+            .replace("<br>", "\n")
+            .replace("<br/>", "\n")
+            .replace("<br />", "\n")
+            .replace("<li>", "• ")
+            .replace("</li>", "\n")
+            .replace("</ul>", "\n")
+            .replace("</ol>", "\n");
+
+        // Strip all remaining HTML tags
+        let mut out = String::with_capacity(s.len());
+        let mut in_tag = false;
+        for ch in s.chars() {
+            match ch {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                _ if !in_tag => out.push(ch),
+                _ => {}
+            }
+        }
+        s = out
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&apos;", "'")
+            .replace("&nbsp;", " ");
+
+        // Collapse excessive consecutive blank lines
+        let mut cleaned = Vec::new();
+        let mut blank_run = 0usize;
+        for line in s.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                blank_run += 1;
+                if blank_run <= 1 && !cleaned.is_empty() {
+                    cleaned.push(String::new());
+                }
+            } else {
+                blank_run = 0;
+                cleaned.push(trimmed.to_string());
+            }
+        }
+        cleaned.join("\n").trim().to_string()
+    }
+
+    pub fn parse_flathub_appstream(app_id: &str, body: &str) -> Option<AppDetails> {
+        let json = serde_json::from_str::<serde_json::Value>(body).ok()?;
+        let description = json
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(Self::strip_html_to_text)
+            .filter(|s| !s.is_empty());
+
+        let version = json
+            .get("releases")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|r| r.get("version"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        let developer = json
+            .get("developer_name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        let license = json
+            .get("project_license")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        let homepage = json
+            .get("urls")
+            .and_then(|u| u.get("homepage"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        let icon_url = json
+            .get("icon")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        let mut screenshots = Vec::new();
+        if let Some(arr) = json.get("screenshots").and_then(|v| v.as_array()) {
+            for sc in arr.iter().take(4) {
+                let caption = sc
+                    .get("caption")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+                if let Some(sizes) = sc.get("sizes").and_then(|v| v.as_array()) {
+                    // Prefer a crisp 700..1300px wide screenshot for fast download & sharp display
+                    let best = sizes
+                        .iter()
+                        .filter_map(|sz| {
+                            let src = sz.get("src").and_then(|v| v.as_str())?;
+                            let w = sz
+                                .get("width")
+                                .and_then(|v| v.as_str().and_then(|s| s.parse::<u32>().ok()).or_else(|| v.as_u64().map(|n| n as u32)))
+                                .unwrap_or(0);
+                            Some((src, w))
+                        })
+                        .min_by_key(|(_, w)| (*w as i64 - 900).abs());
+                    if let Some((src, _)) = best {
+                        screenshots.push((src.to_string(), caption));
+                    }
+                }
+            }
+        }
+
+        Some(AppDetails {
+            app_id: app_id.to_string(),
+            description,
+            version,
+            developer,
+            license,
+            homepage,
+            download_size: None,
+            installed_size: None,
+            icon_url,
+            screenshots,
+        })
+    }
+
+    /// Fetches rich application details (full description, screenshots, version, homepage)
+    /// from Flathub API v2 (for Flatpak) or `pacman -Si` (for Arch Repo).
+    pub async fn fetch_app_details(app_id: &str, source: PackageSource) -> Option<AppDetails> {
+        match source {
+            PackageSource::Flatpak => {
+                let url = format!("https://flathub.org/api/v2/appstream/{}", app_id);
+                let out = Command::new("curl")
+                    .args([
+                        "-sSL",
+                        "--max-time",
+                        "8",
+                        "-H",
+                        "User-Agent: CortenForge/0.5.8",
+                        "-H",
+                        "Accept: application/json",
+                        &url,
+                    ])
+                    .output()
+                    .await
+                    .ok()?;
+                if !out.status.success() {
+                    return None;
+                }
+                let body = String::from_utf8_lossy(&out.stdout);
+                Self::parse_flathub_appstream(app_id, &body)
+            }
+            PackageSource::ArchRepo => {
+                let out = Command::new("pacman")
+                    .args(["-Si", app_id])
+                    .output()
+                    .await
+                    .ok()?;
+                if !out.status.success() {
+                    return None;
+                }
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let mut details = AppDetails {
+                    app_id: app_id.to_string(),
+                    ..Default::default()
+                };
+                for line in stdout.lines() {
+                    if let Some((k, v)) = line.split_once(':') {
+                        let key = k.trim();
+                        let val = v.trim().to_string();
+                        if val.is_empty() || val == "None" {
+                            continue;
+                        }
+                        match key {
+                            "Version" => details.version = Some(val),
+                            "Description" => details.description = Some(val),
+                            "URL" => details.homepage = Some(val),
+                            "Licenses" => details.license = Some(val),
+                            "Download Size" => details.download_size = Some(val),
+                            "Installed Size" => details.installed_size = Some(val),
+                            "Packager" => details.developer = Some(val),
+                            _ => {}
+                        }
+                    }
+                }
+                Some(details)
+            }
+            _ => None,
+        }
+    }
+
+    async fn download_image_cached(url: &str, cache_path: &PathBuf) -> Option<Vec<u8>> {
+        if let Ok(bytes) = tokio::fs::read(cache_path).await {
+            if Self::is_valid_image_bytes(&bytes) {
+                return Some(bytes);
+            }
+        }
+        let out = Command::new("curl")
+            .args([
+                "-sSL",
+                "--max-time",
+                "7",
+                "-H",
+                "User-Agent: CortenForge/0.5.8",
+                url,
+            ])
+            .output()
+            .await
+            .ok()?;
+        if !out.status.success() || !Self::is_valid_image_bytes(&out.stdout) {
+            return None;
+        }
+        let _ = tokio::fs::write(cache_path, &out.stdout).await;
+        Some(out.stdout)
+    }
+
+    /// Loads or downloads an application's real icon (with disk cache).
+    pub async fn fetch_icon_bytes(
+        app_id: String,
+        icon_url: Option<String>,
+        source: PackageSource,
+    ) -> Option<(String, Vec<u8>)> {
+        let safe = Self::safe_cache_name(&app_id);
+        let cache_path = Self::cache_subdir("icons").join(format!("{}.img", safe));
+        if let Ok(bytes) = tokio::fs::read(&cache_path).await {
+            if Self::is_valid_image_bytes(&bytes) {
+                return Some((app_id, bytes));
+            }
+        }
+
+        match source {
+            PackageSource::Flatpak => {
+                if let Some(ref url) = icon_url {
+                    if let Some(bytes) = Self::download_image_cached(url, &cache_path).await {
+                        return Some((app_id, bytes));
+                    }
+                }
+                let fallback = format!(
+                    "https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/{}.png",
+                    app_id
+                );
+                let bytes = Self::download_image_cached(&fallback, &cache_path).await?;
+                Some((app_id, bytes))
+            }
+            PackageSource::ArchRepo | PackageSource::Aur => {
+                let candidates = [
+                    format!("/usr/share/icons/hicolor/128x128/apps/{}.png", app_id),
+                    format!("/usr/share/icons/hicolor/64x64/apps/{}.png", app_id),
+                    format!("/usr/share/icons/hicolor/48x48/apps/{}.png", app_id),
+                    format!("/usr/share/pixmaps/{}.png", app_id),
+                ];
+                for path in candidates {
+                    if let Ok(bytes) = tokio::fs::read(&path).await {
+                        if Self::is_valid_image_bytes(&bytes) {
+                            let _ = tokio::fs::write(&cache_path, &bytes).await;
+                            return Some((app_id, bytes));
+                        }
+                    }
+                }
+                None
+            }
+            PackageSource::CortenCore => None,
+        }
+    }
+
+    /// Concurrently fetches icons for a batch of packages (bounded to 6 parallel requests).
+    pub async fn fetch_icons_batch(
+        items: Vec<(String, Option<String>, PackageSource)>,
+    ) -> Vec<(String, Vec<u8>)> {
+        stream::iter(items)
+            .map(|(id, url, src)| Self::fetch_icon_bytes(id, url, src))
+            .buffer_unordered(6)
+            .filter_map(|res| async move { res })
+            .collect()
+            .await
+    }
+
+    /// Concurrently downloads and caches up to 4 screenshots for an application.
+    pub async fn fetch_screenshots(
+        app_id: String,
+        urls: Vec<(String, Option<String>)>,
+    ) -> (String, Vec<(Vec<u8>, Option<String>)>) {
+        let safe = Self::safe_cache_name(&app_id);
+        let dir = Self::cache_subdir("screenshots");
+        let results: Vec<(usize, Vec<u8>, Option<String>)> = stream::iter(urls.into_iter().enumerate())
+            .map(|(idx, (url, caption))| {
+                let cache_path = dir.join(format!("{}_{}.img", safe, idx));
+                async move {
+                    let bytes = Self::download_image_cached(&url, &cache_path).await?;
+                    Some((idx, bytes, caption))
+                }
+            })
+            .buffer_unordered(4)
+            .filter_map(|res| async move { res })
+            .collect()
+            .await;
+
+        let mut sorted = results;
+        sorted.sort_by_key(|(idx, _, _)| *idx);
+        let images = sorted.into_iter().map(|(_, b, c)| (b, c)).collect();
+        (app_id, images)
     }
 }
 
@@ -1419,5 +1825,50 @@ mod tests {
             safety_summary: "Geniş İzin".into(),
         };
         assert!(wide_perm.safety_score < 70);
+    }
+
+    #[test]
+    fn test_strip_html_to_text_and_entities() {
+        let html = "<p>Hello <b>Corten</b> &amp; friends!</p><ul><li>Fast</li><li>Safe &lt;3</li></ul>";
+        let text = PackageManager::strip_html_to_text(html);
+        assert!(text.contains("Hello Corten & friends!"));
+        assert!(text.contains("• Fast"));
+        assert!(text.contains("• Safe <3"));
+        assert!(!text.contains("<p>") && !text.contains("<b>"));
+    }
+
+    #[test]
+    fn test_parse_flathub_appstream() {
+        let sample = r#"{
+            "description": "<p>Great app for <b>Linux</b>.</p>",
+            "developer_name": "Acme Dev",
+            "project_license": "GPL-3.0",
+            "icon": "https://dl.flathub.org/media/icon.png",
+            "urls": { "homepage": "https://example.org" },
+            "releases": [{ "version": "2.4.1" }],
+            "screenshots": [{
+                "caption": "Main view",
+                "sizes": [
+                    { "width": "400", "src": "https://dl.flathub.org/small.png" },
+                    { "width": "920", "src": "https://dl.flathub.org/med.png" }
+                ]
+            }]
+        }"#;
+        let details = PackageManager::parse_flathub_appstream("org.example.App", sample).unwrap();
+        assert_eq!(details.version.as_deref(), Some("2.4.1"));
+        assert_eq!(details.developer.as_deref(), Some("Acme Dev"));
+        assert_eq!(details.homepage.as_deref(), Some("https://example.org"));
+        assert_eq!(details.description.as_deref(), Some("Great app for Linux."));
+        assert_eq!(details.screenshots.len(), 1);
+        assert_eq!(details.screenshots[0].0, "https://dl.flathub.org/med.png");
+        assert_eq!(details.screenshots[0].1.as_deref(), Some("Main view"));
+    }
+
+    #[test]
+    fn test_is_valid_image_bytes() {
+        assert!(PackageManager::is_valid_image_bytes(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0]));
+        assert!(PackageManager::is_valid_image_bytes(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert!(PackageManager::is_valid_image_bytes(b"RIFF1234WEBPxxxx"));
+        assert!(!PackageManager::is_valid_image_bytes(b"<html>404</html>"));
     }
 }

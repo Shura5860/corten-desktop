@@ -1,5 +1,6 @@
 mod package;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::Mutex;
@@ -11,9 +12,10 @@ use corten_theme::{
     LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
 };
 use iced::widget::{
-    button, column, container, horizontal_space, row, scrollable, text, text_input, vertical_space,
+    button, column, container, horizontal_space, image, row, scrollable, text, text_input,
+    vertical_space,
 };
-use iced::{event, Alignment, Element, Event, Length, Subscription, Task};
+use iced::{event, Alignment, ContentFit, Element, Event, Length, Subscription, Task};
 
 use package::{PackageItem, PackageManager, PackageSource, PackageState, ProductCategory};
 
@@ -61,6 +63,11 @@ pub enum Message {
     CategoryCatalogLoaded(Vec<PackageItem>),
     InstalledLoaded(Vec<PackageItem>),
     UpdatesLoaded(Vec<PackageItem>),
+    IconsLoaded(Vec<(String, Vec<u8>)>),
+    AppDetailsLoaded(Option<package::AppDetails>),
+    ScreenshotsLoaded(String, Vec<(Vec<u8>, Option<String>)>),
+    SelectScreenshot(usize),
+    OpenHomepage(String),
     PermissionsLoaded(String, Option<package::SandboxPermissions>),
     NavigateTo(NavigationTab),
     SetSourceFilter(SourceFilter),
@@ -70,6 +77,7 @@ pub enum Message {
     OpenPackageDetail(PackageItem),
     InstallRequested(PackageItem),
     UninstallRequested(PackageItem),
+    LaunchApp(PackageItem),
     LogLineReceived(String),
     OperationFinished(Result<(), String>),
     RefreshAll,
@@ -91,6 +99,12 @@ pub struct CortenForgeApp {
     log_rx: Option<Arc<Mutex<UnboundedReceiver<String>>>>,
     theme_mode: ThemeMode,
     active_patina: PatinaVariant,
+    icon_handles: HashMap<String, image::Handle>,
+    icons_requested: HashSet<String>,
+    detail_screenshots: HashMap<String, Vec<(image::Handle, Option<String>)>>,
+    detail_homepage: HashMap<String, String>,
+    selected_screenshot_idx: usize,
+    detail_loading: bool,
 }
 
 impl Default for CortenForgeApp {
@@ -114,6 +128,12 @@ impl Default for CortenForgeApp {
             log_rx: None,
             theme_mode: ThemeMode::Dark,
             active_patina,
+            icon_handles: HashMap::new(),
+            icons_requested: HashSet::new(),
+            detail_screenshots: HashMap::new(),
+            detail_homepage: HashMap::new(),
+            selected_screenshot_idx: 0,
+            detail_loading: false,
         }
     }
 }
@@ -133,9 +153,24 @@ impl CortenForgeApp {
         (app, init_task)
     }
 
+    fn queue_icons_for(&mut self, items: &[PackageItem]) -> Task<Message> {
+        let mut pending = Vec::new();
+        for item in items {
+            if self.icons_requested.insert(item.id.clone()) {
+                pending.push((item.id.clone(), item.icon_url.clone(), item.source));
+            }
+        }
+        if pending.is_empty() {
+            Task::none()
+        } else {
+            Task::perform(PackageManager::fetch_icons_batch(pending), Message::IconsLoaded)
+        }
+    }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::CatalogLoaded(items) => {
+                let icon_task = self.queue_icons_for(&items);
                 for item in items {
                     if !self.catalog.iter().any(|existing| existing.id == item.id) {
                         self.catalog.push(item);
@@ -143,21 +178,129 @@ impl CortenForgeApp {
                 }
                 self.is_busy = false;
                 self.busy_message = None;
+                return icon_task;
             }
             Message::CategoryCatalogLoaded(items) => {
+                let icon_task = self.queue_icons_for(&items);
                 for item in items {
-                    if !self.catalog.iter().any(|existing| existing.id == item.id) {
+                    if let Some(existing) = self.catalog.iter_mut().find(|e| e.id == item.id) {
+                        if existing.icon_url.is_none() && item.icon_url.is_some() {
+                            existing.icon_url = item.icon_url;
+                        }
+                    } else {
                         self.catalog.push(item);
                     }
                 }
                 self.is_busy = false;
                 self.busy_message = None;
+                return icon_task;
             }
             Message::InstalledLoaded(items) => {
+                let icon_task = self.queue_icons_for(&items);
                 self.installed = items;
+                return icon_task;
             }
             Message::UpdatesLoaded(items) => {
+                let icon_task = self.queue_icons_for(&items);
                 self.updates = items;
+                return icon_task;
+            }
+            Message::IconsLoaded(icons) => {
+                for (app_id, bytes) in icons {
+                    self.icon_handles
+                        .insert(app_id, image::Handle::from_bytes(bytes));
+                }
+            }
+            Message::AppDetailsLoaded(opt_details) => {
+                self.detail_loading = false;
+                if let Some(details) = opt_details {
+                    let app_id = details.app_id.clone();
+                    let apply_details = |pkg: &mut PackageItem| {
+                        if let Some(ref desc) = details.description {
+                            pkg.description = desc.clone();
+                        }
+                        if let Some(ref ver) = details.version {
+                            pkg.version = ver.clone();
+                        }
+                        if let Some(ref dev) = details.developer {
+                            pkg.developer = Some(dev.clone());
+                        }
+                        if let Some(ref lic) = details.license {
+                            pkg.license = Some(lic.clone());
+                        }
+                        if let Some(ref dl) = details.download_size {
+                            pkg.download_size = Some(dl.clone());
+                        }
+                        if let Some(ref inst) = details.installed_size {
+                            pkg.installed_size = Some(inst.clone());
+                        }
+                        if let Some(ref url) = details.icon_url {
+                            pkg.icon_url = Some(url.clone());
+                        }
+                    };
+                    if let Some(ref mut selected) = self.selected_package {
+                        if selected.id == app_id {
+                            apply_details(selected);
+                        }
+                    }
+                    for item in &mut self.catalog {
+                        if item.id == app_id {
+                            apply_details(item);
+                        }
+                    }
+                    if let Some(ref mut results) = self.search_results {
+                        for item in results.iter_mut() {
+                            if item.id == app_id {
+                                apply_details(item);
+                            }
+                        }
+                    }
+                    if let Some(homepage) = details.homepage {
+                        self.detail_homepage.insert(app_id.clone(), homepage);
+                    }
+
+                    let mut tasks = Vec::new();
+                    if !details.screenshots.is_empty()
+                        && !self.detail_screenshots.contains_key(&app_id)
+                    {
+                        let sc_id = app_id.clone();
+                        let sc_urls = details.screenshots;
+                        tasks.push(Task::perform(
+                            PackageManager::fetch_screenshots(sc_id, sc_urls),
+                            |(id, imgs)| Message::ScreenshotsLoaded(id, imgs),
+                        ));
+                    }
+                    if details.icon_url.is_some() && !self.icon_handles.contains_key(&app_id) {
+                        let ic_id = app_id;
+                        let ic_url = details.icon_url;
+                        tasks.push(Task::perform(
+                            PackageManager::fetch_icons_batch(vec![(
+                                ic_id,
+                                ic_url,
+                                PackageSource::Flatpak,
+                            )]),
+                            Message::IconsLoaded,
+                        ));
+                    }
+                    if !tasks.is_empty() {
+                        return Task::batch(tasks);
+                    }
+                }
+            }
+            Message::ScreenshotsLoaded(app_id, imgs) => {
+                let handles: Vec<(image::Handle, Option<String>)> = imgs
+                    .into_iter()
+                    .map(|(bytes, cap)| (image::Handle::from_bytes(bytes), cap))
+                    .collect();
+                if !handles.is_empty() {
+                    self.detail_screenshots.insert(app_id, handles);
+                }
+            }
+            Message::SelectScreenshot(idx) => {
+                self.selected_screenshot_idx = idx;
+            }
+            Message::OpenHomepage(url) => {
+                let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
             }
             Message::PermissionsLoaded(app_id, opt_perm) => {
                 if let Some(ref mut selected) = self.selected_package {
@@ -201,25 +344,38 @@ impl CortenForgeApp {
                 }
             }
             Message::SearchResultsLoaded(results) => {
+                let icon_task = self.queue_icons_for(&results);
                 self.search_results = Some(results);
                 self.is_busy = false;
                 self.busy_message = None;
+                return icon_task;
             }
             Message::OpenPackageDetail(pkg) => {
                 let id = pkg.id.clone();
-                let is_flatpak = pkg.source == PackageSource::Flatpak;
+                let source = pkg.source;
+                let is_flatpak = source == PackageSource::Flatpak;
+                let icon_task = self.queue_icons_for(std::slice::from_ref(&pkg));
                 self.selected_package = Some(pkg);
                 self.current_tab = NavigationTab::Detail(id.clone());
+                self.selected_screenshot_idx = 0;
+                self.detail_loading = true;
 
+                let mut tasks = vec![icon_task];
+                let detail_id = id.clone();
+                tasks.push(Task::perform(
+                    async move { PackageManager::fetch_app_details(&detail_id, source).await },
+                    Message::AppDetailsLoaded,
+                ));
                 if is_flatpak {
-                    return Task::perform(
+                    tasks.push(Task::perform(
                         async move {
                             let perm = PackageManager::fetch_sandbox_permissions(&id).await;
                             (id, perm)
                         },
                         |(id, perm)| Message::PermissionsLoaded(id, perm),
-                    );
+                    ));
                 }
+                return Task::batch(tasks);
             }
             Message::InstallRequested(pkg) => {
                 self.is_busy = true;
@@ -251,6 +407,19 @@ impl CortenForgeApp {
                     Message::OperationFinished,
                 );
             }
+            Message::LaunchApp(pkg) => {
+                match pkg.source {
+                    PackageSource::Flatpak => {
+                        let _ = std::process::Command::new("flatpak")
+                            .args(["run", &pkg.id])
+                            .spawn();
+                    }
+                    PackageSource::ArchRepo | PackageSource::Aur => {
+                        let _ = std::process::Command::new(&pkg.id).spawn();
+                    }
+                    PackageSource::CortenCore => {}
+                }
+            }
             Message::LogLineReceived(line) => {
                 self.active_logs.push(line);
             }
@@ -263,7 +432,7 @@ impl CortenForgeApp {
                         self.active_logs.push("\n>>> İşlem başarıyla tamamlandı.\n".into());
                     }
                     Err(err) => {
-                        self.active_logs.push(format!("\n>>> ⚠️ Hata: {}\n", err));
+                        self.active_logs.push(format!("\n>>> Hata: {}\n", err));
                     }
                 }
                 // Refresh catalog and installed list
@@ -564,26 +733,35 @@ impl CortenForgeApp {
             horizontal_space().width(0).into()
         };
 
-        let search_input = text_input(
-            "Uygulama ara (Blender, Spotify, Neovim) veya 'video düzenleme' yazın...",
-            &self.search_query,
+        let search_input = container(
+            text_input(
+                "Uygulama ara (Blender, Spotify, Neovim)...",
+                &self.search_query,
+            )
+            .padding([8, 12])
+            .on_input(Message::SearchInputChanged)
+            .on_submit(Message::PerformSearch)
+            .width(Length::Fill)
+            .style(move |_, _| text_input::Style {
+                background: iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04)),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(Radius::SM),
+                },
+                icon: palette.primary.to_iced(),
+                placeholder: palette.text_muted.to_iced(),
+                value: palette.text_primary.to_iced(),
+                selection: iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.35,
+                ),
+            }),
         )
-        .padding([8, 12])
-        .on_input(Message::SearchInputChanged)
-        .on_submit(Message::PerformSearch)
         .width(Length::Fill)
-        .style(move |_, _| text_input::Style {
-            background: iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04)),
-            border: iced::Border {
-                color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-                width: 1.0,
-                radius: iced::border::Radius::from(Radius::SM),
-            },
-            icon: palette.primary.to_iced(),
-            placeholder: palette.text_muted.to_iced(),
-            value: palette.text_primary.to_iced(),
-            selection: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
-        });
+        .clip(true);
 
         let search_btn = button(
             row![
@@ -612,7 +790,7 @@ impl CortenForgeApp {
         // Filter Pills: All | Flatpak | Arch
         let filter_all = Self::source_filter_chip("Tümü", SourceFilter::All, self.source_filter, palette);
         let filter_flatpak = Self::source_filter_chip("Flatpak", SourceFilter::FlatpakOnly, self.source_filter, palette);
-        let filter_arch = Self::source_filter_chip("Arch Depoları", SourceFilter::ArchOnly, self.source_filter, palette);
+        let filter_arch = Self::source_filter_chip("Arch", SourceFilter::ArchOnly, self.source_filter, palette);
 
         let refresh_btn = button(
             row![
@@ -751,6 +929,7 @@ impl CortenForgeApp {
                             state: PackageState::Available,
                             category: ProductCategory::Graphics,
                             icon_char: crate::package::ICON_APP,
+                            icon_url: None,
                             download_size: Some("320 MB".into()),
                             installed_size: Some("890 MB".into()),
                             developer: Some("Blender Foundation".into()),
@@ -762,9 +941,7 @@ impl CortenForgeApp {
                 ]
                 .spacing(Spacing::XS)
                 .width(Length::FillPortion(3)),
-                text("🎨")
-                    .size(80.0)
-                    .color(palette.primary.to_iced()),
+                self.render_app_icon("org.blender.Blender", crate::package::ICON_APP, 84.0, palette),
             ]
             .spacing(Spacing::LG)
             .align_y(Alignment::Center),
@@ -853,9 +1030,17 @@ impl CortenForgeApp {
     fn render_installed_view<'a>(&'a self, palette: Palette) -> Element<'a, Message> {
         let count_text = format!("{} adet yerel uygulama kurulu", self.installed.len());
         let header = row![
-            text("📥 Yüklü Uygulamalar")
-                .size(Typography::TITLE_SM)
-                .color(palette.text_primary.to_iced()),
+            row![
+                text(Icon::DOWNLOAD)
+                    .font(LUCIDE_FONT)
+                    .size(Typography::TITLE_SM)
+                    .color(palette.primary.to_iced()),
+                text("Yüklü Uygulamalar")
+                    .size(Typography::TITLE_SM)
+                    .color(palette.text_primary.to_iced()),
+            ]
+            .spacing(Spacing::XS)
+            .align_y(Alignment::Center),
             horizontal_space(),
             text(count_text)
                 .size(11.0)
@@ -871,9 +1056,7 @@ impl CortenForgeApp {
 
             let row_entry = container(
                 row![
-                    text("📦")
-                        .size(Typography::TITLE_SM)
-                        .color(palette.primary.to_iced()),
+                    self.render_app_icon(&item.id, item.icon_char, 34.0, palette),
                     column![
                         text(item.name.clone())
                             .size(Typography::BODY)
@@ -958,9 +1141,17 @@ impl CortenForgeApp {
         let is_up_to_date = self.updates.is_empty();
 
         let header = row![
-            text("🔄 Sistem & Uygulama Güncellemeleri")
-                .size(Typography::TITLE_SM)
-                .color(palette.text_primary.to_iced()),
+            row![
+                text(Icon::REFRESH)
+                    .font(LUCIDE_FONT)
+                    .size(Typography::TITLE_SM)
+                    .color(palette.primary.to_iced()),
+                text("Sistem & Uygulama Güncellemeleri")
+                    .size(Typography::TITLE_SM)
+                    .color(palette.text_primary.to_iced()),
+            ]
+            .spacing(Spacing::XS)
+            .align_y(Alignment::Center),
             horizontal_space(),
             if is_up_to_date {
                 text("✓ Tüm uygulamalarınız güncel")
@@ -1096,13 +1287,38 @@ impl CortenForgeApp {
             ..Default::default()
         });
 
-        let action_btn = if is_installed {
-            button(
-                text("Sistemden Kaldır")
+        let pkg_clone3 = pkg.clone();
+        let action_btn: Element<'a, Message> = if is_installed {
+            let launch_btn = button(
+                row![
+                    text(Icon::PLAY)
+                        .font(LUCIDE_FONT)
+                        .size(13.0)
+                        .color(palette.on_primary().to_iced()),
+                    text("Aç")
+                        .size(Typography::BODY)
+                        .color(palette.on_primary().to_iced()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([10, 20])
+            .style(move |_, _| button::Style {
+                background: Some(iced::Background::Color(palette.primary.to_iced())),
+                border: iced::Border {
+                    radius: iced::border::Radius::from(Radius::MD),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .on_press(Message::LaunchApp(pkg_clone3));
+
+            let remove_btn = button(
+                text("Kaldır")
                     .size(Typography::BODY)
                     .color(iced::Color::from_rgb(0.95, 0.35, 0.30)),
             )
-            .padding([10, 20])
+            .padding([10, 16])
             .style(move |_, status| {
                 let bg = match status {
                     button::Status::Hovered => iced::Color::from_rgba(0.9, 0.25, 0.2, 0.25),
@@ -1118,12 +1334,17 @@ impl CortenForgeApp {
                     ..Default::default()
                 }
             })
-            .on_press(Message::UninstallRequested(pkg_clone))
+            .on_press(Message::UninstallRequested(pkg_clone));
+
+            row![launch_btn, remove_btn]
+                .spacing(Spacing::XS)
+                .align_y(Alignment::Center)
+                .into()
         } else {
             button(
                 text("Kurulum Yap")
                     .size(Typography::BODY)
-                    .color(palette.text_primary.to_iced()),
+                    .color(palette.on_primary().to_iced()),
             )
             .padding([10, 24])
             .style(move |_, _| button::Style {
@@ -1135,13 +1356,11 @@ impl CortenForgeApp {
                 ..Default::default()
             })
             .on_press(Message::InstallRequested(pkg_clone2))
+            .into()
         };
 
         let app_header = row![
-            text(pkg.icon_char)
-                .font(LUCIDE_FONT)
-                .size(48.0)
-                .color(palette.primary.to_iced()),
+            self.render_app_icon(&pkg.id, pkg.icon_char, 64.0, palette),
             column![
                 row![
                     text(pkg.name.clone())
@@ -1154,15 +1373,75 @@ impl CortenForgeApp {
                 text(pkg.summary.clone())
                     .size(Typography::BODY_SM)
                     .color(palette.text_muted.to_iced()),
-                row![
-                    text(format!("Sürüm: {}", pkg.version)).size(11.0).color(palette.text_muted.to_iced()),
-                    text("•").size(11.0).color(palette.text_muted.to_iced()),
-                    text(pkg.developer.as_deref().unwrap_or("Topluluk")).size(11.0).color(palette.text_muted.to_iced()),
-                    text("•").size(11.0).color(palette.text_muted.to_iced()),
-                    text(pkg.license.as_deref().unwrap_or("Açık Kaynak")).size(11.0).color(palette.text_muted.to_iced()),
-                ]
-                .spacing(Spacing::XS)
-                .align_y(Alignment::Center),
+                {
+                    let clean_license = match pkg.license.as_deref() {
+                        None => "Açık Kaynak".to_string(),
+                        Some(l) if l.starts_with("LicenseRef-proprietary") => "Özel Mülk".to_string(),
+                        Some(l) if l.contains("http://") || l.contains("https://") => {
+                            let base = l.split('=').next().unwrap_or(l).trim();
+                            if base.is_empty() || base.starts_with("LicenseRef-") {
+                                "Özel Lisans".to_string()
+                            } else {
+                                base.to_string()
+                            }
+                        }
+                        Some(l) if l.chars().count() > 28 => {
+                            format!("{}…", l.chars().take(27).collect::<String>())
+                        }
+                        Some(l) => l.to_string(),
+                    };
+                    let meta_row_1 = row![
+                        text(format!("Sürüm: {}", pkg.version)).size(11.0).color(palette.text_muted.to_iced()),
+                        text("•").size(11.0).color(palette.text_muted.to_iced()),
+                        text(pkg.developer.as_deref().unwrap_or("Topluluk")).size(11.0).color(palette.text_muted.to_iced()),
+                        text("•").size(11.0).color(palette.text_muted.to_iced()),
+                        text(clean_license).size(11.0).color(palette.text_muted.to_iced()),
+                    ]
+                    .spacing(Spacing::XS)
+                    .align_y(Alignment::Center);
+
+                    let mut meta_col = column![meta_row_1].spacing(3);
+                    let mut meta_row_2 = row![].spacing(Spacing::SM).align_y(Alignment::Center);
+                    let mut has_row_2 = false;
+                    if let Some(ref dl) = pkg.download_size {
+                        meta_row_2 = meta_row_2.push(
+                            text(format!("İndirme: {}", dl))
+                                .size(11.0)
+                                .color(palette.text_muted.to_iced()),
+                        );
+                        has_row_2 = true;
+                    }
+                    if let Some(url) = self.detail_homepage.get(&pkg.id) {
+                        meta_row_2 = meta_row_2.push(
+                            button(
+                                row![
+                                    text(Icon::GLOBE).font(LUCIDE_FONT).size(11.0).color(palette.primary.to_iced()),
+                                    text("Web Sitesi").size(11.0).color(palette.primary.to_iced()),
+                                ]
+                                .spacing(4)
+                                .align_y(Alignment::Center),
+                            )
+                            .padding([2, 6])
+                            .style(move |_, status| button::Style {
+                                background: Some(iced::Background::Color(match status {
+                                    button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                                    _ => iced::Color::TRANSPARENT,
+                                })),
+                                border: iced::Border {
+                                    radius: iced::border::Radius::from(Radius::SM),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            })
+                            .on_press(Message::OpenHomepage(url.clone())),
+                        );
+                        has_row_2 = true;
+                    }
+                    if has_row_2 {
+                        meta_col = meta_col.push(meta_row_2);
+                    }
+                    meta_col
+                },
             ]
             .spacing(Spacing::XXS)
             .width(Length::Fill),
@@ -1170,6 +1449,127 @@ impl CortenForgeApp {
         ]
         .spacing(Spacing::LG)
         .align_y(Alignment::Center);
+
+        // Screenshot Gallery Section
+        let screenshots_section: Option<Element<'a, Message>> =
+            if let Some(shots) = self.detail_screenshots.get(&pkg.id) {
+                if shots.is_empty() {
+                    None
+                } else {
+                    let active_idx = self.selected_screenshot_idx.min(shots.len() - 1);
+                    let (active_handle, active_caption) = &shots[active_idx];
+
+                    let hero_img = container(
+                        image(active_handle.clone())
+                            .width(Length::Fill)
+                            .height(Length::Fixed(320.0))
+                            .content_fit(ContentFit::Contain),
+                    )
+                    .width(Length::Fill)
+                    .padding(Spacing::SM)
+                    .center_x(Length::Fill)
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(
+                            0.0, 0.0, 0.0, 0.35,
+                        ))),
+                        border: iced::Border {
+                            color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                            width: 1.0,
+                            radius: iced::border::Radius::from(Radius::MD),
+                        },
+                        ..Default::default()
+                    });
+
+                    let mut gallery_col = column![
+                        row![
+                            text("Ekran Görüntüleri")
+                                .size(Typography::TITLE_SM)
+                                .color(palette.text_primary.to_iced()),
+                            horizontal_space(),
+                            text(format!("{} / {}", active_idx + 1, shots.len()))
+                                .size(11.0)
+                                .color(palette.text_muted.to_iced()),
+                        ]
+                        .align_y(Alignment::Center),
+                        hero_img,
+                    ]
+                    .spacing(Spacing::SM);
+
+                    if let Some(cap) = active_caption {
+                        gallery_col = gallery_col.push(
+                            text(cap.clone())
+                                .size(Typography::BODY_SM)
+                                .color(palette.text_muted.to_iced()),
+                        );
+                    }
+
+                    if shots.len() > 1 {
+                        let mut thumbs = row![].spacing(Spacing::SM).align_y(Alignment::Center);
+                        for (idx, (handle, _)) in shots.iter().enumerate() {
+                            let is_sel = idx == active_idx;
+                            let thumb_btn = button(
+                                container(
+                                    image(handle.clone())
+                                        .width(Length::Fixed(112.0))
+                                        .height(Length::Fixed(66.0))
+                                        .content_fit(ContentFit::Cover),
+                                )
+                                .padding(2)
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(
+                                        iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                                    )),
+                                    border: iced::Border {
+                                        color: if is_sel {
+                                            palette.primary.to_iced()
+                                        } else {
+                                            iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10)
+                                        },
+                                        width: if is_sel { 2.0 } else { 1.0 },
+                                        radius: iced::border::Radius::from(Radius::SM),
+                                    },
+                                    ..Default::default()
+                                }),
+                            )
+                            .padding(0)
+                            .style(|_, _| button::Style::default())
+                            .on_press(Message::SelectScreenshot(idx));
+                            thumbs = thumbs.push(thumb_btn);
+                        }
+                        gallery_col = gallery_col.push(thumbs);
+                    }
+
+                    Some(
+                        container(gallery_col)
+                            .padding(Spacing::MD)
+                            .width(Length::Fill)
+                            .style(move |_| card_style(palette))
+                            .into(),
+                    )
+                }
+            } else if self.detail_loading && pkg.source == PackageSource::Flatpak {
+                Some(
+                    container(
+                        row![
+                            text(Icon::CAMERA)
+                                .font(LUCIDE_FONT)
+                                .size(16.0)
+                                .color(palette.primary.to_iced()),
+                            text("Flathub üzerinden ekran görüntüleri ve uygulama detayları yükleniyor...")
+                                .size(Typography::BODY_SM)
+                                .color(palette.text_muted.to_iced()),
+                        ]
+                        .spacing(Spacing::SM)
+                        .align_y(Alignment::Center),
+                    )
+                    .padding(Spacing::MD)
+                    .width(Length::Fill)
+                    .style(move |_| card_style(palette))
+                    .into(),
+                )
+            } else {
+                None
+            };
 
         // Security / Sandbox Röntgen Card
         let security_card = if let Some(ref perm) = pkg.permissions {
@@ -1223,9 +1623,17 @@ impl CortenForgeApp {
             container(
                 column![
                     row![
-                        text("🛡️ CORTEN AI GÜVENLİK VE SANDBOX RÖNTGENİ")
-                            .size(11.5)
-                            .color(palette.primary.to_iced()),
+                        row![
+                            text(Icon::SHIELD)
+                                .font(LUCIDE_FONT)
+                                .size(13.0)
+                                .color(palette.primary.to_iced()),
+                            text("CORTEN AI GÜVENLİK VE SANDBOX RÖNTGENİ")
+                                .size(11.5)
+                                .color(palette.primary.to_iced()),
+                        ]
+                        .spacing(Spacing::XS)
+                        .align_y(Alignment::Center),
                         horizontal_space(),
                         score_badge,
                     ]
@@ -1235,10 +1643,10 @@ impl CortenForgeApp {
                         .color(palette.text_primary.to_iced()),
                     vertical_space().height(2),
                     row![
-                        Self::perm_pill("🌐 Ağ Erişimi", perm.network, palette),
-                        Self::perm_pill("🔊 Ses & Mikrofon", perm.pulseaudio, palette),
-                        Self::perm_pill("🖥️ Wayland", perm.wayland, palette),
-                        Self::perm_pill("🎮 3D Hızlandırma", perm.dri, palette),
+                        Self::perm_pill("Ağ Erişimi", perm.network, palette),
+                        Self::perm_pill("Ses & Mikrofon", perm.pulseaudio, palette),
+                        Self::perm_pill("Wayland", perm.wayland, palette),
+                        Self::perm_pill("3D Hızlandırma", perm.dri, palette),
                     ]
                     .spacing(Spacing::XS),
                     vertical_space().height(2),
@@ -1267,7 +1675,7 @@ impl CortenForgeApp {
         } else {
             container(
                 row![
-                    text("ℹ️").size(Typography::TITLE_SM).color(palette.primary.to_iced()),
+                    text(Icon::SHIELD).font(LUCIDE_FONT).size(Typography::TITLE_SM).color(palette.primary.to_iced()),
                     text("Bu paket yerel sistem depolarından (Arch Repo) sağlandığı için doğrudan sistem ayrıcalıklarıyla çalıştırılır.")
                         .size(11.5)
                         .color(palette.text_muted.to_iced()),
@@ -1305,18 +1713,15 @@ impl CortenForgeApp {
         .width(Length::Fill)
         .style(move |_| card_style(palette));
 
-        scrollable(
-            column![
-                app_header,
-                vertical_space().height(Spacing::XS),
-                security_card,
-                vertical_space().height(Spacing::XS),
-                desc_section,
-            ]
-            .spacing(Spacing::MD),
-        )
-        .height(Length::Fill)
-        .into()
+        let mut detail_col = column![app_header].spacing(Spacing::MD);
+        if let Some(sc_el) = screenshots_section {
+            detail_col = detail_col.push(sc_el);
+        }
+        detail_col = detail_col.push(desc_section).push(security_card);
+
+        scrollable(detail_col)
+            .height(Length::Fill)
+            .into()
     }
 
     fn render_package_grid<'a>(&'a self, items: &[PackageItem], palette: Palette) -> Element<'a, Message> {
@@ -1410,10 +1815,7 @@ impl CortenForgeApp {
             container(
                 column![
                     row![
-                        text(item.icon_char)
-                            .font(LUCIDE_FONT)
-                            .size(26.0)
-                            .color(palette.primary.to_iced()),
+                        self.render_app_icon(&item.id, item.icon_char, 42.0, palette),
                         column![
                             row![
                                 text(item.name.clone())
@@ -1461,6 +1863,60 @@ impl CortenForgeApp {
     // ─────────────────────────────────────────────────────────────────────────────
     // HELPERS
     // ─────────────────────────────────────────────────────────────────────────────
+
+    fn render_app_icon<'a>(
+        &'a self,
+        app_id: &str,
+        fallback_char: &'static str,
+        size: f32,
+        palette: Palette,
+    ) -> Element<'a, Message> {
+        if let Some(handle) = self.icon_handles.get(app_id) {
+            container(
+                image(handle.clone())
+                    .width(Length::Fixed(size))
+                    .height(Length::Fixed(size))
+                    .content_fit(ContentFit::Contain),
+            )
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .center_x(Length::Fixed(size))
+            .center_y(Length::Fixed(size))
+            .into()
+        } else {
+            let icon_sz = (size * 0.56).max(16.0);
+            container(
+                text(fallback_char)
+                    .font(LUCIDE_FONT)
+                    .size(icon_sz)
+                    .color(palette.primary.to_iced()),
+            )
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .center_x(Length::Fixed(size))
+            .center_y(Length::Fixed(size))
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.12,
+                ))),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.28,
+                    ),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(Radius::MD),
+                },
+                ..Default::default()
+            })
+            .into()
+        }
+    }
 
     fn sidebar_nav_button<'a>(
         icon: char,

@@ -50,7 +50,7 @@ impl ClipboardManager {
                 let preview = line.split('\t').nth(1).unwrap_or(line).trim().to_string();
                 let is_image = preview.starts_with("[[ binary data") && (preview.contains("png") || preview.contains("jpg") || preview.contains("jpeg") || preview.contains("image"));
                 let display_preview = if is_image {
-                    format!("📷 {}", preview.trim_start_matches("[[").trim_end_matches("]]").trim())
+                    format!("[Görsel] {}", preview.trim_start_matches("[[").trim_end_matches("]]").trim())
                 } else {
                     preview
                 };

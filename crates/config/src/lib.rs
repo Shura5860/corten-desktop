@@ -223,6 +223,24 @@ pub struct AppearanceConfig {
     pub live_wallpaper_shader: bool,
     #[serde(default)]
     pub desktop_icons_enabled: bool,
+    #[serde(default = "default_window_corner_radius")]
+    pub window_corner_radius: u16,
+    #[serde(default = "default_window_gap")]
+    pub window_gap: i32,
+    #[serde(default = "default_window_border_style")]
+    pub window_border_style: String,
+}
+
+fn default_window_corner_radius() -> u16 {
+    10
+}
+
+fn default_window_gap() -> i32 {
+    12
+}
+
+fn default_window_border_style() -> String {
+    "subtle".to_string()
 }
 
 impl Default for AppearanceConfig {
@@ -240,6 +258,9 @@ impl Default for AppearanceConfig {
             secondary_wallpaper_path: String::new(),
             live_wallpaper_shader: false,
             desktop_icons_enabled: false,
+            window_corner_radius: default_window_corner_radius(),
+            window_gap: default_window_gap(),
+            window_border_style: default_window_border_style(),
         }
     }
 }

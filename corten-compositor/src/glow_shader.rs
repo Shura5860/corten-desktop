@@ -497,61 +497,129 @@ uniform float tint;
 #endif
 
 uniform vec4 u_glow_color;
-uniform float u_radius;
+uniform vec4 u_border_color;
+uniform float u_border_width;
+uniform vec2 u_radii;
 uniform float u_glow_size;
 
-// Continuous G2 Squircle (L4 superellipse) signed distance function
-float sd_squircle_box(vec2 p, vec2 b, float r) {
-    vec2 d = max(abs(p) - b + vec2(r), 0.0);
-    float l4 = pow(pow(d.x, 4.0) + pow(d.y, 4.0), 0.25);
-    return min(max(abs(p.x) - b.x + r, abs(p.y) - b.y + r), 0.0) + l4 - r;
+float sd_rounded_box_tb(vec2 p, vec2 b, vec2 radii) {
+    float r = (p.y < 0.0) ? radii.x : radii.y;
+    vec2 q = abs(p) - b + vec2(r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
 }
 
 void main() {
-    // Current pixel coordinate in local element coordinates [0, size.x] x [0, size.y]
     vec2 pixel_coord = v_coords * size;
     vec2 center = size * 0.5;
     vec2 half_window = center - vec2(u_glow_size);
 
     vec2 p = pixel_coord - center;
-    float dist = sd_squircle_box(p, half_window, u_radius);
+    float dist = sd_rounded_box_tb(p, half_window, u_radii);
 
-    if (dist < 0.0) {
-        // Inside the window bounds - discard so window surface shows through
-        discard;
-    } else if (dist <= u_glow_size) {
-        float norm_d = dist / u_glow_size;
-
-        // Layer 1: Ambient Occlusion (Tight 5px dark contact shadow shifted +1.8px downward)
-        vec2 p_ao = p - vec2(0.0, 1.8);
-        float dist_ao = max(sd_squircle_box(p_ao, half_window, u_radius), 0.0);
-        float ao_alpha = exp(-dist_ao * 0.55) * 0.52;
-
-        // Layer 2: Key-Light Elevation Shadow (Soft downward-cast Gaussian shadow shifted +4.5px)
-        vec2 p_key = p - vec2(0.0, 4.5);
-        float dist_key = max(sd_squircle_box(p_key, half_window, u_radius), 0.0) / max(u_glow_size, 1.0);
-        float key_alpha = exp(-dist_key * dist_key * 3.6) * 0.38;
-
-        // Layer 3: Corten Radiant Halo & Specular Rim Highlight
-        float halo_intensity = exp(-norm_d * norm_d * 4.2);
-        float core = exp(-norm_d * 12.0) * 0.48;
-        float top_specular = (p.y < -half_window.y + 3.0 && dist < 2.2) ? exp(-dist * 1.4) * 0.28 : 0.0;
-
-        float color_a = clamp((halo_intensity + core) * u_glow_color.a, 0.0, 1.0);
-        float shadow_a = clamp(ao_alpha + key_alpha, 0.0, 0.72) * clamp(u_glow_color.a + 0.35, 0.0, 1.0);
-
-        vec3 base_rgb = u_glow_color.rgb * color_a + vec3(1.0) * top_specular;
-        float final_a = clamp((max(color_a, shadow_a) + top_specular) * alpha, 0.0, 1.0);
-
-        gl_FragColor = vec4(clamp(base_rgb, 0.0, 1.0), final_a);
-    } else {
+    if (dist < -0.5) {
         discard;
     }
+
+    float d_pos = max(dist, 0.0);
+    // Smooth fade to zero before the quad boundary to prevent any hard edge cutoff
+    float edge_fade = 1.0 - smoothstep(u_glow_size * 0.68, u_glow_size, d_pos);
+
+    // Layer 1: Tight contact ambient occlusion (+1.5px Y)
+    vec2 p_ao = p - vec2(0.0, 1.5);
+    float dist_ao = max(sd_rounded_box_tb(p_ao, half_window, u_radii + vec2(1.0)), 0.0);
+    float ao_a = exp(-dist_ao * 0.26) * 0.24 * edge_fade;
+
+    // Layer 2: Soft downward-cast Gaussian elevation shadow (+8px Y)
+    vec2 p_key = p - vec2(0.0, 8.0);
+    float dist_key = max(sd_rounded_box_tb(p_key, half_window, u_radii + vec2(4.0)), 0.0);
+    float shadow_sigma = max(u_glow_size * 0.36, 5.0);
+    float key_a = exp(-(dist_key * dist_key) / (2.0 * shadow_sigma * shadow_sigma)) * 0.36 * edge_fade;
+
+    float shadow_a = clamp(ao_a + key_a, 0.0, 0.52);
+
+    // Layer 3: Optional subtle halo (0.0 for normal windows; used only by snap preview / high-vis)
+    float halo_sigma = max(u_glow_size * 0.24, 3.0);
+    float halo_a = (u_glow_color.a > 0.001)
+        ? exp(-(d_pos * d_pos) / (2.0 * halo_sigma * halo_sigma)) * u_glow_color.a * edge_fade
+        : 0.0;
+
+    // Layer 4: Crisp anti-aliased hairline glass rim
+    float border_mask = (1.0 - smoothstep(u_border_width - 0.60, u_border_width + 0.40, dist))
+                      * smoothstep(-0.5, 0.15, dist);
+    float border_a = border_mask * u_border_color.a;
+
+    // Premultiplied Porter-Duff src-over compositing: shadow -> halo -> hairline rim
+    vec3 col = vec3(0.0);
+    float out_a = shadow_a;
+
+    if (halo_a > 0.001) {
+        vec3 halo_pm = u_glow_color.rgb * halo_a;
+        col = halo_pm + col * (1.0 - halo_a);
+        out_a = halo_a + out_a * (1.0 - halo_a);
+    }
+
+    if (border_a > 0.001) {
+        vec3 border_pm = u_border_color.rgb * border_a;
+        col = border_pm + col * (1.0 - border_a);
+        out_a = border_a + out_a * (1.0 - border_a);
+    }
+
+    if (out_a <= 0.001) {
+        discard;
+    }
+
+    gl_FragColor = vec4(col, out_a) * alpha;
+}
+"#;
+
+pub const ROUNDED_HEADER_SHADER_SRC: &str = r#"
+precision mediump float;
+varying vec2 v_coords;
+uniform vec2 size;
+uniform float alpha;
+
+#if defined(DEBUG_FLAGS)
+uniform float tint;
+#endif
+
+uniform vec4 u_bg_top;
+uniform vec4 u_bg_bottom;
+uniform vec4 u_rim_color;
+uniform float u_radius;
+
+float sd_top_rounded(vec2 p, vec2 b, float r) {
+    float cr = (p.y < 0.0) ? r : 0.0;
+    vec2 q = abs(p) - b + vec2(cr);
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - cr;
+}
+
+void main() {
+    vec2 pixel_coord = v_coords * size;
+    vec2 half_size = size * 0.5;
+    vec2 p = pixel_coord - half_size;
+
+    float dist = sd_top_rounded(p, half_size, u_radius);
+    float mask = 1.0 - smoothstep(-0.6, 0.5, dist);
+    if (mask <= 0.001) {
+        discard;
+    }
+
+    float t = clamp(v_coords.y, 0.0, 1.0);
+    vec4 bg = mix(u_bg_top, u_bg_bottom, t);
+
+    // Subtle 1px curved top glass highlight
+    float inner_rim = smoothstep(-1.8, -0.4, dist) * (1.0 - smoothstep(-0.4, 0.4, dist));
+    float top_weight = smoothstep(0.45, 0.0, t);
+    vec3 rgb = mix(bg.rgb, u_rim_color.rgb, inner_rim * top_weight * u_rim_color.a);
+
+    float out_a = bg.a * mask * alpha;
+    gl_FragColor = vec4(rgb * out_a, out_a);
 }
 "#;
 
 pub struct GlowShaderManager {
     program: GlesPixelProgram,
+    header_program: GlesPixelProgram,
 }
 
 impl GlowShaderManager {
@@ -560,20 +628,35 @@ impl GlowShaderManager {
     ) -> Result<Self, smithay::backend::renderer::gles::GlesError> {
         let uniforms = [
             UniformName::new("u_glow_color", UniformType::_4f),
-            UniformName::new("u_radius", UniformType::_1f),
+            UniformName::new("u_border_color", UniformType::_4f),
+            UniformName::new("u_border_width", UniformType::_1f),
+            UniformName::new("u_radii", UniformType::_2f),
             UniformName::new("u_glow_size", UniformType::_1f),
+        ];
+        let header_uniforms = [
+            UniformName::new("u_bg_top", UniformType::_4f),
+            UniformName::new("u_bg_bottom", UniformType::_4f),
+            UniformName::new("u_rim_color", UniformType::_4f),
+            UniformName::new("u_radius", UniformType::_1f),
         ];
 
         let program = renderer.compile_custom_pixel_shader(GLOW_SHADER_SRC, &uniforms)?;
-        Ok(Self { program })
+        let header_program =
+            renderer.compile_custom_pixel_shader(ROUNDED_HEADER_SHADER_SRC, &header_uniforms)?;
+        Ok(Self {
+            program,
+            header_program,
+        })
     }
 
-    pub fn create_element(
+    pub fn create_styled_element(
         &self,
         window_rect: Rectangle<i32, Logical>,
         glow_size: i32,
-        corner_radius: f32,
-        color: [f32; 4],
+        corner_radii: (f32, f32),
+        glow_color: [f32; 4],
+        border_color: [f32; 4],
+        border_width: f32,
     ) -> PixelShaderElement {
         let glow_area = Rectangle::new(
             Point::from((window_rect.loc.x - glow_size, window_rect.loc.y - glow_size)),
@@ -587,9 +670,25 @@ impl GlowShaderManager {
         let uniforms = vec![
             Uniform::new(
                 Cow::Borrowed("u_glow_color"),
-                UniformValue::_4f(color[0], color[1], color[2], color[3]),
+                UniformValue::_4f(glow_color[0], glow_color[1], glow_color[2], glow_color[3]),
             ),
-            Uniform::new(Cow::Borrowed("u_radius"), UniformValue::_1f(corner_radius)),
+            Uniform::new(
+                Cow::Borrowed("u_border_color"),
+                UniformValue::_4f(
+                    border_color[0],
+                    border_color[1],
+                    border_color[2],
+                    border_color[3],
+                ),
+            ),
+            Uniform::new(
+                Cow::Borrowed("u_border_width"),
+                UniformValue::_1f(border_width),
+            ),
+            Uniform::new(
+                Cow::Borrowed("u_radii"),
+                UniformValue::_2f(corner_radii.0, corner_radii.1),
+            ),
             Uniform::new(
                 Cow::Borrowed("u_glow_size"),
                 UniformValue::_1f(glow_size as f32),
@@ -606,13 +705,56 @@ impl GlowShaderManager {
         )
     }
 
-    /// Creates a grounded 4dp Dual-Layer elevation shadow element for inactive windows.
+    /// Creates a single-pass rounded top-corners SSD titlebar plate.
+    pub fn create_rounded_header_element(
+        &self,
+        header_rect: Rectangle<i32, Logical>,
+        top_radius: f32,
+        bg_top: [f32; 4],
+        bg_bottom: [f32; 4],
+        rim_color: [f32; 4],
+    ) -> PixelShaderElement {
+        let uniforms = vec![
+            Uniform::new(
+                Cow::Borrowed("u_bg_top"),
+                UniformValue::_4f(bg_top[0], bg_top[1], bg_top[2], bg_top[3]),
+            ),
+            Uniform::new(
+                Cow::Borrowed("u_bg_bottom"),
+                UniformValue::_4f(bg_bottom[0], bg_bottom[1], bg_bottom[2], bg_bottom[3]),
+            ),
+            Uniform::new(
+                Cow::Borrowed("u_rim_color"),
+                UniformValue::_4f(rim_color[0], rim_color[1], rim_color[2], rim_color[3]),
+            ),
+            Uniform::new(Cow::Borrowed("u_radius"), UniformValue::_1f(top_radius)),
+        ];
+
+        PixelShaderElement::new(
+            self.header_program.clone(),
+            header_rect,
+            None,
+            1.0,
+            uniforms,
+            Kind::Unspecified,
+        )
+    }
+
+    /// Creates a clean, grounded elevation shadow + subtle 1px glass rim for inactive windows.
     pub fn create_inactive_shadow_element(
         &self,
         window_rect: Rectangle<i32, Logical>,
-        corner_radius: f32,
+        corner_radii: (f32, f32),
+        border_color: [f32; 4],
     ) -> PixelShaderElement {
-        self.create_element(window_rect, 12, corner_radius, [0.04, 0.05, 0.07, 0.28])
+        self.create_styled_element(
+            window_rect,
+            28,
+            corner_radii,
+            [0.0, 0.0, 0.0, 0.0],
+            border_color,
+            1.0,
+        )
     }
 }
 

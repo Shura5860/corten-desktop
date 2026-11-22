@@ -7,7 +7,7 @@ set -euo pipefail
 # and optionally enables Corten Greeter (greetd + cage).
 
 REPO="Shura5860/corten-desktop"
-FALLBACK_VERSION="v0.5.8"
+FALLBACK_VERSION="v0.5.9"
 ENABLE_GREETER=0
 
 for arg in "$@"; do

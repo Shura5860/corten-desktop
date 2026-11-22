@@ -38,7 +38,7 @@ impl Default for FilesConfig {
     fn default() -> Self {
         Self {
             show_hidden: false,
-            show_inspector: true,
+            show_inspector: false,
             view_mode: ViewMode::List,
             sort_column: SortColumn::Name,
             sort_direction: SortDirection::Ascending,
@@ -159,6 +159,7 @@ pub enum Message {
     UnmountDevice(String),
     DeviceUnmounted(Result<(), String>),
     AnalyzeWithAi(PathBuf),
+    SetAsWallpaper(PathBuf),
     OpenContextMenu(usize),
     CloseContextMenu,
     ToggleBreadcrumbDropdown(PathBuf),
@@ -738,6 +739,26 @@ impl CortenFilesApp {
                     self.selected_index = Some(idx);
                     self.refresh_inspection();
                     self.context_menu = Some(idx);
+                }
+            }
+            Message::SetAsWallpaper(path) => {
+                self.context_menu = None;
+                if let Ok(mut mgr) =
+                    ConfigManager::<corten_config::AppearanceConfig>::load_or_default("appearance")
+                {
+                    let mut cfg = mgr.get().clone();
+                    cfg.wallpaper_path = path.to_string_lossy().to_string();
+                    if mgr.update(cfg).is_ok() {
+                        let _ = std::process::Command::new("pkill")
+                            .args(["-USR1", "-x", "corten-wallpaper"])
+                            .spawn();
+                        self.status_message = format!(
+                            "Duvar kağıdı uygulandı: {}",
+                            path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("görsel")
+                        );
+                    }
                 }
             }
             Message::CloseContextMenu => {
@@ -1774,10 +1795,18 @@ impl CortenFilesApp {
             return column![].into();
         };
 
+        let ext_lower = entry
+            .path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
         let is_archive = matches!(
-            entry.path.extension().and_then(|s| s.to_str()).unwrap_or(""),
+            ext_lower.as_str(),
             "zip" | "tar" | "gz" | "xz" | "7z" | "zst"
         );
+        let is_image = !entry.is_dir
+            && matches!(ext_lower.as_str(), "png" | "jpg" | "jpeg" | "webp");
 
         let icon_char = Self::entry_icon(entry.kind);
         let icon_color = Self::entry_accent_color(entry, palette);
@@ -1844,6 +1873,16 @@ impl CortenFilesApp {
             Message::ActivateIndex(idx),
             palette,
         ));
+        if is_image {
+            items = items.push(Self::context_menu_item(
+                Icon::SUN,
+                "Duvar Kağıdı Yap",
+                "Anlık",
+                false,
+                Message::SetAsWallpaper(entry.path.clone()),
+                palette,
+            ));
+        }
         items = items.push(Self::context_menu_item(
             Icon::SEARCH,
             "Hızlı Bakış",
@@ -3832,7 +3871,7 @@ impl CortenFilesApp {
 
             if is_script_or_binary {
                 col = col.push(Self::small_button(
-                    "⚡ Corten AI Güvenlik Analizi",
+                    "Corten AI Güvenlik Analizi",
                     "",
                     Message::AnalyzeWithAi(PathBuf::from(&info.full_path)),
                     palette,
@@ -3842,7 +3881,7 @@ impl CortenFilesApp {
             col.push(
                 row![
                     Self::small_button(
-                        "👁 Hızlı Bakış (Space)",
+                        "Hızlı Bakış (Space)",
                         "",
                         Message::ToggleQuickLook,
                         palette,

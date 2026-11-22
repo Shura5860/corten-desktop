@@ -31,7 +31,7 @@ impl Default for WeatherData {
             temperature: 19.5,
             feels_like: 19.0,
             condition: "Güneşli".to_string(),
-            icon: "☀️".to_string(),
+            icon: corten_theme::Icon::SUN.to_string(),
             humidity: 62,
             wind_speed: 14.0,
             pressure_hpa: 1016,
@@ -191,22 +191,23 @@ impl WeatherService {
 }
 
 fn map_condition(desc: &str) -> (String, String) {
+    use corten_theme::Icon;
     let lower = desc.to_lowercase();
     if lower.contains("sunny") || lower.contains("clear") {
-        ("Güneşli".to_string(), "☀️".to_string())
+        ("Güneşli".to_string(), Icon::SUN.to_string())
     } else if lower.contains("partly cloudy") {
-        ("Parçalı Bulutlu".to_string(), "⛅".to_string())
+        ("Parçalı Bulutlu".to_string(), Icon::CLOUD.to_string())
     } else if lower.contains("cloudy") || lower.contains("overcast") {
-        ("Bulutlu".to_string(), "☁️".to_string())
+        ("Bulutlu".to_string(), Icon::CLOUD.to_string())
     } else if lower.contains("rain") || lower.contains("drizzle") || lower.contains("shower") {
-        ("Yağmurlu".to_string(), "🌧️".to_string())
+        ("Yağmurlu".to_string(), Icon::DROPLET.to_string())
     } else if lower.contains("snow") || lower.contains("blizzard") {
-        ("Karlı".to_string(), "❄️".to_string())
+        ("Karlı".to_string(), Icon::CLOUD.to_string())
     } else if lower.contains("thunder") || lower.contains("storm") {
-        ("Fırtınalı".to_string(), "⛈️".to_string())
+        ("Fırtınalı".to_string(), Icon::ZAP.to_string())
     } else if lower.contains("fog") || lower.contains("mist") {
-        ("Sisli".to_string(), "🌫️".to_string())
+        ("Sisli".to_string(), Icon::WIND.to_string())
     } else {
-        (desc.to_string(), "⛅".to_string())
+        (desc.to_string(), Icon::CLOUD.to_string())
     }
 }

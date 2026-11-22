@@ -201,7 +201,7 @@ pub fn parse_color_query(q: &str) -> Option<(String, String)> {
             let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
             let (h, sat, l) = rgb_to_hsl(r, g, b);
             return Some((
-                format!("🎨 Renk: #{}", hex.to_uppercase()),
+                format!("Renk: #{}", hex.to_uppercase()),
                 format!("RGB: ({}, {}, {}) | HSL: ({}°, {}%, {}%)", r, g, b, h, sat, l),
             ));
         } else if hex.len() == 3 {
@@ -214,7 +214,7 @@ pub fn parse_color_query(q: &str) -> Option<(String, String)> {
             let b = u8::from_str_radix(&full_hex[4..6], 16).ok()?;
             let (h, sat, l) = rgb_to_hsl(r, g, b);
             return Some((
-                format!("🎨 Renk: #{}", full_hex.to_uppercase()),
+                format!("Renk: #{}", full_hex.to_uppercase()),
                 format!("RGB: ({}, {}, {}) | HSL: ({}°, {}%, {}%)", r, g, b, h, sat, l),
             ));
         }
@@ -227,7 +227,7 @@ pub fn parse_color_query(q: &str) -> Option<(String, String)> {
             let b = parts[2].parse::<u8>().ok()?;
             let (h, sat, l) = rgb_to_hsl(r, g, b);
             return Some((
-                format!("🎨 Renk: #{:02X}{:02X}{:02X}", r, g, b),
+                format!("Renk: #{:02X}{:02X}{:02X}", r, g, b),
                 format!("RGB: ({}, {}, {}) | HSL: ({}°, {}%, {}%)", r, g, b, h, sat, l),
             ));
         }

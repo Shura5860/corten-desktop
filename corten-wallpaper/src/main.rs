@@ -222,6 +222,7 @@ pub enum Message {
     ReloadConfig,
     CheckPeriodic,
     ShaderTick,
+    FadeTick,
     OpenDesktopEntry(PathBuf),
     LayerAction(LayershellCustomActions),
 }
@@ -307,6 +308,8 @@ pub fn scan_desktop_folder_icons() -> Vec<(String, PathBuf, bool)> {
 
 pub struct CortenWallpaperApp {
     wallpapers: Vec<PathBuf>,
+    previous_wallpaper: Option<PathBuf>,
+    fade_progress: f32,
     current_index: usize,
     interval_secs: u64,
     slideshow_enabled: bool,
@@ -340,6 +343,8 @@ impl Application for CortenWallpaperApp {
         (
             Self {
                 wallpapers: flags.wallpapers,
+                previous_wallpaper: None,
+                fade_progress: 1.0,
                 current_index: 0,
                 interval_secs: flags.interval_secs,
                 slideshow_enabled: flags.slideshow_enabled,
@@ -368,7 +373,9 @@ impl Application for CortenWallpaperApp {
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         match message {
             Message::NextWallpaper => {
-                if !self.wallpapers.is_empty() {
+                if self.wallpapers.len() > 1 {
+                    self.previous_wallpaper = self.wallpapers.get(self.current_index).cloned();
+                    self.fade_progress = 0.0;
                     self.current_index = (self.current_index + 1) % self.wallpapers.len();
                     if let Some(wp) = self.wallpapers.get(self.current_index) {
                         sync_ambiance_to_config(wp);
@@ -404,7 +411,9 @@ impl Application for CortenWallpaperApp {
                         if new_path.exists() && new_path.is_file() {
                             let is_different = self.wallpapers.get(self.current_index) != Some(&new_path);
                             if is_different {
-                                info!("corten-wallpaper: Updating wallpaper to {}", new_path.display());
+                                info!("corten-wallpaper: Crossfading wallpaper to {}", new_path.display());
+                                self.previous_wallpaper = self.wallpapers.get(self.current_index).cloned();
+                                self.fade_progress = 0.0;
                                 self.wallpapers = vec![new_path.clone()];
                                 self.current_index = 0;
                                 sync_ambiance_to_config(&new_path);
@@ -415,6 +424,14 @@ impl Application for CortenWallpaperApp {
             }
             Message::ShaderTick => {
                 self.shader_phase = (self.shader_phase + 0.04) % std::f32::consts::TAU;
+            }
+            Message::FadeTick => {
+                if self.fade_progress < 1.0 {
+                    self.fade_progress = (self.fade_progress + 0.055).min(1.0);
+                    if self.fade_progress >= 1.0 {
+                        self.previous_wallpaper = None;
+                    }
+                }
             }
             Message::OpenDesktopEntry(path) => {
                 let _ = std::process::Command::new("xdg-open").arg(path).spawn();
@@ -502,22 +519,44 @@ impl Application for CortenWallpaperApp {
         }
 
         if let Some(path) = self.wallpapers.get(self.current_index) {
+            // Smooth cubic ease-out for silky 300ms crossfade
+            let t = self.fade_progress.clamp(0.0, 1.0);
+            let eased_alpha = 1.0 - (1.0 - t).powi(3);
             let handle = iced_image::Handle::from_path(path);
-            let bg: Element<'_, Self::Message> = container(
-                iced_image(handle)
+            let new_img = iced_image(handle)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .content_fit(iced::ContentFit::Cover)
+                .opacity(eased_alpha);
+
+            let bg: Element<'_, Self::Message> = if let Some(ref prev_path) = self.previous_wallpaper {
+                if self.fade_progress < 1.0 {
+                    let prev_img = iced_image(iced_image::Handle::from_path(prev_path))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .content_fit(iced::ContentFit::Cover);
+                    iced::widget::stack![prev_img, new_img]
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into()
+                } else {
+                    container(new_img)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into()
+                }
+            } else {
+                container(new_img)
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .content_fit(iced::ContentFit::Cover),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgb(
-                    0.08, 0.08, 0.10,
-                ))),
-                ..Default::default()
-            })
-            .into();
+                    .style(|_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(
+                            0.08, 0.08, 0.10,
+                        ))),
+                        ..Default::default()
+                    })
+                    .into()
+            };
             if let Some(overlay) = icons_overlay {
                 iced::widget::stack![bg, overlay]
                     .width(Length::Fill)
@@ -577,6 +616,12 @@ impl Application for CortenWallpaperApp {
         subs.push(
             iced::time::every(Duration::from_millis(5000)).map(|_| Message::CheckPeriodic),
         );
+
+        if self.fade_progress < 1.0 {
+            subs.push(
+                iced::time::every(Duration::from_millis(16)).map(|_| Message::FadeTick),
+            );
+        }
 
         if self.live_shader_enabled {
             subs.push(

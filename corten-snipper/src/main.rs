@@ -1,8 +1,12 @@
+use std::borrow::Cow;
 use std::io::Write;
 use std::path::PathBuf;
 
 use corten_config::{AppearanceConfig, ConfigManager};
-use corten_theme::{Palette, PatinaVariant, ThemeMode, Typography};
+use corten_theme::{
+    Icon, Palette, PatinaVariant, ThemeMode, Typography, LUCIDE_FONT, LUCIDE_FONT_BYTES,
+    NOTO_SANS, NOTO_SANS_BYTES,
+};
 use iced::mouse::Button;
 use iced::widget::{button, canvas, column, container, horizontal_space, image, row, stack, text};
 use iced::{
@@ -101,6 +105,11 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             pin_arg,
             delay_secs,
         },
+        fonts: vec![
+            Cow::Borrowed(LUCIDE_FONT_BYTES),
+            Cow::Borrowed(NOTO_SANS_BYTES),
+        ],
+        default_font: NOTO_SANS,
         ..Default::default()
     })
 }
@@ -471,7 +480,7 @@ impl Application for CortenSnipperApp {
             Message::ToggleRedactionMode => {
                 self.redaction_mode = !self.redaction_mode;
                 self.status_msg = Some(if self.redaction_mode {
-                    "✏️ Çizim & Gizleme modu aktif. Aracı seçip görsel üzerinde sürükleyin.".into()
+                    "Çizim & Gizleme modu aktif. Aracı seçip görsel üzerinde sürükleyin.".into()
                 } else {
                     "Normal önizleme moduna dönüldü.".into()
                 });
@@ -504,7 +513,7 @@ impl Application for CortenSnipperApp {
                     match apply_annotations_and_save(path_str, &self.redactions, bounds) {
                         Ok(target) => {
                             self.last_saved_path = Some(target.clone());
-                            self.status_msg = Some(format!("💾 Kaydedildi: {}", target));
+                            self.status_msg = Some(format!("Kaydedildi: {}", target));
                         }
                         Err(err) => {
                             self.status_msg = Some(format!("Hata: {}", err));
@@ -529,7 +538,7 @@ impl Application for CortenSnipperApp {
                 if let Some(path) = target_path {
                     match copy_image_to_clipboard(path) {
                         Ok(()) => {
-                            self.status_msg = Some("📋 Resim panoya kopyalandı!".into());
+                            self.status_msg = Some("Resim panoya kopyalandı!".into());
                         }
                         Err(err) => {
                             self.status_msg = Some(format!("Kopyalama hatası: {}", err));
@@ -699,14 +708,30 @@ impl Application for CortenSnipperApp {
                 .unwrap_or_else(|| "Ekran Görüntüsü".to_string());
 
             let mut header = row![
-                text(format!("📌 {}", filename))
-                    .size(Typography::CAPTION)
-                    .color(palette.primary.to_iced()),
+                row![
+                    text(Icon::PIN)
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
+                        .color(palette.primary.to_iced()),
+                    text(filename)
+                        .size(Typography::CAPTION)
+                        .color(palette.primary.to_iced()),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
                 horizontal_space(),
                 button(
-                    text(if self.redaction_mode { "✏️ Düzenle: Açık" } else { "✏️ Çiz & Gizle" })
-                        .size(11.0)
-                        .color(if self.redaction_mode { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
+                    row![
+                        text(Icon::PEN)
+                            .font(LUCIDE_FONT)
+                            .size(11.0)
+                            .color(if self.redaction_mode { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
+                        text(if self.redaction_mode { "Düzenle: Açık" } else { "Çiz & Gizle" })
+                            .size(11.0)
+                            .color(if self.redaction_mode { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
                 )
                 .padding([2, 8])
                 .style(move |_, _| button::Style {
@@ -723,54 +748,75 @@ impl Application for CortenSnipperApp {
                     ..Default::default()
                 })
                 .on_press(Message::ToggleRedactionMode),
-                button(text("🔒").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::Redact)),
-                button(text("💧").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::BlurPixelate)),
-                button(text("⬜").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::RectangleBox)),
-                button(text("↗").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::Arrow)),
-                button(text("🖍").size(11.0)).padding([2, 5]).on_press(Message::SelectAnnotationTool(AnnotationTool::Highlight)),
+                button(text(Icon::LOCK).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::Redact)),
+                button(text(Icon::DROPLET).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::BlurPixelate)),
+                button(text(Icon::SQUARE).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::RectangleBox)),
+                button(text(Icon::ARROW_UP_RIGHT).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::Arrow)),
+                button(text(Icon::PEN).font(LUCIDE_FONT).size(12.0).color(palette.warning.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::Highlight)),
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center);
 
             if !self.redactions.is_empty() {
                 header = header.push(
-                    button(text("↩ Geri Al").size(11.0).color(palette.text_muted.to_iced()))
-                        .padding([2, 6])
-                        .style(|_, _| button::Style::default())
-                        .on_press(Message::UndoRedaction),
+                    button(
+                        row![
+                            text(Icon::UNDO).font(LUCIDE_FONT).size(11.0).color(palette.text_muted.to_iced()),
+                            text("Geri Al").size(11.0).color(palette.text_muted.to_iced()),
+                        ]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center),
+                    )
+                    .padding([2, 6])
+                    .style(|_, _| button::Style::default())
+                    .on_press(Message::UndoRedaction),
                 );
                 header = header.push(
-                    button(text("💾 Kaydet").size(11.0).color(palette.primary.to_iced()))
-                        .padding([2, 8])
-                        .style(move |_, _| button::Style {
-                            background: Some(Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.20).into()),
-                            border: iced::Border {
-                                radius: iced::border::Radius::from(6.0),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        })
-                        .on_press(Message::SaveRedactedImage),
-                );
-            }
-
-            header = header.push(
-                button(text("📋 Kopyala").size(11.0).color(palette.text_primary.to_iced()))
+                    button(
+                        row![
+                            text(Icon::SAVE).font(LUCIDE_FONT).size(11.0).color(palette.primary.to_iced()),
+                            text("Kaydet").size(11.0).color(palette.primary.to_iced()),
+                        ]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center),
+                    )
                     .padding([2, 8])
                     .style(move |_, _| button::Style {
-                        background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.08).into()),
+                        background: Some(Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.20).into()),
                         border: iced::Border {
                             radius: iced::border::Radius::from(6.0),
                             ..Default::default()
                         },
                         ..Default::default()
                     })
-                    .on_press(Message::CopyImageToClipboard),
+                    .on_press(Message::SaveRedactedImage),
+                );
+            }
+
+            header = header.push(
+                button(
+                    row![
+                        text(Icon::COPY).font(LUCIDE_FONT).size(11.0).color(palette.text_primary.to_iced()),
+                        text("Kopyala").size(11.0).color(palette.text_primary.to_iced()),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
+                )
+                .padding([2, 8])
+                .style(move |_, _| button::Style {
+                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.08).into()),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(6.0),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::CopyImageToClipboard),
             );
 
             header = header.push(
-                button(text("✕").size(11.0).color(palette.text_muted.to_iced()))
-                    .padding([1, 6])
+                button(text(Icon::X).font(LUCIDE_FONT).size(12.0).color(palette.text_muted.to_iced()))
+                    .padding([2, 6])
                     .style(|_, _| button::Style::default())
                     .on_press(Message::ClosePinned),
             );
@@ -1083,7 +1129,7 @@ impl canvas::Program<Message> for RedactionCanvas {
                         Color::from_rgba(0.20, 0.22, 0.28, 0.82),
                     );
                     let badge = canvas::Text {
-                        content: "💧 Bulanık".into(),
+                        content: "Bulanık".into(),
                         position: Point::new(r.x + 4.0, r.y + 4.0),
                         color: Color::from_rgba(1.0, 1.0, 1.0, 0.80),
                         size: 10.0.into(),

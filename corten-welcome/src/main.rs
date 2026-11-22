@@ -225,14 +225,14 @@ impl Application for CortenWelcomeApp {
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch(vec![
             event::listen().map(Message::KeyboardEvent),
-            iced::time::every(Duration::from_millis(50)).map(|_| Message::Tick),
+            iced::time::every(Duration::from_millis(100)).map(|_| Message::Tick),
         ])
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
-                self.anim_tick = (self.anim_tick + 0.05) % (std::f32::consts::PI * 2.0);
+                self.anim_tick = (self.anim_tick + 0.10) % (std::f32::consts::PI * 2.0);
             }
             Message::GoToSlide(slide) => {
                 self.slide = slide;

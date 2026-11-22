@@ -419,6 +419,7 @@ fn build_secondary_scene(
                 rel_cursor,
                 is_tiled,
                 &tabs,
+                None,
             );
         }
 
@@ -1113,6 +1114,8 @@ pub fn run_drm(
     let mut clients = Vec::new();
     let start_time = Instant::now();
     let (mut theme_mode, mut active_patina) = (ThemeMode::Dark, PatinaVariant::Rust);
+    let mut window_corner_radius: f32 = 10.0;
+    let mut window_border_style: String = "subtle".to_string();
     let mut appearance_rx = None;
     if let Ok(app_cfg) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
         theme_mode = match app_cfg.get().theme_mode {
@@ -1120,6 +1123,9 @@ pub fn run_drm(
             corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
         };
         active_patina = PatinaVariant::from_code(&app_cfg.get().patina);
+        window_corner_radius = app_cfg.get().window_corner_radius as f32;
+        window_border_style = app_cfg.get().window_border_style.clone();
+        state.set_gap_for_all_outputs(app_cfg.get().window_gap);
         if let Ok((_watcher, rx)) = app_cfg.spawn_watcher() {
             std::mem::forget(_watcher);
             appearance_rx = Some(rx);
@@ -1180,6 +1186,9 @@ pub fn run_drm(
                     corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
                 };
                 active_patina = PatinaVariant::from_code(&new_cfg.patina);
+                window_corner_radius = new_cfg.window_corner_radius as f32;
+                window_border_style = new_cfg.window_border_style.clone();
+                state.set_gap_for_all_outputs(new_cfg.window_gap);
                 palette_dirty = true;
             }
         }
@@ -2429,13 +2438,58 @@ pub fn run_drm(
                                         layout.drag_split_window(window.clone(), target_win, dir, new_on_first);
                                         state.snap_preview = None;
                                     } else if let Some(snap_rect) = state.snap_preview.take() {
-                                        state
-                                            .layout_for_output_mut(&target_output)
-                                            .set_fullscreen(&window, false);
-                                        state
-                                            .layout_for_output_mut(&target_output)
-                                            .set_floating_geometry(&window, snap_rect);
-                                        crate::layout::configure_window_geometry(&window, snap_rect);
+                                        let is_dragged_tiled = state
+                                            .layout_for_output(&target_output)
+                                            .is_window_tiled(&window);
+                                        let swap_candidate = if is_dragged_tiled {
+                                            window_rects.iter().rev().find_map(|(w, r)| {
+                                                if w != &window
+                                                    && r.to_f64().contains(out_rel_loc)
+                                                    && state
+                                                        .layout_for_output(&target_output)
+                                                        .is_window_tiled(w)
+                                                {
+                                                    Some(w.clone())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                        } else {
+                                            None
+                                        };
+                                        if let Some(target_win) = swap_candidate {
+                                            let layout =
+                                                state.layout_for_output_mut(&target_output);
+                                            layout.swap_windows(&window, &target_win);
+                                        } else {
+                                            state
+                                                .layout_for_output_mut(&target_output)
+                                                .set_fullscreen(&window, false);
+                                            state
+                                                .layout_for_output_mut(&target_output)
+                                                .set_floating_geometry(&window, snap_rect);
+                                            crate::layout::configure_window_geometry(
+                                                &window, snap_rect,
+                                            );
+                                        }
+                                    } else if state
+                                        .layout_for_output(&target_output)
+                                        .is_window_tiled(&window)
+                                    {
+                                        if let Some((target_win, _)) =
+                                            window_rects.iter().rev().find(|(w, r)| {
+                                                w != &window
+                                                    && r.to_f64().contains(out_rel_loc)
+                                                    && state
+                                                        .layout_for_output(&target_output)
+                                                        .is_window_tiled(w)
+                                            })
+                                        {
+                                            let target_win = target_win.clone();
+                                            let layout =
+                                                state.layout_for_output_mut(&target_output);
+                                            layout.swap_windows(&window, &target_win);
+                                        }
                                     } else if let Some(geo) = state.layout_for_output(&target_output).floating_geometry(&window) {
                                         crate::layout::configure_window_geometry(&window, geo);
                                     }
@@ -3224,13 +3278,64 @@ pub fn run_drm(
                 }
             }
 
+            let glow_rect = crate::state::compute_zoomed_glow_rect(
+                shifted_rect,
+                state.zoom_level,
+                zoom_pan,
+                base_scale,
+            );
+            let is_tiled = state.layout.is_window_tiled(window);
+            let is_max = state.layout.is_maximized(window);
+            let zero_radius = is_fs || is_max || (is_tiled && state.layout.gap() == 0);
+            let corner_radii: (f32, f32) = if zero_radius || window_corner_radius <= 0.5 {
+                (0.0, 0.0)
+            } else if titlebar_h > 0 {
+                (window_corner_radius, 2.0)
+            } else {
+                (window_corner_radius, window_corner_radius)
+            };
+
             // 2. Render Corten Industrial Titlebar & Controls ONLY for Server-Side Decorated windows
             if titlebar_h > 0 {
-                let is_max = state.layout.is_maximized(window);
-                let is_tiled = state.layout.is_window_tiled(window);
                 let win_id = crate::layout::window_stable_id(window);
                 let tabs = state.layout.window_tabs_metadata(win_id);
                 let (app_id, title) = crate::layout::window_metadata(window);
+                let rounded_header = glow_shader.as_ref().map(|manager| {
+                    let (header_bg, _, _) =
+                        crate::render::compute_titlebar_colors(&palette, is_active, false);
+                    let bg_top = if is_active {
+                        [
+                            (header_bg.r() + 0.035).min(1.0),
+                            (header_bg.g() + 0.038).min(1.0),
+                            (header_bg.b() + 0.048).min(1.0),
+                            0.98,
+                        ]
+                    } else {
+                        [
+                            (header_bg.r() + 0.018).min(1.0),
+                            (header_bg.g() + 0.020).min(1.0),
+                            (header_bg.b() + 0.025).min(1.0),
+                            0.95,
+                        ]
+                    };
+                    let bg_bottom = [header_bg.r(), header_bg.g(), header_bg.b(), 0.98];
+                    let rim = if is_active {
+                        [1.0, 1.0, 1.0, 0.16]
+                    } else {
+                        [1.0, 1.0, 1.0, 0.07]
+                    };
+                    let header_log = Rectangle::new(
+                        glow_rect.loc,
+                        smithay::utils::Size::from((glow_rect.size.w, titlebar_h)),
+                    );
+                    manager.create_rounded_header_element(
+                        header_log,
+                        corner_radii.0,
+                        bg_top,
+                        bg_bottom,
+                        rim,
+                    )
+                });
                 draw_window_titlebar(
                     &mut elements,
                     &mut renderer,
@@ -3246,6 +3351,7 @@ pub fn run_drm(
                     state.cursor_location,
                     is_tiled,
                     &tabs,
+                    rounded_header,
                 );
             }
 
@@ -3275,19 +3381,22 @@ pub fn run_drm(
                 }
             }
 
-            // 4. Glow halo and frame borders (Behind window content in front-to-back ordering, only for non-fullscreen windows)
-            let glow_rect = crate::state::compute_zoomed_glow_rect(
-                shifted_rect,
-                state.zoom_level,
-                zoom_pan,
-                base_scale,
-            );
+            // 4. Clean Elevation Shadow & Subtle Glass Rim (Behind window content in front-to-back ordering)
             if is_active && !is_fs {
                 let is_high_vis = state.accessibility.high_vis_focus_ring || state.accessibility.high_contrast;
-                let (ring_width, ring_color, halo_radiance) = if is_high_vis {
-                    (3, Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, 1.0), 0.95)
+                let (border_alpha, border_w, halo_radiance) = if is_high_vis {
+                    (0.95_f32, 2.0_f32, 0.16_f32)
                 } else {
-                    (2, Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, 1.0), 0.72)
+                    match window_border_style.as_str() {
+                        "none" => (0.0, 0.0, 0.0),
+                        "copper" => (0.82, 1.5, 0.0),
+                        _ => (0.48, 1.25, 0.0),
+                    }
+                };
+                let (ring_width, ring_color) = if is_high_vis {
+                    (3, Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, 0.95))
+                } else {
+                    (1, Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, border_alpha))
                 };
                 if let Some(manager) = glow_shader.as_ref() {
                     let halo_color = [
@@ -3296,18 +3405,37 @@ pub fn run_drm(
                         palette.primary.b,
                         halo_radiance,
                     ];
-                    let glow_elem = manager.create_element(glow_rect, 22, 8.0, halo_color);
+                    let border_color = [
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        border_alpha,
+                    ];
+                    let glow_elem = manager.create_styled_element(
+                        glow_rect,
+                        38,
+                        corner_radii,
+                        halo_color,
+                        border_color,
+                        border_w,
+                    );
                     elements.push(CustomRenderElement::from(glow_elem));
+                } else if border_alpha > 0.01 {
+                    draw_glow_ring(&mut elements, phys_rect, 0, ring_width, ring_color, 2);
                 }
-                draw_glow_ring(&mut elements, phys_rect, 0, ring_width, ring_color, 4);
             } else if !is_fs {
                 if let Some(manager) = glow_shader.as_ref() {
-                    let shadow_elem = manager.create_inactive_shadow_element(glow_rect, 8.0);
+                    let shadow_elem = manager.create_inactive_shadow_element(
+                        glow_rect,
+                        corner_radii,
+                        [1.0, 1.0, 1.0, 0.09],
+                    );
                     elements.push(CustomRenderElement::from(shadow_elem));
+                } else {
+                    let inactive_color =
+                        Color32F::new(1.0, 1.0, 1.0, 0.12);
+                    draw_glow_ring(&mut elements, phys_rect, 0, 1, inactive_color, 2);
                 }
-                let inactive_color =
-                    Color32F::new(palette.border.r, palette.border.g, palette.border.b, 0.45);
-                draw_glow_ring(&mut elements, phys_rect, 0, 1, inactive_color, 3);
             }
         }
 
@@ -3323,35 +3451,37 @@ pub fn run_drm(
                     inset_size.to_physical_precise_round(fractional_scale),
                 );
                 if let Some(manager) = glow_shader.as_ref() {
-                    let ghost_glow = manager.create_element(
+                    let ghost_glow = manager.create_styled_element(
                         inset_log,
                         16,
-                        12.0,
-                        [palette.primary.r, palette.primary.g, palette.primary.b, 0.78],
+                        (10.0, 10.0),
+                        [palette.primary.r, palette.primary.g, palette.primary.b, 0.14],
+                        [palette.primary.r, palette.primary.g, palette.primary.b, 0.65],
+                        1.5,
                     );
                     elements.push(CustomRenderElement::from(ghost_glow));
+                } else {
+                    let snap_border = Color32F::new(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.72,
+                    );
+                    draw_glow_ring(&mut elements, phys_snap, 0, 2, snap_border, 4);
                 }
                 let snap_color = Color32F::new(
                     palette.primary.r,
                     palette.primary.g,
                     palette.primary.b,
-                    0.16,
+                    0.12,
                 );
-                let snap_border = Color32F::new(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.82,
-                );
-                draw_glow_ring(
-                    &mut elements,
+                elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
+                    Id::new(),
                     phys_snap,
-                    0,
-                    phys_snap.size.w.min(phys_snap.size.h) / 2,
+                    CommitCounter::default(),
                     snap_color,
-                    14,
-                );
-                draw_glow_ring(&mut elements, phys_snap, 0, 2, snap_border, 14);
+                    Kind::Unspecified,
+                )));
                 let brk_len = (18.0 * fractional_scale).round().max(8.0) as i32;
                 let brk_thk = (3.0 * fractional_scale).round().max(2.0) as i32;
                 let brk_col = Color32F::new(1.0, 0.85, 0.65, 0.92);
