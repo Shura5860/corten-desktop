@@ -1,6 +1,6 @@
 # Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
 pkgname=corten-desktop-bin
-pkgver=0.5.8
+pkgver=0.5.9
 pkgrel=1
 pkgdesc="Pure-Rust Wayland desktop environment powered by Smithay, Iced & AURA-CORE (precompiled binary release)"
 arch=('x86_64')
