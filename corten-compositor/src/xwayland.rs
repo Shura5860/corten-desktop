@@ -29,6 +29,58 @@ impl XWaylandShellHandler for CortenCompositor {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
         &mut self.xwayland_shell_state
     }
+
+    fn surface_associated(
+        &mut self,
+        _xwm: XwmId,
+        wl_surface: WlSurface,
+        window: X11Surface,
+    ) {
+        let output_scale = self.output.current_scale().fractional_scale();
+        let scale = compute_xwayland_surface_scale(output_scale, self.xwayland_force_zero_scaling);
+        smithay::wayland::compositor::with_states(&wl_surface, |states| {
+            smithay::wayland::fractional_scale::with_fractional_scale(states, |fscale| {
+                fscale.set_preferred_scale(scale);
+            });
+        });
+        if !window.is_override_redirect() {
+            let wid = (1u64 << 32) | u64::from(window.window_id());
+            let already_tracked = self
+                .layout
+                .windows()
+                .iter()
+                .chain(self.layout.floating_windows().iter())
+                .any(|w| window_stable_id(w) == wid);
+            if !already_tracked && window.is_mapped() {
+                let smithay_window = Window::new_x11_window(window.clone());
+                self.layout.add_window(smithay_window.clone());
+                let usable = self.usable_area();
+                let geo = window.geometry();
+                let titlebar_h = crate::layout::window_titlebar_height(&smithay_window, false);
+                let max_w = (usable.size.w - 32).max(200);
+                let max_h = (usable.size.h - 32).max(160);
+                let w = geo.size.w.clamp(160, max_w);
+                let h = (geo.size.h + titlebar_h).clamp(100 + titlebar_h, max_h);
+                let x = geo
+                    .loc
+                    .x
+                    .clamp(usable.loc.x + 16, (usable.loc.x + usable.size.w - w).max(usable.loc.x));
+                let y = geo
+                    .loc
+                    .y
+                    .clamp(usable.loc.y + 16, (usable.loc.y + usable.size.h - h).max(usable.loc.y));
+                let rect = Rectangle::new((x, y).into(), (w, h).into());
+                self.layout.set_floating_geometry(&smithay_window, rect);
+                configure_window_geometry(&smithay_window, rect);
+            }
+            let _ = window.set_activated(true);
+            let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+            if let Some(keyboard) = self.seat.get_keyboard() {
+                keyboard.set_focus(self, Some(wl_surface), serial);
+            }
+            self.sync_ipc_snapshot();
+        }
+    }
 }
 
 smithay::delegate_xwayland_shell!(CortenCompositor);
@@ -547,7 +599,15 @@ pub fn start_xwayland(
                 sync_x11_scale(scale);
                 match X11Wm::start_wm(handle_for_wm.clone(), x11_socket, client_for_wm.clone()) {
                     Ok(wm) => {
-                        info!("XWayland ready on DISPLAY={display_value} with active X11Wm");
+                        if let Some(data) =
+                            client_for_wm.get_data::<smithay::xwayland::XWaylandClientData>()
+                        {
+                            data.user_data().insert_if_missing(|| wm.id());
+                        }
+                        info!(
+                            "XWayland ready on DISPLAY={display_value} with active X11Wm (id={:?})",
+                            wm.id()
+                        );
                         state.xwm = Some(wm);
                         state.xwayland_client = Some(client_for_wm.clone());
                     }

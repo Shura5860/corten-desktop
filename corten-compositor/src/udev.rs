@@ -2441,7 +2441,11 @@ pub fn run_drm(
                                         layout.set_floating(&window, false);
                                         layout.set_mode(corten_config::LayoutMode::Bsp);
                                         layout.drag_split_window(window.clone(), target_win, dir, new_on_first);
+                                        for (w, r) in layout.arrange(usable_area) {
+                                            crate::layout::configure_window_geometry_force(&w, r, Some(false));
+                                        }
                                         state.snap_preview = None;
+                                        state.sync_ipc_snapshot();
                                     } else if let Some(snap_rect) = state.snap_preview.take() {
                                         let is_dragged_tiled = state
                                             .layout_for_output(&target_output)
@@ -2466,18 +2470,27 @@ pub fn run_drm(
                                             let layout =
                                                 state.layout_for_output_mut(&target_output);
                                             layout.swap_windows(&window, &target_win);
+                                            for (w, r) in layout.arrange(usable_area) {
+                                                crate::layout::configure_window_geometry_force(&w, r, Some(false));
+                                            }
+                                            state.sync_ipc_snapshot();
                                         } else {
                                             let is_full_max = snap_rect == usable_area;
                                             let layout =
                                                 state.layout_for_output_mut(&target_output);
                                             layout.set_fullscreen(&window, false);
-                                            layout.set_maximized(&window, usable_area, is_full_max);
-                                            layout.set_floating_geometry(&window, snap_rect);
-                                            crate::layout::configure_window_geometry_force(
-                                                &window,
-                                                snap_rect,
-                                                Some(is_full_max),
-                                            );
+                                            if is_full_max {
+                                                layout.set_maximized(&window, usable_area, true);
+                                            } else {
+                                                layout.set_maximized(&window, usable_area, false);
+                                                layout.set_floating_geometry(&window, snap_rect);
+                                                crate::layout::configure_window_geometry_force(
+                                                    &window,
+                                                    snap_rect,
+                                                    Some(false),
+                                                );
+                                            }
+                                            state.sync_ipc_snapshot();
                                         }
                                     } else if state
                                         .layout_for_output(&target_output)
@@ -2496,6 +2509,10 @@ pub fn run_drm(
                                             let layout =
                                                 state.layout_for_output_mut(&target_output);
                                             layout.swap_windows(&window, &target_win);
+                                            for (w, r) in layout.arrange(usable_area) {
+                                                crate::layout::configure_window_geometry_force(&w, r, Some(false));
+                                            }
+                                            state.sync_ipc_snapshot();
                                         }
                                     } else if let Some(geo) = state.layout_for_output(&target_output).floating_geometry(&window) {
                                         crate::layout::configure_window_geometry(&window, geo);

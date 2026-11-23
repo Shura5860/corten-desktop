@@ -1806,13 +1806,17 @@ impl LayoutManager {
             let client_h = (target_rect.size.h - titlebar_h).max(100);
             toplevel.with_pending_state(|tstate| {
                 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
+                tstate.states.unset(State::Resizing);
+                tstate.states.set(State::Activated);
                 if maximized {
                     tstate.states.set(State::Maximized);
                     tstate.states.unset(State::Fullscreen);
                 } else {
                     tstate.states.unset(State::Maximized);
                 }
-                tstate.size = Some((target_rect.size.w.max(160), client_h).into());
+                let sz = Some((target_rect.size.w.max(160), client_h).into());
+                tstate.size = sz;
+                tstate.bounds = sz;
             });
             toplevel.send_configure();
         } else if let Some(x11) = window.x11_surface() {
