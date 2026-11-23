@@ -74,10 +74,10 @@ impl WeatherService {
 
     pub fn load_cached_or_default() -> WeatherData {
         let path = Self::cache_path();
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(data) = serde_json::from_str::<WeatherData>(&content) {
-                return data;
-            }
+        if let Ok(content) = fs::read_to_string(&path)
+            && let Ok(data) = serde_json::from_str::<WeatherData>(&content)
+        {
+            return data;
         }
         let default_data = WeatherData::default();
         Self::save_cache(&default_data);
@@ -98,15 +98,13 @@ impl WeatherService {
             .output()
             .await;
 
-        if let Ok(output) = output {
-            if output.status.success() {
-                if let Ok(json_str) = std::str::from_utf8(&output.stdout) {
-                    if let Ok(data) = Self::parse_wttr(json_str) {
-                        Self::save_cache(&data);
-                        return data;
-                    }
-                }
-            }
+        if let Ok(output) = output
+            && output.status.success()
+            && let Ok(json_str) = std::str::from_utf8(&output.stdout)
+            && let Ok(data) = Self::parse_wttr(json_str)
+        {
+            Self::save_cache(&data);
+            return data;
         }
 
         Self::load_cached_or_default()
@@ -169,7 +167,10 @@ impl WeatherService {
 
         let location = parsed
             .nearest_area
-            .and_then(|a| a.first().and_then(|n| n.area_name.first().map(|v| v.value.clone())))
+            .and_then(|a| {
+                a.first()
+                    .and_then(|n| n.area_name.first().map(|v| v.value.clone()))
+            })
             .unwrap_or_else(|| "İstanbul".to_string());
 
         let (condition, icon) = map_condition(desc);

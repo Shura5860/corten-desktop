@@ -2,7 +2,7 @@ use corten_theme::iced_styles::{
     badge_style, card_style, kbd_style, primary_button_style, secondary_button_style,
 };
 use corten_theme::{
-    Icon, Palette, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT, LUCIDE_FONT_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, Palette, Radius, Spacing, ThemeMode, Typography,
 };
 use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Element, Length};

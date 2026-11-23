@@ -1,6 +1,6 @@
+use super::weights::{KVCache, LayerWeights};
 use crate::ops::{apply_rope, rms_norm_into, silu, softmax};
 use crate::quant::{f16_to_f32, f32_to_f16};
-use super::weights::{KVCache, LayerWeights};
 
 pub struct ScratchBuffer {
     pub x_norm: Vec<f32>,
@@ -18,7 +18,14 @@ pub struct ScratchBuffer {
 }
 
 impl ScratchBuffer {
-    pub fn new(hidden_dim: usize, ffn_dim: usize, num_heads: usize, num_kv_heads: usize, head_dim: usize, vocab_size: usize) -> Self {
+    pub fn new(
+        hidden_dim: usize,
+        ffn_dim: usize,
+        num_heads: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+        vocab_size: usize,
+    ) -> Self {
         let kv_dim = num_kv_heads * head_dim;
         let q_dim = num_heads * head_dim;
         Self {
@@ -49,19 +56,46 @@ pub struct TransformerBlock {
 }
 
 impl TransformerBlock {
-    pub fn forward(&self, x: &mut [f32], pos: usize, kv_cache: &mut KVCache, scratch: &mut ScratchBuffer) {
+    pub fn forward(
+        &self,
+        x: &mut [f32],
+        pos: usize,
+        kv_cache: &mut KVCache,
+        scratch: &mut ScratchBuffer,
+    ) {
         let eps = 1e-5;
         let kv_dim = self.num_kv_heads * self.head_dim;
 
         // 1. ATTENTION
         rms_norm_into(&mut scratch.x_norm, x, &self.weights.attn_norm, eps);
 
-        self.weights.wq.mat_vec_mul_into(&mut scratch.q, &scratch.x_norm, self.num_heads * self.head_dim, self.hidden_dim);
-        self.weights.wk.mat_vec_mul_into(&mut scratch.k, &scratch.x_norm, kv_dim, self.hidden_dim);
-        self.weights.wv.mat_vec_mul_into(&mut scratch.v, &scratch.x_norm, kv_dim, self.hidden_dim);
+        self.weights.wq.mat_vec_mul_into(
+            &mut scratch.q,
+            &scratch.x_norm,
+            self.num_heads * self.head_dim,
+            self.hidden_dim,
+        );
+        self.weights
+            .wk
+            .mat_vec_mul_into(&mut scratch.k, &scratch.x_norm, kv_dim, self.hidden_dim);
+        self.weights
+            .wv
+            .mat_vec_mul_into(&mut scratch.v, &scratch.x_norm, kv_dim, self.hidden_dim);
 
-        apply_rope(&mut scratch.q, pos, self.num_heads, self.head_dim, self.rope_theta);
-        apply_rope(&mut scratch.k, pos, self.num_kv_heads, self.head_dim, self.rope_theta);
+        apply_rope(
+            &mut scratch.q,
+            pos,
+            self.num_heads,
+            self.head_dim,
+            self.rope_theta,
+        );
+        apply_rope(
+            &mut scratch.k,
+            pos,
+            self.num_kv_heads,
+            self.head_dim,
+            self.rope_theta,
+        );
 
         // Compress K & V to FP16 (u16)
         let k_fp16: Vec<u16> = scratch.k.iter().map(|&val| f32_to_f16(val)).collect();
@@ -106,7 +140,12 @@ impl TransformerBlock {
             }
         }
 
-        self.weights.wo.mat_vec_mul_into(&mut scratch.wo_out, &scratch.attn_out, self.hidden_dim, self.num_heads * self.head_dim);
+        self.weights.wo.mat_vec_mul_into(
+            &mut scratch.wo_out,
+            &scratch.attn_out,
+            self.hidden_dim,
+            self.num_heads * self.head_dim,
+        );
 
         for i in 0..self.hidden_dim {
             x[i] += scratch.wo_out[i];
@@ -115,14 +154,29 @@ impl TransformerBlock {
         // 2. FFN
         rms_norm_into(&mut scratch.x_norm, x, &self.weights.ffn_norm, eps);
 
-        self.weights.w_gate.mat_vec_mul_into(&mut scratch.gate, &scratch.x_norm, self.ffn_dim, self.hidden_dim);
-        self.weights.w_up.mat_vec_mul_into(&mut scratch.up, &scratch.x_norm, self.ffn_dim, self.hidden_dim);
+        self.weights.w_gate.mat_vec_mul_into(
+            &mut scratch.gate,
+            &scratch.x_norm,
+            self.ffn_dim,
+            self.hidden_dim,
+        );
+        self.weights.w_up.mat_vec_mul_into(
+            &mut scratch.up,
+            &scratch.x_norm,
+            self.ffn_dim,
+            self.hidden_dim,
+        );
 
         for i in 0..self.ffn_dim {
             scratch.hidden_ffn[i] = silu(scratch.gate[i]) * scratch.up[i];
         }
 
-        self.weights.w_down.mat_vec_mul_into(&mut scratch.ffn_out, &scratch.hidden_ffn, self.hidden_dim, self.ffn_dim);
+        self.weights.w_down.mat_vec_mul_into(
+            &mut scratch.ffn_out,
+            &scratch.hidden_ffn,
+            self.hidden_dim,
+            self.ffn_dim,
+        );
 
         for i in 0..self.hidden_dim {
             x[i] += scratch.ffn_out[i];

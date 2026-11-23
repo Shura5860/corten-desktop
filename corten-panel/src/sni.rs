@@ -1,6 +1,6 @@
+use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use futures::StreamExt;
 use tracing::{info, warn};
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
@@ -71,11 +71,15 @@ impl StatusNotifierWatcherServer {
                         let before_len = items_lock.len();
                         items_lock.retain(|_, item| item.bus_name != dead_name.as_str());
 
-                        let mut reg_lock = registered_keys.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut reg_lock =
+                            registered_keys.lock().unwrap_or_else(|e| e.into_inner());
                         reg_lock.retain(|key| !key.starts_with(dead_name.as_str()));
 
                         if items_lock.len() != before_len {
-                            info!("SNI: Removed tray items for disconnected bus name: {}", dead_name);
+                            info!(
+                                "SNI: Removed tray items for disconnected bus name: {}",
+                                dead_name
+                            );
                             let remaining: Vec<SniItem> = items_lock.values().cloned().collect();
                             drop(items_lock);
                             drop(reg_lock);
@@ -118,10 +122,16 @@ impl StatusNotifierWatcherServer {
         let (bus_name, obj_path) = parse_service_target(sender_str, service);
 
         let key = format!("{bus_name}{obj_path}");
-        info!("SNI Watcher: RegisterStatusNotifierItem received for key: {}", key);
+        info!(
+            "SNI Watcher: RegisterStatusNotifierItem received for key: {}",
+            key
+        );
 
         {
-            let mut reg = self.registered_keys.lock().unwrap_or_else(|e| e.into_inner());
+            let mut reg = self
+                .registered_keys
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if !reg.contains(&key) {
                 reg.push(key.clone());
             }
@@ -134,7 +144,7 @@ impl StatusNotifierWatcherServer {
         let tx = self.tx.clone();
         tokio::spawn(async move {
             if let Ok(conn) = zbus::Connection::session().await {
-                if let Ok(proxy) = zbus::Proxy::new(
+                match zbus::Proxy::new(
                     &conn,
                     bus_name.as_str(),
                     obj_path.as_str(),
@@ -142,31 +152,50 @@ impl StatusNotifierWatcherServer {
                 )
                 .await
                 {
-                    let id = proxy.get_property::<String>("Id").await.unwrap_or_else(|_| bus_name.clone());
-                    let title = proxy.get_property::<String>("Title").await.unwrap_or_else(|_| id.clone());
-                    let icon_name = proxy.get_property::<String>("IconName").await.unwrap_or_default();
-                    let menu_path = proxy.get_property::<zbus::zvariant::OwnedObjectPath>("Menu").await.ok().map(|p| p.to_string());
+                    Ok(proxy) => {
+                        let id = proxy
+                            .get_property::<String>("Id")
+                            .await
+                            .unwrap_or_else(|_| bus_name.clone());
+                        let title = proxy
+                            .get_property::<String>("Title")
+                            .await
+                            .unwrap_or_else(|_| id.clone());
+                        let icon_name = proxy
+                            .get_property::<String>("IconName")
+                            .await
+                            .unwrap_or_default();
+                        let menu_path = proxy
+                            .get_property::<zbus::zvariant::OwnedObjectPath>("Menu")
+                            .await
+                            .ok()
+                            .map(|p| p.to_string());
 
-                    let icon_display = derive_tray_icon(&id, &title, &icon_name);
+                        let icon_display = derive_tray_icon(&id, &title, &icon_name);
 
-                    let item = SniItem {
-                        bus_name,
-                        obj_path,
-                        id: id.clone(),
-                        title,
-                        icon_name,
-                        icon_display,
-                        menu_path,
-                    };
+                        let item = SniItem {
+                            bus_name,
+                            obj_path,
+                            id: id.clone(),
+                            title,
+                            icon_name,
+                            icon_display,
+                            menu_path,
+                        };
 
-                    let mut items_lock = items_arc.lock().unwrap_or_else(|e| e.into_inner());
-                    items_lock.insert(key, item);
-                    let all_items: Vec<SniItem> = items_lock.values().cloned().collect();
-                    drop(items_lock);
+                        let mut items_lock = items_arc.lock().unwrap_or_else(|e| e.into_inner());
+                        items_lock.insert(key, item);
+                        let all_items: Vec<SniItem> = items_lock.values().cloned().collect();
+                        drop(items_lock);
 
-                    let _ = tx.send(crate::PanelIpcCommand::UpdateSniItems(all_items));
-                } else {
-                    warn!("SNI Watcher: Failed to create proxy for item {}:{}", bus_name, obj_path);
+                        let _ = tx.send(crate::PanelIpcCommand::UpdateSniItems(all_items));
+                    }
+                    _ => {
+                        warn!(
+                            "SNI Watcher: Failed to create proxy for item {}:{}",
+                            bus_name, obj_path
+                        );
+                    }
                 }
             }
         });
@@ -179,7 +208,10 @@ impl StatusNotifierWatcherServer {
         service: &str,
         #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        info!("SNI Watcher: RegisterStatusNotifierHost received for: {}", service);
+        info!(
+            "SNI Watcher: RegisterStatusNotifierHost received for: {}",
+            service
+        );
         let _ = Self::status_notifier_host_registered(&ctxt).await;
         Ok(())
     }
@@ -242,7 +274,8 @@ mod tests {
 
     #[test]
     fn test_sni_service_target_parsing() {
-        let (bus, path) = parse_service_target(Some(":1.42"), "/org/ayatana/NotificationItem/steam");
+        let (bus, path) =
+            parse_service_target(Some(":1.42"), "/org/ayatana/NotificationItem/steam");
         assert_eq!(bus, ":1.42");
         assert_eq!(path, "/org/ayatana/NotificationItem/steam");
 
@@ -259,10 +292,19 @@ mod tests {
     fn test_sni_icon_derivation() {
         assert_eq!(derive_tray_icon("steam", "Steam", "steam_tray"), "🎮");
         assert_eq!(derive_tray_icon("vesktop", "Discord", "discord-tray"), "💬");
-        assert_eq!(derive_tray_icon("telegram-desktop", "Telegram", "telegram"), "✈");
+        assert_eq!(
+            derive_tray_icon("telegram-desktop", "Telegram", "telegram"),
+            "✈"
+        );
         assert_eq!(derive_tray_icon("obs", "OBS Studio", "obs-tray"), "🔴");
         assert_eq!(derive_tray_icon("spotify", "Spotify", ""), "🎵");
-        assert_eq!(derive_tray_icon("nm-applet", "Network", "network-wireless-connected"), "📶");
-        assert_eq!(derive_tray_icon("custom-app", "My App", "custom-icon"), "🔹");
+        assert_eq!(
+            derive_tray_icon("nm-applet", "Network", "network-wireless-connected"),
+            "📶"
+        );
+        assert_eq!(
+            derive_tray_icon("custom-app", "My App", "custom-icon"),
+            "🔹"
+        );
     }
 }

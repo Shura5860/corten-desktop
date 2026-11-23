@@ -100,7 +100,9 @@ impl CortenUpdater {
             current_version: format!("v{}", current_ver),
             latest_version: format!("v{}", latest_tag),
             has_update,
-            release_notes: release.body.unwrap_or_else(|| "Düzenli bakım ve performans iyileştirmeleri.".into()),
+            release_notes: release
+                .body
+                .unwrap_or_else(|| "Düzenli bakım ve performans iyileştirmeleri.".into()),
             tarball_url,
             sha256_url,
             published_at: release.published_at.unwrap_or_else(|| "Bilinmiyor".into()),
@@ -180,7 +182,11 @@ impl CortenUpdater {
 
         // Verify downloaded archive is non-empty and matches expected size if provided
         let dl_size = fs::metadata(&tarball_path).map(|m| m.len()).unwrap_or(0);
-        if dl_size == 0 || info.asset_size_bytes.is_some_and(|expected| expected > 0 && dl_size != expected) {
+        if dl_size == 0
+            || info
+                .asset_size_bytes
+                .is_some_and(|expected| expected > 0 && dl_size != expected)
+        {
             let _ = fs::remove_dir_all(&tmp_dir);
             return Err(format!(
                 "İndirilen arşiv boyutu doğrulanamadı (alınan: {} bayt, beklenen: {:?}).",
@@ -229,7 +235,11 @@ impl CortenUpdater {
         progress(&format!("İkililer kuruluyor -> {:?}", target_prefix));
 
         let probe_path = target_prefix.join(format!(".corten_ota_probe_{}", std::process::id()));
-        let is_writable = match fs::OpenOptions::new().write(true).create_new(true).open(&probe_path) {
+        let is_writable = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe_path)
+        {
             Ok(_) => {
                 let _ = fs::remove_file(&probe_path);
                 true
@@ -344,12 +354,12 @@ impl CortenUpdater {
     }
 
     fn detect_install_prefix() -> PathBuf {
-        if let Ok(output) = Command::new("which").arg("corten-compositor").output() {
-            if output.status.success() {
-                let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if let Some(parent) = Path::new(&path_str).parent() {
-                    return parent.to_path_buf();
-                }
+        if let Ok(output) = Command::new("which").arg("corten-compositor").output()
+            && output.status.success()
+        {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some(parent) = Path::new(&path_str).parent() {
+                return parent.to_path_buf();
             }
         }
 
@@ -367,8 +377,12 @@ impl CortenUpdater {
     fn hot_reload_services() {
         info!("Hot-reloading Corten Desktop UI components...");
         // Signal components that actually handle SIGUSR1 (never send unhandled SIGHUP to corten-panel!)
-        let _ = Command::new("pkill").args(["-USR1", "-x", "corten-widgets"]).spawn();
-        let _ = Command::new("pkill").args(["-USR1", "-x", "corten-wallpaper"]).spawn();
+        let _ = Command::new("pkill")
+            .args(["-USR1", "-x", "corten-widgets"])
+            .spawn();
+        let _ = Command::new("pkill")
+            .args(["-USR1", "-x", "corten-wallpaper"])
+            .spawn();
     }
 }
 

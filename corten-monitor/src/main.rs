@@ -8,13 +8,15 @@ use corten_theme::iced_styles::{
     card_style, input_style, primary_button_style, secondary_button_style,
 };
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, Spacing, ThemeMode, Typography,
 };
 use iced::widget::{
     button, column, container, horizontal_space, progress_bar, row, scrollable, text, text_input,
 };
-use iced::{border, event, keyboard, time, Alignment, Border, Color, Element, Length, Subscription, Task};
+use iced::{
+    Alignment, Border, Color, Element, Length, Subscription, Task, border, event, keyboard, time,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcSortColumn {
@@ -110,7 +112,11 @@ impl ProcSampler {
                 };
 
                 next_proc_ticks.insert(pid, proc_ticks);
-                let prev_ticks = self.prev_proc_ticks.get(&pid).copied().unwrap_or(proc_ticks);
+                let prev_ticks = self
+                    .prev_proc_ticks
+                    .get(&pid)
+                    .copied()
+                    .unwrap_or(proc_ticks);
                 let proc_delta = proc_ticks.saturating_sub(prev_ticks);
                 let proc_cpu = if delta_total > 0 {
                     ((proc_delta as f32 / delta_total as f32) * 100.0 * num_cpus)
@@ -293,9 +299,13 @@ fn read_meminfo() -> (u64, u64, u64, u64) {
     }
 
     let mem_total = mem_total_kb.saturating_mul(1024);
-    let mem_used = mem_total_kb.saturating_sub(mem_avail_kb).saturating_mul(1024);
+    let mem_used = mem_total_kb
+        .saturating_sub(mem_avail_kb)
+        .saturating_mul(1024);
     let swap_total = swap_total_kb.saturating_mul(1024);
-    let swap_used = swap_total_kb.saturating_sub(swap_free_kb).saturating_mul(1024);
+    let swap_used = swap_total_kb
+        .saturating_sub(swap_free_kb)
+        .saturating_mul(1024);
     (mem_total, mem_used, swap_total, swap_used)
 }
 
@@ -452,11 +462,19 @@ pub enum Message {
     SortBy(ProcSortColumn),
     SelectPid(u32),
     SendSignal(u32, &'static str),
-    SignalResult { pid: u32, sig: &'static str, success: bool },
+    SignalResult {
+        pid: u32,
+        sig: &'static str,
+        success: bool,
+    },
     SwitchTab(MonitorTab),
     RestartService(String),
     StopService(String),
-    ServiceActionResult { unit: String, action: String, success: bool },
+    ServiceActionResult {
+        unit: String,
+        action: String,
+        success: bool,
+    },
     ClearSelectionOrSearch,
     KillSelected(bool),
 }
@@ -532,25 +550,29 @@ impl CortenMonitorApp {
     pub fn subscription(&self) -> Subscription<Message> {
         let timer_sub = time::every(Duration::from_millis(1500)).map(|_| Message::Tick);
         let key_sub = event::listen_with(|event, _status, _window| match event {
-            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => match key {
-                keyboard::Key::Named(keyboard::key::Named::F5) => Some(Message::Tick),
-                keyboard::Key::Named(keyboard::key::Named::Escape) => {
-                    Some(Message::ClearSelectionOrSearch)
+            iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                match key {
+                    keyboard::Key::Named(keyboard::key::Named::F5) => Some(Message::Tick),
+                    keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                        Some(Message::ClearSelectionOrSearch)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::Delete) => {
+                        Some(Message::KillSelected(modifiers.shift()))
+                    }
+                    keyboard::Key::Character(ref c)
+                        if (c == "r" || c == "R") && modifiers.control() =>
+                    {
+                        Some(Message::Tick)
+                    }
+                    keyboard::Key::Character(ref c) if c == "1" && modifiers.alt() => {
+                        Some(Message::SwitchTab(MonitorTab::Processes))
+                    }
+                    keyboard::Key::Character(ref c) if c == "2" && modifiers.alt() => {
+                        Some(Message::SwitchTab(MonitorTab::Services))
+                    }
+                    _ => None,
                 }
-                keyboard::Key::Named(keyboard::key::Named::Delete) => {
-                    Some(Message::KillSelected(modifiers.shift()))
-                }
-                keyboard::Key::Character(ref c) if (c == "r" || c == "R") && modifiers.control() => {
-                    Some(Message::Tick)
-                }
-                keyboard::Key::Character(ref c) if c == "1" && modifiers.alt() => {
-                    Some(Message::SwitchTab(MonitorTab::Processes))
-                }
-                keyboard::Key::Character(ref c) if c == "2" && modifiers.alt() => {
-                    Some(Message::SwitchTab(MonitorTab::Services))
-                }
-                _ => None,
-            },
+            }
             _ => None,
         });
 
@@ -631,10 +653,13 @@ impl CortenMonitorApp {
             }
             Message::SignalResult { pid, sig, success } => {
                 if success {
-                    self.status_message = format!("PID {pid} sürecine SIG{sig} sinyali gönderildi.");
+                    self.status_message =
+                        format!("PID {pid} sürecine SIG{sig} sinyali gönderildi.");
                     self.snapshot = self.sampler.sample();
                 } else {
-                    self.status_message = format!("PID {pid} sonlandırılamadı (Erişim engellendi veya süreç sonlandı).");
+                    self.status_message = format!(
+                        "PID {pid} sonlandırılamadı (Erişim engellendi veya süreç sonlandı)."
+                    );
                 }
             }
             Message::RestartService(unit) => {
@@ -646,9 +671,17 @@ impl CortenMonitorApp {
                             .arg(&unit_clone)
                             .status()
                             .await;
-                        (unit_clone, "yeniden başlatıldı".to_string(), res.map(|s| s.success()).unwrap_or(false))
+                        (
+                            unit_clone,
+                            "yeniden başlatıldı".to_string(),
+                            res.map(|s| s.success()).unwrap_or(false),
+                        )
                     },
-                    |(unit, action, success)| Message::ServiceActionResult { unit, action, success },
+                    |(unit, action, success)| Message::ServiceActionResult {
+                        unit,
+                        action,
+                        success,
+                    },
                 );
             }
             Message::StopService(unit) => {
@@ -660,12 +693,24 @@ impl CortenMonitorApp {
                             .arg(&unit_clone)
                             .status()
                             .await;
-                        (unit_clone, "durduruldu".to_string(), res.map(|s| s.success()).unwrap_or(false))
+                        (
+                            unit_clone,
+                            "durduruldu".to_string(),
+                            res.map(|s| s.success()).unwrap_or(false),
+                        )
                     },
-                    |(unit, action, success)| Message::ServiceActionResult { unit, action, success },
+                    |(unit, action, success)| Message::ServiceActionResult {
+                        unit,
+                        action,
+                        success,
+                    },
                 );
             }
-            Message::ServiceActionResult { unit, action, success } => {
+            Message::ServiceActionResult {
+                unit,
+                action,
+                success,
+            } => {
                 if success {
                     self.status_message = format!("Servis {action}: {unit}");
                 } else {
@@ -704,11 +749,7 @@ impl CortenMonitorApp {
                     .to_ascii_lowercase()
                     .cmp(&b.name.to_ascii_lowercase()),
             };
-            if self.sort_desc {
-                ord.reverse()
-            } else {
-                ord
-            }
+            if self.sort_desc { ord.reverse() } else { ord }
         });
         list
     }
@@ -747,7 +788,10 @@ impl CortenMonitorApp {
             self.view_gauge_card(
                 "Ağ Trafiği",
                 format!("↓ {}/sn", format_bytes(self.snapshot.net_rx_speed)),
-                format!("↑ {}/sn (Gönderim)", format_bytes(self.snapshot.net_tx_speed)),
+                format!(
+                    "↑ {}/sn (Gönderim)",
+                    format_bytes(self.snapshot.net_tx_speed)
+                ),
                 ((self.snapshot.net_rx_speed as f32 / 10_000_000.0) * 100.0).clamp(0.0, 100.0),
                 palette,
             ),
@@ -767,15 +811,11 @@ impl CortenMonitorApp {
 
         let tab_btn = |tab: MonitorTab, label: &'static str| {
             let is_active = self.current_tab == tab;
-            button(
-                text(label)
-                    .size(Typography::BODY_SM)
-                    .color(if is_active {
-                        palette.primary.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
-            )
+            button(text(label).size(Typography::BODY_SM).color(if is_active {
+                palette.primary.to_iced()
+            } else {
+                palette.text_muted.to_iced()
+            }))
             .padding([4, 12])
             .style(move |_, status| {
                 let mut st = secondary_button_style(palette, status);
@@ -810,7 +850,9 @@ impl CortenMonitorApp {
                         .padding([7, 12])
                         .size(Typography::BODY_SM)
                         .width(Length::Fixed(240.0))
-                        .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+                        .style(move |_, status| {
+                            corten_theme::iced_styles::corten_text_input_style(palette, status)
+                        }),
                 ]
                 .spacing(Spacing::XS)
                 .align_y(Alignment::Center),
@@ -829,31 +871,34 @@ impl CortenMonitorApp {
         .spacing(Spacing::SM)
         .align_y(Alignment::Center);
 
-        if self.current_tab == MonitorTab::Processes {
-            if let Some(proc_info) = selected_proc {
-                toolbar = toolbar
-                    .push(
-                        text(format!("Seçili: {} (PID {})", proc_info.name, proc_info.pid))
-                            .size(Typography::BODY_SM)
-                            .color(palette.primary.to_iced()),
-                    )
-                    .push(
-                        button(text("Sonlandır (SIGTERM)").size(Typography::CAPTION))
-                            .padding([6, 12])
-                            .on_press(Message::SendSignal(proc_info.pid, "TERM"))
-                            .style(move |_, status| secondary_button_style(palette, status)),
-                    )
-                    .push(
-                        button(text("Zorla Kapat (SIGKILL)").size(Typography::CAPTION))
-                            .padding([6, 12])
-                            .on_press(Message::SendSignal(proc_info.pid, "KILL"))
-                            .style(move |_, status| {
-                                let mut s = primary_button_style(palette, status);
-                                s.background = Some(palette.danger.to_iced().into());
-                                s
-                            }),
-                    );
-            }
+        if self.current_tab == MonitorTab::Processes
+            && let Some(proc_info) = selected_proc
+        {
+            toolbar = toolbar
+                .push(
+                    text(format!(
+                        "Seçili: {} (PID {})",
+                        proc_info.name, proc_info.pid
+                    ))
+                    .size(Typography::BODY_SM)
+                    .color(palette.primary.to_iced()),
+                )
+                .push(
+                    button(text("Sonlandır (SIGTERM)").size(Typography::CAPTION))
+                        .padding([6, 12])
+                        .on_press(Message::SendSignal(proc_info.pid, "TERM"))
+                        .style(move |_, status| secondary_button_style(palette, status)),
+                )
+                .push(
+                    button(text("Zorla Kapat (SIGKILL)").size(Typography::CAPTION))
+                        .padding([6, 12])
+                        .on_press(Message::SendSignal(proc_info.pid, "KILL"))
+                        .style(move |_, status| {
+                            let mut s = primary_button_style(palette, status);
+                            s.background = Some(palette.danger.to_iced().into());
+                            s
+                        }),
+                );
         }
 
         let table_card = if self.current_tab == MonitorTab::Processes {
@@ -977,11 +1022,7 @@ impl CortenMonitorApp {
             }
 
             container(
-                column![
-                    header,
-                    scrollable(rows_col).height(Length::Fill),
-                ]
-                .spacing(Spacing::XS),
+                column![header, scrollable(rows_col).height(Length::Fill),].spacing(Spacing::XS),
             )
             .padding(Spacing::SM)
             .width(Length::Fill)
@@ -1077,11 +1118,7 @@ impl CortenMonitorApp {
             }
 
             container(
-                column![
-                    header,
-                    scrollable(s_rows).height(Length::Fill),
-                ]
-                .spacing(Spacing::XS),
+                column![header, scrollable(s_rows).height(Length::Fill),].spacing(Spacing::XS),
             )
             .padding(Spacing::SM)
             .width(Length::Fill)

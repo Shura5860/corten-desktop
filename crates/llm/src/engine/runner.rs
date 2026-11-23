@@ -1,14 +1,16 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::collections::HashSet;
 use std::io::{self, Write};
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use crate::gguf::{get_token_embedding, load_quantized_tensor, load_tensor_data, GgufHeader, GgufValue};
-use crate::ops::{apply_repetition_penalty, rms_norm_into, sample_token, SamplerParams};
-use crate::tokenizer::SimpleTokenizer;
 use super::block::{ScratchBuffer, TransformerBlock};
 use super::weights::{KVCache, LayerWeights, QuantizedTensor};
+use crate::gguf::{
+    GgufHeader, GgufValue, get_token_embedding, load_quantized_tensor, load_tensor_data,
+};
+use crate::ops::{SamplerParams, apply_repetition_penalty, rms_norm_into, sample_token};
+use crate::tokenizer::SimpleTokenizer;
 
 pub enum InferenceMessage {
     Token(String),
@@ -66,11 +68,12 @@ impl ModelRunner {
             .and_then(|v| v.to_u64())
             .unwrap_or(30) as usize;
 
-        let tokenizer = if let Some(GgufValue::Array(tokens)) = header.metadata.get("tokenizer.ggml.tokens") {
-            SimpleTokenizer::new(tokens)
-        } else {
-            return Err(anyhow!("Tokenizer tokens bulunamadı."));
-        };
+        let tokenizer =
+            if let Some(GgufValue::Array(tokens)) = header.metadata.get("tokenizer.ggml.tokens") {
+                SimpleTokenizer::new(tokens)
+            } else {
+                return Err(anyhow!("Tokenizer tokens bulunamadı."));
+            };
 
         let eos_token_id = header
             .metadata
@@ -81,13 +84,19 @@ impl ModelRunner {
 
         let mut stop_token_ids: HashSet<usize> = HashSet::new();
         stop_token_ids.insert(eos_token_id);
-        stop_token_ids.insert(0);      // UNK
+        stop_token_ids.insert(0); // UNK
         stop_token_ids.insert(151643); // Qwen2 <|endoftext|>
         stop_token_ids.insert(151645); // Qwen2 <|im_end|>
         stop_token_ids.insert(128001); // Llama 3 <|end_of_text|>
         stop_token_ids.insert(128009); // Llama 3 <|eot_id|>
 
-        let stop_strings = vec!["<|endoftext|>", "<|im_end|>", "<|end_of_text|>", "<|eot_id|>", "<|end|>"];
+        let stop_strings = vec![
+            "<|endoftext|>",
+            "<|im_end|>",
+            "<|end_of_text|>",
+            "<|eot_id|>",
+            "<|end|>",
+        ];
 
         let embd_tensor = header
             .tensors
@@ -140,22 +149,41 @@ impl ModelRunner {
 
         let head_dim = hidden_dim / num_heads;
 
-        let embd_weights = load_quantized_tensor(&header, mmap, tensor_data_offset, "token_embd.weight")?;
+        let embd_weights =
+            load_quantized_tensor(&header, mmap, tensor_data_offset, "token_embd.weight")?;
 
-        let output_weights = if let Some(t) = header.tensors.iter().find(|t| t.name == "output.weight") {
-            println!("📐 output.weight found: dims={:?}, qtype={}", t.dimensions, t.qtype);
-            load_quantized_tensor(&header, mmap, tensor_data_offset, "output.weight")?
-        } else {
-            println!("📐 output.weight tied to token_embd.weight");
-            embd_weights.clone()
-        };
+        let output_weights =
+            if let Some(t) = header.tensors.iter().find(|t| t.name == "output.weight") {
+                println!(
+                    "📐 output.weight found: dims={:?}, qtype={}",
+                    t.dimensions, t.qtype
+                );
+                load_quantized_tensor(&header, mmap, tensor_data_offset, "output.weight")?
+            } else {
+                println!("📐 output.weight tied to token_embd.weight");
+                embd_weights.clone()
+            };
 
         println!("📐 token_embd.weight qtype={}", embd_tensor.qtype);
 
-        let output_norm_weight = load_tensor_data(&header, mmap, tensor_data_offset, "output_norm.weight")?;
+        let output_norm_weight =
+            load_tensor_data(&header, mmap, tensor_data_offset, "output_norm.weight")?;
 
-        println!("🧠 Model Config: num_layers={}, hidden_dim={}, ffn_dim={}, vocab_size={}, num_heads={}, num_kv_heads={}, head_dim={}, rope_theta={}", num_layers, hidden_dim, ffn_dim, vocab_size, num_heads, num_kv_heads, head_dim, rope_theta);
-        println!("🧠 {} Katman Yükleniyor... (Hidden: {}, Vocab: {}, Heads: Q:{}/KV:{}, RoPE: {})", num_layers, hidden_dim, vocab_size, num_heads, num_kv_heads, rope_theta);
+        println!(
+            "🧠 Model Config: num_layers={}, hidden_dim={}, ffn_dim={}, vocab_size={}, num_heads={}, num_kv_heads={}, head_dim={}, rope_theta={}",
+            num_layers,
+            hidden_dim,
+            ffn_dim,
+            vocab_size,
+            num_heads,
+            num_kv_heads,
+            head_dim,
+            rope_theta
+        );
+        println!(
+            "🧠 {} Katman Yükleniyor... (Hidden: {}, Vocab: {}, Heads: Q:{}/KV:{}, RoPE: {})",
+            num_layers, hidden_dim, vocab_size, num_heads, num_kv_heads, rope_theta
+        );
 
         let mut transformer_layers = Vec::with_capacity(num_layers);
         for layer_idx in 0..num_layers {
@@ -163,16 +191,61 @@ impl ModelRunner {
             io::stdout().flush()?;
 
             let prefix = format!("blk.{}.", layer_idx);
-            let attn_norm = load_tensor_data(&header, mmap, tensor_data_offset, &format!("{}attn_norm.weight", prefix))?;
-            let wq = load_quantized_tensor(&header, mmap, tensor_data_offset, &format!("{}attn_q.weight", prefix))?;
-            let wk = load_quantized_tensor(&header, mmap, tensor_data_offset, &format!("{}attn_k.weight", prefix))?;
-            let wv = load_quantized_tensor(&header, mmap, tensor_data_offset, &format!("{}attn_v.weight", prefix))?;
-            let wo = load_quantized_tensor(&header, mmap, tensor_data_offset, &format!("{}attn_output.weight", prefix))?;
+            let attn_norm = load_tensor_data(
+                &header,
+                mmap,
+                tensor_data_offset,
+                &format!("{}attn_norm.weight", prefix),
+            )?;
+            let wq = load_quantized_tensor(
+                &header,
+                mmap,
+                tensor_data_offset,
+                &format!("{}attn_q.weight", prefix),
+            )?;
+            let wk = load_quantized_tensor(
+                &header,
+                mmap,
+                tensor_data_offset,
+                &format!("{}attn_k.weight", prefix),
+            )?;
+            let wv = load_quantized_tensor(
+                &header,
+                mmap,
+                tensor_data_offset,
+                &format!("{}attn_v.weight", prefix),
+            )?;
+            let wo = load_quantized_tensor(
+                &header,
+                mmap,
+                tensor_data_offset,
+                &format!("{}attn_output.weight", prefix),
+            )?;
 
-            let ffn_norm = load_tensor_data(&header, mmap, tensor_data_offset, &format!("{}ffn_norm.weight", prefix))?;
-            let w_gate = load_quantized_tensor(&header, mmap, tensor_data_offset, &format!("{}ffn_gate.weight", prefix))?;
-            let w_up = load_quantized_tensor(&header, mmap, tensor_data_offset, &format!("{}ffn_up.weight", prefix))?;
-            let w_down = load_quantized_tensor(&header, mmap, tensor_data_offset, &format!("{}ffn_down.weight", prefix))?;
+            let ffn_norm = load_tensor_data(
+                &header,
+                mmap,
+                tensor_data_offset,
+                &format!("{}ffn_norm.weight", prefix),
+            )?;
+            let w_gate = load_quantized_tensor(
+                &header,
+                mmap,
+                tensor_data_offset,
+                &format!("{}ffn_gate.weight", prefix),
+            )?;
+            let w_up = load_quantized_tensor(
+                &header,
+                mmap,
+                tensor_data_offset,
+                &format!("{}ffn_up.weight", prefix),
+            )?;
+            let w_down = load_quantized_tensor(
+                &header,
+                mmap,
+                tensor_data_offset,
+                &format!("{}ffn_down.weight", prefix),
+            )?;
 
             let block = TransformerBlock {
                 hidden_dim,
@@ -218,7 +291,13 @@ impl ModelRunner {
         })
     }
 
-    pub fn generate(&self, prompt_text: &str, max_tokens: usize, temperature: f32, top_p: f32) -> Result<()> {
+    pub fn generate(
+        &self,
+        prompt_text: &str,
+        max_tokens: usize,
+        temperature: f32,
+        top_p: f32,
+    ) -> Result<()> {
         let params = SamplerParams {
             temperature,
             top_k: 40,
@@ -228,7 +307,12 @@ impl ModelRunner {
         self.generate_with_params(prompt_text, max_tokens, &params)
     }
 
-    pub fn generate_string(&self, prompt_text: &str, max_tokens: usize, params: &SamplerParams) -> Result<String> {
+    pub fn generate_string(
+        &self,
+        prompt_text: &str,
+        max_tokens: usize,
+        params: &SamplerParams,
+    ) -> Result<String> {
         let mut kv_caches: Vec<KVCache> = (0..self.num_layers).map(|_| KVCache::new()).collect();
         let prompt_tokens = self.tokenizer.encode(prompt_text);
 
@@ -243,7 +327,8 @@ impl ModelRunner {
 
         let mut last_x = vec![0.0f32; self.hidden_dim];
         for (pos, &token) in prompt_tokens.iter().enumerate() {
-            let mut x = get_token_embedding(&self.embd_weights, token, self.hidden_dim, self.vocab_size);
+            let mut x =
+                get_token_embedding(&self.embd_weights, token, self.hidden_dim, self.vocab_size);
             for (i, block) in self.transformer_layers.iter().enumerate() {
                 block.forward(&mut x, pos, &mut kv_caches[i], &mut scratch);
             }
@@ -251,7 +336,12 @@ impl ModelRunner {
         }
 
         rms_norm_into(&mut scratch.x_norm, &last_x, &self.output_norm_weight, 1e-5);
-        self.output_weights.mat_vec_mul_into(&mut scratch.logits, &scratch.x_norm, self.vocab_size, self.hidden_dim);
+        self.output_weights.mat_vec_mul_into(
+            &mut scratch.logits,
+            &scratch.x_norm,
+            self.vocab_size,
+            self.hidden_dim,
+        );
 
         let mut current_token = sample_token(&mut scratch.logits, params, &self.stop_token_ids);
         let start_pos = prompt_tokens.len();
@@ -271,22 +361,41 @@ impl ModelRunner {
             output_str.push_str(&token_text);
             generated_tokens.push(current_token);
 
-            let mut x = get_token_embedding(&self.embd_weights, current_token, self.hidden_dim, self.vocab_size);
+            let mut x = get_token_embedding(
+                &self.embd_weights,
+                current_token,
+                self.hidden_dim,
+                self.vocab_size,
+            );
             for (i, block) in self.transformer_layers.iter().enumerate() {
                 block.forward(&mut x, pos, &mut kv_caches[i], &mut scratch);
             }
 
             rms_norm_into(&mut scratch.x_norm, &x, &self.output_norm_weight, 1e-5);
-            self.output_weights.mat_vec_mul_into(&mut scratch.logits, &scratch.x_norm, self.vocab_size, self.hidden_dim);
+            self.output_weights.mat_vec_mul_into(
+                &mut scratch.logits,
+                &scratch.x_norm,
+                self.vocab_size,
+                self.hidden_dim,
+            );
 
-            apply_repetition_penalty(&mut scratch.logits, &generated_tokens, params.repetition_penalty);
+            apply_repetition_penalty(
+                &mut scratch.logits,
+                &generated_tokens,
+                params.repetition_penalty,
+            );
             current_token = sample_token(&mut scratch.logits, params, &self.stop_token_ids);
         }
 
         Ok(output_str)
     }
 
-    pub fn generate_with_params(&self, prompt_text: &str, max_tokens: usize, params: &SamplerParams) -> Result<()> {
+    pub fn generate_with_params(
+        &self,
+        prompt_text: &str,
+        max_tokens: usize,
+        params: &SamplerParams,
+    ) -> Result<()> {
         let mut kv_caches: Vec<KVCache> = (0..self.num_layers).map(|_| KVCache::new()).collect();
         let prompt_tokens = self.tokenizer.encode(prompt_text);
 
@@ -304,7 +413,8 @@ impl ModelRunner {
         let mut last_x = vec![0.0f32; self.hidden_dim];
 
         for (pos, &token) in prompt_tokens.iter().enumerate() {
-            let mut x = get_token_embedding(&self.embd_weights, token, self.hidden_dim, self.vocab_size);
+            let mut x =
+                get_token_embedding(&self.embd_weights, token, self.hidden_dim, self.vocab_size);
             for (i, block) in self.transformer_layers.iter().enumerate() {
                 block.forward(&mut x, pos, &mut kv_caches[i], &mut scratch);
             }
@@ -312,7 +422,12 @@ impl ModelRunner {
         }
 
         rms_norm_into(&mut scratch.x_norm, &last_x, &self.output_norm_weight, 1e-5);
-        self.output_weights.mat_vec_mul_into(&mut scratch.logits, &scratch.x_norm, self.vocab_size, self.hidden_dim);
+        self.output_weights.mat_vec_mul_into(
+            &mut scratch.logits,
+            &scratch.x_norm,
+            self.vocab_size,
+            self.hidden_dim,
+        );
 
         let prefill_elapsed = prefill_start.elapsed();
         let prefill_tok_s = prompt_tokens.len() as f64 / prefill_elapsed.as_secs_f64();
@@ -346,15 +461,29 @@ impl ModelRunner {
             generated_tokens.push(current_token);
             generated_count += 1;
 
-            let mut x = get_token_embedding(&self.embd_weights, current_token, self.hidden_dim, self.vocab_size);
+            let mut x = get_token_embedding(
+                &self.embd_weights,
+                current_token,
+                self.hidden_dim,
+                self.vocab_size,
+            );
             for (i, block) in self.transformer_layers.iter().enumerate() {
                 block.forward(&mut x, pos, &mut kv_caches[i], &mut scratch);
             }
 
             rms_norm_into(&mut scratch.x_norm, &x, &self.output_norm_weight, 1e-5);
-            self.output_weights.mat_vec_mul_into(&mut scratch.logits, &scratch.x_norm, self.vocab_size, self.hidden_dim);
+            self.output_weights.mat_vec_mul_into(
+                &mut scratch.logits,
+                &scratch.x_norm,
+                self.vocab_size,
+                self.hidden_dim,
+            );
 
-            apply_repetition_penalty(&mut scratch.logits, &generated_tokens, params.repetition_penalty);
+            apply_repetition_penalty(
+                &mut scratch.logits,
+                &generated_tokens,
+                params.repetition_penalty,
+            );
             current_token = sample_token(&mut scratch.logits, params, &self.stop_token_ids);
         }
 
@@ -373,8 +502,19 @@ impl ModelRunner {
         println!("\n\n✅ Üretim Tamamlandı!");
         println!("--------------------------------------------------");
         println!("📊 PERFORMANS METRİKLERİ (FP16 KV-Cache & Sampler Pipeline):");
-        println!("  • Prefill Hızı:  {} token | {:.2} ms ({:.2} tok/s)", prompt_tokens.len(), prefill_elapsed.as_secs_f64() * 1000.0, prefill_tok_s);
-        println!("  • Decode Hızı:   {} token | {:.2} ms ({:.2} tok/s | {:.2} ms/token)", generated_count, decode_elapsed.as_secs_f64() * 1000.0, decode_tok_s, ms_per_tok);
+        println!(
+            "  • Prefill Hızı:  {} token | {:.2} ms ({:.2} tok/s)",
+            prompt_tokens.len(),
+            prefill_elapsed.as_secs_f64() * 1000.0,
+            prefill_tok_s
+        );
+        println!(
+            "  • Decode Hızı:   {} token | {:.2} ms ({:.2} tok/s | {:.2} ms/token)",
+            generated_count,
+            decode_elapsed.as_secs_f64() * 1000.0,
+            decode_tok_s,
+            ms_per_tok
+        );
         println!("--------------------------------------------------");
 
         Ok(())
@@ -403,7 +543,8 @@ impl ModelRunner {
         let mut last_x = vec![0.0f32; self.hidden_dim];
 
         for (pos, &token) in prompt_tokens.iter().enumerate() {
-            let mut x = get_token_embedding(&self.embd_weights, token, self.hidden_dim, self.vocab_size);
+            let mut x =
+                get_token_embedding(&self.embd_weights, token, self.hidden_dim, self.vocab_size);
             for (i, block) in self.transformer_layers.iter().enumerate() {
                 block.forward(&mut x, pos, &mut kv_caches[i], &mut scratch);
             }
@@ -411,7 +552,12 @@ impl ModelRunner {
         }
 
         rms_norm_into(&mut scratch.x_norm, &last_x, &self.output_norm_weight, 1e-5);
-        self.output_weights.mat_vec_mul_into(&mut scratch.logits, &scratch.x_norm, self.vocab_size, self.hidden_dim);
+        self.output_weights.mat_vec_mul_into(
+            &mut scratch.logits,
+            &scratch.x_norm,
+            self.vocab_size,
+            self.hidden_dim,
+        );
 
         let prefill_elapsed = prefill_start.elapsed();
         let prefill_tok_s = prompt_tokens.len() as f64 / prefill_elapsed.as_secs_f64();
@@ -439,15 +585,29 @@ impl ModelRunner {
             generated_tokens.push(current_token);
             generated_count += 1;
 
-            let mut x = get_token_embedding(&self.embd_weights, current_token, self.hidden_dim, self.vocab_size);
+            let mut x = get_token_embedding(
+                &self.embd_weights,
+                current_token,
+                self.hidden_dim,
+                self.vocab_size,
+            );
             for (i, block) in self.transformer_layers.iter().enumerate() {
                 block.forward(&mut x, pos, &mut kv_caches[i], &mut scratch);
             }
 
             rms_norm_into(&mut scratch.x_norm, &x, &self.output_norm_weight, 1e-5);
-            self.output_weights.mat_vec_mul_into(&mut scratch.logits, &scratch.x_norm, self.vocab_size, self.hidden_dim);
+            self.output_weights.mat_vec_mul_into(
+                &mut scratch.logits,
+                &scratch.x_norm,
+                self.vocab_size,
+                self.hidden_dim,
+            );
 
-            apply_repetition_penalty(&mut scratch.logits, &generated_tokens, params.repetition_penalty);
+            apply_repetition_penalty(
+                &mut scratch.logits,
+                &generated_tokens,
+                params.repetition_penalty,
+            );
             current_token = sample_token(&mut scratch.logits, params, &self.stop_token_ids);
 
             let decode_elapsed = decode_start.elapsed();

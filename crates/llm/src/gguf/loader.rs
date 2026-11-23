@@ -1,10 +1,12 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
 
-use crate::engine::weights::QuantizedTensor;
-use crate::quant::{dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0, f16_to_f32};
 use super::header::GgufHeader;
+use crate::engine::weights::QuantizedTensor;
+use crate::quant::{
+    dequantize_q4_k, dequantize_q5_0, dequantize_q6_k, dequantize_q8_0, f16_to_f32,
+};
 
 pub fn load_quantized_tensor(
     header: &GgufHeader,
@@ -40,11 +42,15 @@ pub fn load_quantized_tensor(
     } else if tensor.qtype == 12 {
         let blocks = num_elements / 256;
         let bytes_len = blocks * 144;
-        Ok(QuantizedTensor::Q4K { data: bytes[..bytes_len].to_vec() })
+        Ok(QuantizedTensor::Q4K {
+            data: bytes[..bytes_len].to_vec(),
+        })
     } else if tensor.qtype == 14 {
         let blocks = num_elements / 256;
         let bytes_len = blocks * 210;
-        Ok(QuantizedTensor::Q6K { data: bytes[..bytes_len].to_vec() })
+        Ok(QuantizedTensor::Q6K {
+            data: bytes[..bytes_len].to_vec(),
+        })
     } else {
         let f32_vec = if tensor.qtype == 6 {
             dequantize_q5_0(bytes, num_elements)
@@ -71,7 +77,12 @@ pub fn load_tensor_data(
     }
 }
 
-pub fn get_token_embedding(embd: &QuantizedTensor, token: usize, hidden_dim: usize, _vocab_size: usize) -> Vec<f32> {
+pub fn get_token_embedding(
+    embd: &QuantizedTensor,
+    token: usize,
+    hidden_dim: usize,
+    _vocab_size: usize,
+) -> Vec<f32> {
     let mut vec = vec![0.0f32; hidden_dim];
     match embd {
         QuantizedTensor::F32(v) => {

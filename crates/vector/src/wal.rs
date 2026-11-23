@@ -16,14 +16,13 @@ pub enum WalEntry {
 }
 
 pub fn append_wal(wal_path: &Option<String>, entry: &WalEntry) {
-    if let Some(ref path) = *wal_path {
-        if let Ok(file) = OpenOptions::new().create(true).append(true).open(path) {
-            let mut writer = BufWriter::new(file);
-            if let Ok(serialized) = serde_json::to_string(entry) {
-                let _ = writeln!(writer, "{}", serialized);
-                let _ = writer.flush();
-            }
+    if let Some(ref path) = *wal_path
+        && let Ok(file) = OpenOptions::new().create(true).append(true).open(path)
+    {
+        let mut writer = BufWriter::new(file);
+        if let Ok(serialized) = serde_json::to_string(entry) {
+            let _ = writeln!(writer, "{}", serialized);
+            let _ = writer.flush();
         }
     }
 }
-

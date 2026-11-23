@@ -74,9 +74,23 @@ impl TerminalPalette {
 
         let is_light = mode == ThemeMode::Light;
         let (bg_hex, fg_hex, bg_raw, fg_raw, bg_rgb, fg_rgb) = if is_light {
-            ("#f5f6f8", "#1a1c23", "f5f6f8", "1a1c23", "245,246,248", "26,28,35")
+            (
+                "#f5f6f8",
+                "#1a1c23",
+                "f5f6f8",
+                "1a1c23",
+                "245,246,248",
+                "26,28,35",
+            )
         } else {
-            ("#0f1012", "#f2eee9", "0f1012", "f2eee9", "15,16,18", "242,238,233")
+            (
+                "#0f1012",
+                "#f2eee9",
+                "0f1012",
+                "f2eee9",
+                "15,16,18",
+                "242,238,233",
+            )
         };
 
         Self {
@@ -447,10 +461,10 @@ fn apply_common_cmd_settings(
     working_dir: &Option<PathBuf>,
     wayland_display: &str,
 ) {
-    if let Some(ref dir) = working_dir {
-        if dir.is_dir() {
-            cmd.current_dir(dir);
-        }
+    if let Some(dir) = working_dir
+        && dir.is_dir()
+    {
+        cmd.current_dir(dir);
     }
     cmd.env("WAYLAND_DISPLAY", wayland_display);
     cmd.env("XDG_CURRENT_DESKTOP", "corten");
@@ -468,7 +482,9 @@ fn main() {
         println!();
         println!("SEÇENEKLER:");
         println!("    --working-directory, --workdir, -d <DİZİN>   Başlangıç çalışma dizini");
-        println!("    -e <KOMUT...>                               Terminal içinde çalıştırılacak komut");
+        println!(
+            "    -e <KOMUT...>                               Terminal içinde çalıştırılacak komut"
+        );
         println!("    -h, --help                                  Bu yardım mesajını göster");
         println!("    -v, --version                               Sürüm bilgisini göster");
         println!();
@@ -488,17 +504,17 @@ fn main() {
     let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "corten-0".into());
 
     // 0. User's explicit $TERMINAL environment override
-    if let Ok(user_term) = std::env::var("TERMINAL") {
-        if !user_term.trim().is_empty() {
-            let mut cmd = Command::new(&user_term);
-            apply_common_cmd_settings(&mut cmd, &cli_args.working_dir, &wayland_display);
-            if let Some(ref c) = cli_args.command {
-                cmd.args(["-e"]).args(c);
-            }
-            cmd.args(&cli_args.passthrough_args);
-            if cmd.spawn().is_ok() {
-                return;
-            }
+    if let Ok(user_term) = std::env::var("TERMINAL")
+        && !user_term.trim().is_empty()
+    {
+        let mut cmd = Command::new(&user_term);
+        apply_common_cmd_settings(&mut cmd, &cli_args.working_dir, &wayland_display);
+        if let Some(ref c) = cli_args.command {
+            cmd.args(["-e"]).args(c);
+        }
+        cmd.args(&cli_args.passthrough_args);
+        if cmd.spawn().is_ok() {
+            return;
         }
     }
 
@@ -506,12 +522,17 @@ fn main() {
     {
         let mut cmd = Command::new("alacritty");
         apply_common_cmd_settings(&mut cmd, &cli_args.working_dir, &wayland_display);
-        cmd.args(["-T", "Corten Terminal", "--class", "corten-terminal,corten-terminal"]);
+        cmd.args([
+            "-T",
+            "Corten Terminal",
+            "--class",
+            "corten-terminal,corten-terminal",
+        ]);
 
-        if let Some(ref paths) = config_paths {
-            if paths.alacritty.exists() {
-                cmd.args(["--config-file", &paths.alacritty.to_string_lossy()]);
-            }
+        if let Some(ref paths) = config_paths
+            && paths.alacritty.exists()
+        {
+            cmd.args(["--config-file", &paths.alacritty.to_string_lossy()]);
         }
 
         if let Some(ref dir) = cli_args.working_dir {
@@ -534,10 +555,10 @@ fn main() {
         apply_common_cmd_settings(&mut cmd, &cli_args.working_dir, &wayland_display);
         cmd.args(["-T", "Corten Terminal", "--app-id", "corten-terminal"]);
 
-        if let Some(ref paths) = config_paths {
-            if paths.foot.exists() {
-                cmd.args(["-c", &paths.foot.to_string_lossy()]);
-            }
+        if let Some(ref paths) = config_paths
+            && paths.foot.exists()
+        {
+            cmd.args(["-c", &paths.foot.to_string_lossy()]);
         }
 
         if let Some(ref dir) = cli_args.working_dir {
@@ -560,10 +581,10 @@ fn main() {
         apply_common_cmd_settings(&mut cmd, &cli_args.working_dir, &wayland_display);
         cmd.args(["-T", "Corten Terminal", "--class", "corten-terminal"]);
 
-        if let Some(ref paths) = config_paths {
-            if paths.kitty.exists() {
-                cmd.args(["--config", &paths.kitty.to_string_lossy()]);
-            }
+        if let Some(ref paths) = config_paths
+            && paths.kitty.exists()
+        {
+            cmd.args(["--config", &paths.kitty.to_string_lossy()]);
         }
 
         if let Some(ref dir) = cli_args.working_dir {
@@ -684,11 +705,22 @@ mod tests {
 
     #[test]
     fn test_parse_cli_args_command_execution() {
-        let parsed = parse_cli_args(["--working-directory", "/home", "-e", "htop", "--delay", "10"]);
+        let parsed = parse_cli_args([
+            "--working-directory",
+            "/home",
+            "-e",
+            "htop",
+            "--delay",
+            "10",
+        ]);
         assert_eq!(parsed.working_dir, Some(PathBuf::from("/home")));
         assert_eq!(
             parsed.command,
-            Some(vec!["htop".to_string(), "--delay".to_string(), "10".to_string()])
+            Some(vec![
+                "htop".to_string(),
+                "--delay".to_string(),
+                "10".to_string()
+            ])
         );
     }
 

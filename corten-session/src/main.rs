@@ -60,13 +60,13 @@ fn restore_session_apps(socket_name: &str) {
         }
     }
 }
-use nix::sys::signal::{kill, Signal};
+use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info, warn};
@@ -187,10 +187,10 @@ fn register_signals(running: Arc<AtomicBool>) {
     if std::io::stdin().is_terminal() {
         let _ = std::thread::spawn(move || {
             let mut buffer = String::new();
-            if let Ok(bytes) = std::io::stdin().read_line(&mut buffer) {
-                if bytes > 0 {
-                    r.store(false, Ordering::SeqCst);
-                }
+            if let Ok(bytes) = std::io::stdin().read_line(&mut buffer)
+                && bytes > 0
+            {
+                r.store(false, Ordering::SeqCst);
             }
         });
     }
@@ -199,12 +199,12 @@ fn register_signals(running: Arc<AtomicBool>) {
 /// Locate a binary either in current PATH or in the target release/debug build folder.
 fn find_binary(bin_name: &str) -> PathBuf {
     // 1. Check if it's in target/release or target/debug relative to current exe
-    if let Ok(current_exe) = env::current_exe() {
-        if let Some(parent) = current_exe.parent() {
-            let candidate = parent.join(bin_name);
-            if candidate.exists() {
-                return candidate;
-            }
+    if let Ok(current_exe) = env::current_exe()
+        && let Some(parent) = current_exe.parent()
+    {
+        let candidate = parent.join(bin_name);
+        if candidate.exists() {
+            return candidate;
         }
     }
 
@@ -266,7 +266,11 @@ pub fn parse_autostart_desktop(content: &str) -> Option<AutostartEntry> {
     for line in content.lines() {
         let line = line.trim();
         if line.starts_with("Hidden=") {
-            if line.trim_start_matches("Hidden=").trim().eq_ignore_ascii_case("true") {
+            if line
+                .trim_start_matches("Hidden=")
+                .trim()
+                .eq_ignore_ascii_case("true")
+            {
                 hidden = true;
             }
         } else if line.starts_with("Name=") && name.is_none() {
@@ -297,14 +301,18 @@ pub fn parse_autostart_desktop(content: &str) -> Option<AutostartEntry> {
     }
 
     if let Some(ref list) = only_show_in {
-        let matched = list.iter().any(|d| d == "corten" || d == "corten desktop" || d == "x-corten");
+        let matched = list
+            .iter()
+            .any(|d| d == "corten" || d == "corten desktop" || d == "x-corten");
         if !matched {
             return None;
         }
     }
 
     if let Some(ref list) = not_show_in {
-        let matched = list.iter().any(|d| d == "corten" || d == "corten desktop" || d == "x-corten");
+        let matched = list
+            .iter()
+            .any(|d| d == "corten" || d == "corten desktop" || d == "x-corten");
         if matched {
             return None;
         }
@@ -341,19 +349,17 @@ fn spawn_xdg_autostart(socket_name: &str) {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("desktop") {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        if let Some(item) = parse_autostart_desktop(&content) {
-                            if let Some((prog, args)) = item.exec.split_first() {
-                                info!("Launching XDG Autostart app '{}' ({:?})", item.name, prog);
-                                let _ = Command::new(prog)
-                                    .args(args)
-                                    .env("WAYLAND_DISPLAY", socket_name)
-                                    .stderr(std::process::Stdio::null())
-                                    .spawn();
-                            }
-                        }
-                    }
+                if path.extension().and_then(|e| e.to_str()) == Some("desktop")
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                    && let Some(item) = parse_autostart_desktop(&content)
+                    && let Some((prog, args)) = item.exec.split_first()
+                {
+                    info!("Launching XDG Autostart app '{}' ({:?})", item.name, prog);
+                    let _ = Command::new(prog)
+                        .args(args)
+                        .env("WAYLAND_DISPLAY", socket_name)
+                        .stderr(std::process::Stdio::null())
+                        .spawn();
                 }
             }
         }
@@ -366,7 +372,10 @@ fn record_crash_report(status: std::process::ExitStatus) {
         .map(|d| d.data_dir().join("corten/crashes"))
         .unwrap_or_else(|| PathBuf::from("/tmp/corten_crashes"));
     let _ = std::fs::create_dir_all(&crash_dir);
-    let log_file = crash_dir.join(format!("crash_{}.log", chrono::Local::now().format("%Y%m%d_%H%M%S")));
+    let log_file = crash_dir.join(format!(
+        "crash_{}.log",
+        chrono::Local::now().format("%Y%m%d_%H%M%S")
+    ));
     let runtime_crash_file = env::var("XDG_RUNTIME_DIR")
         .map(|d| PathBuf::from(d).join("corten-crash.log"))
         .unwrap_or_else(|_| crash_dir.join("latest-crash.log"));
@@ -376,17 +385,21 @@ fn record_crash_report(status: std::process::ExitStatus) {
         now, status
     );
 
-    if let Ok(out) = Command::new("cortenctl").args(["doctor", "--markdown"]).output() {
-        if out.status.success() {
-            report.push_str("\n--- SYSTEM DOCTOR DIAGNOSTIC ---\n");
-            report.push_str(&String::from_utf8_lossy(&out.stdout));
-        }
+    if let Ok(out) = Command::new("cortenctl")
+        .args(["doctor", "--markdown"])
+        .output()
+        && out.status.success()
+    {
+        report.push_str("\n--- SYSTEM DOCTOR DIAGNOSTIC ---\n");
+        report.push_str(&String::from_utf8_lossy(&out.stdout));
     }
 
     let _ = std::fs::write(&log_file, &report);
     let _ = std::fs::write(&runtime_crash_file, &report);
 
-    eprintln!("\n\x1b[1;31m=======================================================================\x1b[0m");
+    eprintln!(
+        "\n\x1b[1;31m=======================================================================\x1b[0m"
+    );
     eprintln!("\x1b[1;31m⚠️  CORTEN COMPOSITOR KRİTİK ÇÖKME HATASI!\x1b[0m");
     eprintln!("Compositor üst üste 3 kez çöktü ve oturum güvenli şekilde durduruldu.");
     eprintln!("Ayrıntılı hata teşhis raporu kaydedildi:");
@@ -394,7 +407,9 @@ fn record_crash_report(status: std::process::ExitStatus) {
     eprintln!("  ↳ \x1b[1m{}\x1b[0m", log_file.display());
     eprintln!("\nSorunu gidermek için terminalden şu komutu çalıştırabilirsiniz:");
     eprintln!("  \x1b[38;2;225;110;45mcortenctl doctor\x1b[0m");
-    eprintln!("\x1b[1;31m=======================================================================\x1b[0m\n");
+    eprintln!(
+        "\x1b[1;31m=======================================================================\x1b[0m\n"
+    );
 }
 
 fn main() -> Result<()> {
@@ -406,23 +421,29 @@ fn main() -> Result<()> {
         .init();
 
     info!("==========================================");
-    info!("   CORTEN DESKTOP ENVIRONMENT v{}      ", env!("CARGO_PKG_VERSION"));
+    info!(
+        "   CORTEN DESKTOP ENVIRONMENT v{}      ",
+        env!("CARGO_PKG_VERSION")
+    );
     info!("   Pure Rust Wayland Session Orchestrator ");
     info!("==========================================");
 
     // Set standard XDG desktop environment variables
-    env::set_var("XDG_CURRENT_DESKTOP", "Corten");
-    env::set_var("XDG_SESSION_DESKTOP", "corten");
-    env::set_var("XDG_SESSION_TYPE", "wayland");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("XDG_CURRENT_DESKTOP", "Corten") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("XDG_SESSION_DESKTOP", "corten") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("XDG_SESSION_TYPE", "wayland") };
 
     // Prepend the release/debug directory to PATH so direct component spawns
     // and compositor shortcuts can find the freshly built binaries.
-    if let Ok(current_exe) = env::current_exe() {
-        if let Some(parent) = current_exe.parent() {
-            if let Ok(old_path) = env::var("PATH") {
-                env::set_var("PATH", format!("{}:{}", parent.display(), old_path));
-            }
-        }
+    if let Ok(current_exe) = env::current_exe()
+        && let Some(parent) = current_exe.parent()
+        && let Ok(old_path) = env::var("PATH")
+    {
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { env::set_var("PATH", format!("{}:{}", parent.display(), old_path)) };
     }
 
     // 1. Start the Compositor
@@ -466,18 +487,23 @@ fn main() -> Result<()> {
     let socket_name: &str = &socket_name;
 
     // Export WAYLAND_DISPLAY and toolkit backends with XWayland fallback so legacy apps never crash
-    env::set_var("WAYLAND_DISPLAY", socket_name);
-    env::set_var("GDK_BACKEND", "wayland,x11,*");
-    env::set_var("QT_QPA_PLATFORM", "wayland;xcb");
-    env::set_var("WINIT_UNIX_BACKEND", "wayland");
-    env::set_var("ELECTRON_OZONE_PLATFORM_HINT", "auto");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("WAYLAND_DISPLAY", socket_name) };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("GDK_BACKEND", "wayland,x11,*") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("QT_QPA_PLATFORM", "wayland;xcb") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("WINIT_UNIX_BACKEND", "wayland") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("ELECTRON_OZONE_PLATFORM_HINT", "auto") };
     // Ensure Flatpak exported .desktop entries and icons are discoverable via XDG_DATA_DIRS
     {
         let home = env::var("HOME").unwrap_or_default();
         let user_fp = format!("{}/.local/share/flatpak/exports/share", home);
         let sys_fp = "/var/lib/flatpak/exports/share";
-        let cur = env::var("XDG_DATA_DIRS")
-            .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
+        let cur =
+            env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
         let mut parts: Vec<String> = Vec::new();
         if !home.is_empty() && !cur.split(':').any(|p| p == user_fp) {
             parts.push(user_fp);
@@ -486,7 +512,8 @@ fn main() -> Result<()> {
             parts.push(sys_fp.to_string());
         }
         parts.push(cur);
-        env::set_var("XDG_DATA_DIRS", parts.join(":"));
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { env::set_var("XDG_DATA_DIRS", parts.join(":")) };
     }
     let cursor_theme = if std::path::Path::new("/usr/share/icons/breeze_cursors").exists() {
         "breeze_cursors"
@@ -497,7 +524,10 @@ fn main() -> Result<()> {
     };
 
     // Respect user's appearance.toml preference instead of forcing Adwaita:dark on Light mode users
-    let is_light = corten_config::ConfigManager::<corten_config::AppearanceConfig>::load_or_default("appearance")
+    let is_light =
+        corten_config::ConfigManager::<corten_config::AppearanceConfig>::load_or_default(
+            "appearance",
+        )
         .map(|c| matches!(c.get().theme_mode, corten_config::ThemeModeChoice::Light))
         .unwrap_or(false);
     let (gtk_theme, color_scheme) = if is_light {
@@ -506,19 +536,37 @@ fn main() -> Result<()> {
         ("Adwaita:dark", "prefer-dark")
     };
 
-    env::set_var("GTK_THEME", gtk_theme);
-    env::set_var("XCURSOR_THEME", cursor_theme);
-    env::set_var("XCURSOR_SIZE", "24");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("GTK_THEME", gtk_theme) };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("XCURSOR_THEME", cursor_theme) };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("XCURSOR_SIZE", "24") };
 
     // Sync GTK / GNOME settings with user's configured theme
     let _ = Command::new("gsettings")
-        .args(["set", "org.gnome.desktop.interface", "color-scheme", color_scheme])
+        .args([
+            "set",
+            "org.gnome.desktop.interface",
+            "color-scheme",
+            color_scheme,
+        ])
         .status();
     let _ = Command::new("gsettings")
-        .args(["set", "org.gnome.desktop.interface", "gtk-theme", if is_light { "Adwaita" } else { "Adwaita-dark" }])
+        .args([
+            "set",
+            "org.gnome.desktop.interface",
+            "gtk-theme",
+            if is_light { "Adwaita" } else { "Adwaita-dark" },
+        ])
         .status();
     let _ = Command::new("gsettings")
-        .args(["set", "org.gnome.desktop.interface", "cursor-theme", cursor_theme])
+        .args([
+            "set",
+            "org.gnome.desktop.interface",
+            "cursor-theme",
+            cursor_theme,
+        ])
         .status();
 
     // Synchronize WAYLAND_DISPLAY and XDG_CURRENT_DESKTOP with systemd/D-Bus user environment
@@ -605,7 +653,12 @@ fn main() -> Result<()> {
     // present only the onboarding setup wizard. Do not spawn dock, widgets or autostart yet.
     let show_welcome = env::args().any(|arg| arg == "--welcome") || {
         directories::BaseDirs::new()
-            .map(|d| !d.config_dir().join("corten").join(".welcome_completed").exists())
+            .map(|d| {
+                !d.config_dir()
+                    .join("corten")
+                    .join(".welcome_completed")
+                    .exists()
+            })
             .unwrap_or(false)
     };
 
@@ -687,12 +740,13 @@ fn main() -> Result<()> {
         let capture_factory_bin = capture_bin.clone();
         let capture_factory = Box::new(move || Command::new(capture_factory_bin.clone()));
         let capture_cmd = capture_factory();
-        if let Some(proc) =
-            SessionProcess::spawn("corten-capture-service", capture_cmd, capture_factory)
-        {
-            session_processes.push(proc);
-        } else {
-            warn!("Capture service was requested but could not be started");
+        match SessionProcess::spawn("corten-capture-service", capture_cmd, capture_factory) {
+            Some(proc) => {
+                session_processes.push(proc);
+            }
+            _ => {
+                warn!("Capture service was requested but could not be started");
+            }
         }
     }
 
@@ -851,7 +905,9 @@ fn main() -> Result<()> {
                             );
 
                             if wait_for_wayland_socket(socket_name, Duration::from_secs(5)) {
-                                info!("Restored Wayland socket. Re-supervising session components...");
+                                info!(
+                                    "Restored Wayland socket. Re-supervising session components..."
+                                );
                                 for proc in &mut session_processes {
                                     proc.supervise();
                                 }

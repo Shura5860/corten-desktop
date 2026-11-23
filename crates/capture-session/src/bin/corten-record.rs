@@ -117,6 +117,8 @@ fn stream_output_path(path: &std::ffi::OsStr, index: usize) -> std::path::PathBu
 
 #[cfg(not(feature = "ffmpeg"))]
 fn main() {
-    eprintln!("corten-record requires: cargo run -p corten-capture-session --features ffmpeg -- <output-file>");
+    eprintln!(
+        "corten-record requires: cargo run -p corten-capture-session --features ffmpeg -- <output-file>"
+    );
     std::process::exit(2);
 }

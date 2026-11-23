@@ -2,8 +2,8 @@
 
 use corten_ipc::doctor;
 use corten_ipc::{
-    event_socket_path, get_session_connection, CompositorControlProxy,
-    NotificationControlProxy, PanelControlProxy,
+    CompositorControlProxy, NotificationControlProxy, PanelControlProxy, event_socket_path,
+    get_session_connection,
 };
 use tokio::io::AsyncBufReadExt;
 
@@ -115,7 +115,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
                     }
                     comp.take_screenshot(region).await?;
-                    println!("Screenshot triggered (region={}) -> saved to ~/Pictures/", region);
+                    println!(
+                        "Screenshot triggered (region={}) -> saved to ~/Pictures/",
+                        region
+                    );
                 }
                 "reload" => {
                     comp.reload_config().await?;
@@ -217,14 +220,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match args[2].as_str() {
                 "dnd" => {
                     let state = notify.toggle_dnd().await?;
-                    println!("Do-Not-Disturb is now: {}", if state { "ON" } else { "OFF" });
+                    println!(
+                        "Do-Not-Disturb is now: {}",
+                        if state { "ON" } else { "OFF" }
+                    );
                 }
                 "clear" => {
                     notify.clear_all().await?;
                     println!("Cleared all notification popups");
                 }
                 other => {
-                    eprintln!("Unknown notify command '{}'. See 'cortenctl --help'.", other);
+                    eprintln!(
+                        "Unknown notify command '{}'. See 'cortenctl --help'.",
+                        other
+                    );
                     std::process::exit(1);
                 }
             }
@@ -237,4 +246,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

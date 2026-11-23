@@ -192,11 +192,7 @@ pub mod pipewire {
             let Ok(id) = id_str.trim().parse::<u32>() else {
                 continue;
             };
-            let name = rest
-                .split_once('[')
-                .map(|(n, _)| n)
-                .unwrap_or(rest)
-                .trim();
+            let name = rest.split_once('[').map(|(n, _)| n).unwrap_or(rest).trim();
 
             if !name.is_empty() {
                 let vol_info = get_stream_volume(id).unwrap_or((80, false));
@@ -245,18 +241,16 @@ pub mod pipewire {
         if let Ok(status) = Command::new("pactl")
             .args(["move-sink-input", &s_str, &k_str])
             .status()
+            && status.success()
         {
-            if status.success() {
-                return Ok(());
-            }
+            return Ok(());
         }
         if let Ok(status) = Command::new("pw-metadata")
             .args(["-n", "default", &s_str, "target.node", &k_str])
             .status()
+            && status.success()
         {
-            if status.success() {
-                return Ok(());
-            }
+            return Ok(());
         }
         set_default_sink(sink_id)
     }
@@ -726,7 +720,9 @@ pub mod bluetooth {
             .enable_all()
             .build()
             .ok();
-        let Some(rt) = runtime else { return Vec::new(); };
+        let Some(rt) = runtime else {
+            return Vec::new();
+        };
         rt.block_on(async {
             let connection = zbus::Connection::system().await.ok()?;
             let manager = zbus::Proxy::new(
@@ -741,16 +737,20 @@ pub mod bluetooth {
             let mut devices = Vec::new();
             for (path, interfaces) in objects {
                 if let Some(dev_props) = interfaces.get("org.bluez.Device1") {
-                    let name = dev_props.get("Name")
+                    let name = dev_props
+                        .get("Name")
                         .and_then(|v| v.downcast_ref::<String>().ok())
                         .unwrap_or_else(|| "Bilinmeyen Aygıt".into());
-                    let address = dev_props.get("Address")
+                    let address = dev_props
+                        .get("Address")
                         .and_then(|v| v.downcast_ref::<String>().ok())
                         .unwrap_or_default();
-                    let is_connected = dev_props.get("Connected")
+                    let is_connected = dev_props
+                        .get("Connected")
                         .and_then(|v| v.downcast_ref::<bool>().ok())
                         .unwrap_or(false);
-                    let is_paired = dev_props.get("Paired")
+                    let is_paired = dev_props
+                        .get("Paired")
                         .and_then(|v| v.downcast_ref::<bool>().ok())
                         .unwrap_or(false);
 
@@ -764,21 +764,22 @@ pub mod bluetooth {
                 }
             }
             Some(devices)
-        }).unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
 
-    pub fn toggle_device_connection(device_path: &str, currently_connected: bool) -> Result<(), super::ServiceError> {
+    pub fn toggle_device_connection(
+        device_path: &str,
+        currently_connected: bool,
+    ) -> Result<(), super::ServiceError> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
         runtime.block_on(async {
             let connection = zbus::Connection::system().await?;
-            let proxy = zbus::Proxy::new(
-                &connection,
-                "org.bluez",
-                device_path,
-                "org.bluez.Device1",
-            ).await?;
+            let proxy =
+                zbus::Proxy::new(&connection, "org.bluez", device_path, "org.bluez.Device1")
+                    .await?;
             if currently_connected {
                 let _: () = proxy.call("Disconnect", &()).await?;
             } else {
@@ -1167,10 +1168,10 @@ pub mod portal {
 }
 
 pub mod udisks2 {
+    use super::ServiceError;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
-    use super::ServiceError;
 
     const SERVICE: &str = "org.freedesktop.UDisks2";
     const MANAGER_PATH: &str = "/org/freedesktop/UDisks2/Manager";
@@ -1196,10 +1197,11 @@ pub mod udisks2 {
 
         runtime.block_on(async {
             let connection = zbus::Connection::system().await?;
-            let proxy = zbus::Proxy::new(&connection, SERVICE, MANAGER_PATH, MANAGER_INTERFACE).await?;
-            
+            let proxy =
+                zbus::Proxy::new(&connection, SERVICE, MANAGER_PATH, MANAGER_INTERFACE).await?;
+
             // GetManagedObjects returns a dictionary of object paths and their interfaces/properties
-            let managed: HashMap<OwnedObjectPath, HashMap<String, HashMap<String, OwnedValue>>> = 
+            let managed: HashMap<OwnedObjectPath, HashMap<String, HashMap<String, OwnedValue>>> =
                 proxy.call("GetManagedObjects", &()).await?;
 
             let mut devices = Vec::new();
@@ -1208,51 +1210,57 @@ pub mod udisks2 {
                 // Must have Block interface
                 if let Some(block_props) = interfaces.get("org.freedesktop.UDisks2.Block") {
                     let mut device_name = String::new();
-                    if let Some(dev_val) = block_props.get("Device") {
-                        if let Ok(bytes) = Vec::<u8>::try_from(dev_val.clone()) {
-                            // Strip trailing null if present
-                            let s = String::from_utf8_lossy(&bytes);
-                            device_name = s.trim_matches('\0').to_string();
-                        }
+                    if let Some(dev_val) = block_props.get("Device")
+                        && let Ok(bytes) = Vec::<u8>::try_from(dev_val.clone())
+                    {
+                        // Strip trailing null if present
+                        let s = String::from_utf8_lossy(&bytes);
+                        device_name = s.trim_matches('\0').to_string();
                     }
 
                     // Ignore loop devices and zram
-                    if device_name.starts_with("/dev/loop") || device_name.starts_with("/dev/zram") {
+                    if device_name.starts_with("/dev/loop") || device_name.starts_with("/dev/zram")
+                    {
                         continue;
                     }
 
-                    let label = block_props.get("IdLabel")
+                    let label = block_props
+                        .get("IdLabel")
                         .and_then(|v| String::try_from(v.clone()).ok())
                         .unwrap_or_default();
 
-                    let fs_type = block_props.get("IdType")
+                    let fs_type = block_props
+                        .get("IdType")
                         .and_then(|v| String::try_from(v.clone()).ok())
                         .unwrap_or_default();
 
-                    let size = block_props.get("Size")
+                    let size = block_props
+                        .get("Size")
                         .and_then(|v| u64::try_from(v.clone()).ok())
                         .unwrap_or(0);
 
-                    let is_read_only = block_props.get("ReadOnly")
+                    let is_read_only = block_props
+                        .get("ReadOnly")
                         .and_then(|v| bool::try_from(v.clone()).ok())
                         .unwrap_or(false);
 
-                    let hint_system = block_props.get("HintSystem")
+                    let hint_system = block_props
+                        .get("HintSystem")
                         .and_then(|v| bool::try_from(v.clone()).ok())
                         .unwrap_or(true);
 
                     // Check filesystem mount points if present
                     let mut mount_point = None;
-                    if let Some(fs_props) = interfaces.get("org.freedesktop.UDisks2.Filesystem") {
-                        if let Some(mp_val) = fs_props.get("MountPoints") {
-                            if let Ok(mps) = Vec::<Vec<u8>>::try_from(mp_val.clone()) {
-                                if let Some(first) = mps.first() {
-                                    let path_str = String::from_utf8_lossy(first).trim_matches('\0').to_string();
-                                    if !path_str.is_empty() {
-                                        mount_point = Some(PathBuf::from(path_str));
-                                    }
-                                }
-                            }
+                    if let Some(fs_props) = interfaces.get("org.freedesktop.UDisks2.Filesystem")
+                        && let Some(mp_val) = fs_props.get("MountPoints")
+                        && let Ok(mps) = Vec::<Vec<u8>>::try_from(mp_val.clone())
+                        && let Some(first) = mps.first()
+                    {
+                        let path_str = String::from_utf8_lossy(first)
+                            .trim_matches('\0')
+                            .to_string();
+                        if !path_str.is_empty() {
+                            mount_point = Some(PathBuf::from(path_str));
                         }
                     }
 
@@ -1264,7 +1272,11 @@ pub mod udisks2 {
                     } else if !device_name.is_empty() {
                         device_name.clone()
                     } else {
-                        path.as_str().split('/').next_back().unwrap_or("Disk").to_string()
+                        path.as_str()
+                            .split('/')
+                            .next_back()
+                            .unwrap_or("Disk")
+                            .to_string()
                     };
 
                     devices.push(BlockDevice {
@@ -1299,7 +1311,8 @@ pub mod udisks2 {
                 SERVICE,
                 object_path,
                 "org.freedesktop.UDisks2.Filesystem",
-            ).await?;
+            )
+            .await?;
 
             let options: HashMap<&str, Value<'_>> = HashMap::new();
             let mount_path: String = proxy.call("Mount", &(options)).await?;
@@ -1320,7 +1333,8 @@ pub mod udisks2 {
                 SERVICE,
                 object_path,
                 "org.freedesktop.UDisks2.Filesystem",
-            ).await?;
+            )
+            .await?;
 
             let options: HashMap<&str, Value<'_>> = HashMap::new();
             let _: () = proxy.call("Unmount", &(options)).await?;
@@ -1330,9 +1344,9 @@ pub mod udisks2 {
 }
 
 pub mod mpris {
+    use super::ServiceError;
     use std::collections::HashMap;
     use zbus::zvariant::OwnedValue;
-    use super::ServiceError;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum PlaybackStatus {
@@ -1393,30 +1407,42 @@ pub mod mpris {
                         bus_name.clone(),
                         "/org/mpris/MediaPlayer2",
                         "org.mpris.MediaPlayer2.Player",
-                    ).await;
+                    )
+                    .await;
 
                     let root_proxy = zbus::Proxy::new(
                         &connection,
                         bus_name.clone(),
                         "/org/mpris/MediaPlayer2",
                         "org.mpris.MediaPlayer2",
-                    ).await;
+                    )
+                    .await;
 
                     if let (Ok(p_proxy), Ok(r_proxy)) = (player_proxy, root_proxy) {
-                        let identity: String = r_proxy.get_property("Identity").await.unwrap_or_else(|_| {
-                            bus_name.strip_prefix("org.mpris.MediaPlayer2.").unwrap_or(&bus_name).to_string()
-                        });
+                        let identity: String =
+                            r_proxy.get_property("Identity").await.unwrap_or_else(|_| {
+                                bus_name
+                                    .strip_prefix("org.mpris.MediaPlayer2.")
+                                    .unwrap_or(&bus_name)
+                                    .to_string()
+                            });
 
-                        let status_str: String = p_proxy.get_property("PlaybackStatus").await.unwrap_or_else(|_| "Stopped".into());
+                        let status_str: String = p_proxy
+                            .get_property("PlaybackStatus")
+                            .await
+                            .unwrap_or_else(|_| "Stopped".into());
                         let playback_status = PlaybackStatus::from_status_str(&status_str);
 
-                        let metadata: HashMap<String, OwnedValue> = p_proxy.get_property("Metadata").await.unwrap_or_default();
+                        let metadata: HashMap<String, OwnedValue> =
+                            p_proxy.get_property("Metadata").await.unwrap_or_default();
 
-                        let title = metadata.get("xesam:title")
+                        let title = metadata
+                            .get("xesam:title")
                             .and_then(|v| String::try_from(v.clone()).ok())
                             .unwrap_or_default();
 
-                        let artist = metadata.get("xesam:artist")
+                        let artist = metadata
+                            .get("xesam:artist")
                             .and_then(|v| {
                                 if let Ok(s) = String::try_from(v.clone()) {
                                     Some(s)
@@ -1428,25 +1454,27 @@ pub mod mpris {
                             })
                             .unwrap_or_default();
 
-                        let album = metadata.get("xesam:album")
+                        let album = metadata
+                            .get("xesam:album")
                             .and_then(|v| String::try_from(v.clone()).ok())
                             .unwrap_or_default();
 
-                        let art_url = metadata.get("mpris:artUrl")
+                        let art_url = metadata
+                            .get("mpris:artUrl")
                             .and_then(|v| String::try_from(v.clone()).ok());
 
-                        let length_micros = metadata.get("mpris:length")
-                            .and_then(|v| {
-                                if let Ok(u) = u64::try_from(v.clone()) {
-                                    Some(u)
-                                } else if let Ok(i) = i64::try_from(v.clone()) {
-                                    Some(i.max(0) as u64)
-                                } else {
-                                    None
-                                }
-                            });
+                        let length_micros = metadata.get("mpris:length").and_then(|v| {
+                            if let Ok(u) = u64::try_from(v.clone()) {
+                                Some(u)
+                            } else if let Ok(i) = i64::try_from(v.clone()) {
+                                Some(i.max(0) as u64)
+                            } else {
+                                None
+                            }
+                        });
 
-                        let position_micros: Option<u64> = p_proxy.get_property::<i64>("Position")
+                        let position_micros: Option<u64> = p_proxy
+                            .get_property::<i64>("Position")
                             .await
                             .ok()
                             .map(|p| p.max(0) as u64);
@@ -1482,7 +1510,8 @@ pub mod mpris {
                 bus_name,
                 "/org/mpris/MediaPlayer2",
                 "org.mpris.MediaPlayer2.Player",
-            ).await?;
+            )
+            .await?;
             let _: () = proxy.call("PlayPause", &()).await?;
             Ok(())
         })
@@ -1500,7 +1529,8 @@ pub mod mpris {
                 bus_name,
                 "/org/mpris/MediaPlayer2",
                 "org.mpris.MediaPlayer2.Player",
-            ).await?;
+            )
+            .await?;
             let _: () = proxy.call("Next", &()).await?;
             Ok(())
         })
@@ -1518,7 +1548,8 @@ pub mod mpris {
                 bus_name,
                 "/org/mpris/MediaPlayer2",
                 "org.mpris.MediaPlayer2.Player",
-            ).await?;
+            )
+            .await?;
             let _: () = proxy.call("Previous", &()).await?;
             Ok(())
         })
@@ -1613,7 +1644,10 @@ pub mod a11y {
 
     /// Queries whether the AT-SPI2 screen reader (e.g. Orca) is active on the D-Bus session bus.
     pub fn is_screen_reader_enabled() -> bool {
-        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
             Ok(rt) => rt,
             Err(_) => return false,
         };
@@ -1623,10 +1657,11 @@ pub mod a11y {
                 Ok(c) => c,
                 Err(_) => return false,
             };
-            if let Ok(proxy) = zbus::Proxy::new(&conn, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Status").await {
-                if let Ok(enabled) = proxy.get_property::<bool>("IsEnabled").await {
-                    return enabled;
-                }
+            if let Ok(proxy) =
+                zbus::Proxy::new(&conn, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Status").await
+                && let Ok(enabled) = proxy.get_property::<bool>("IsEnabled").await
+            {
+                return enabled;
             }
             // Fallback: check if orca process is running
             std::process::Command::new("pgrep")
@@ -1734,7 +1769,10 @@ pub mod a11y {
                 name: name.into(),
                 description: String::new(),
                 role,
-                states: atspi_state::VISIBLE | atspi_state::SHOWING | atspi_state::ENABLED | atspi_state::SENSITIVE,
+                states: atspi_state::VISIBLE
+                    | atspi_state::SHOWING
+                    | atspi_state::ENABLED
+                    | atspi_state::SENSITIVE,
                 value: None,
                 children: Vec::new(),
                 parent: None,
@@ -1756,7 +1794,10 @@ pub mod a11y {
         }
 
         pub fn state_tuple(&self) -> (u32, u32) {
-            ((self.states & 0xFFFF_FFFF) as u32, (self.states >> 32) as u32)
+            (
+                (self.states & 0xFFFF_FFFF) as u32,
+                (self.states >> 32) as u32,
+            )
         }
     }
 
@@ -1788,7 +1829,8 @@ pub mod a11y {
     impl AccessibleTree {
         pub fn new(desktop_name: &str) -> Self {
             let root_id = "root".to_string();
-            let mut root_node = AccessibleNode::new(&root_id, desktop_name, AtspiRole::DesktopFrame);
+            let mut root_node =
+                AccessibleNode::new(&root_id, desktop_name, AtspiRole::DesktopFrame);
             root_node.description = "Corten Wayland Masaüstü Ortamı".to_string();
             root_node.states |= atspi_state::ACTIVE;
 
@@ -1816,22 +1858,21 @@ pub mod a11y {
 
         pub fn add_or_update_node(&mut self, node: AccessibleNode) {
             let id = node.id.clone();
-            if let Some(parent_id) = &node.parent {
-                if let Some(parent) = self.nodes.get_mut(parent_id) {
-                    if !parent.children.contains(&id) {
-                        parent.children.push(id.clone());
-                    }
-                }
+            if let Some(parent_id) = &node.parent
+                && let Some(parent) = self.nodes.get_mut(parent_id)
+                && !parent.children.contains(&id)
+            {
+                parent.children.push(id.clone());
             }
             self.nodes.insert(id, node);
         }
 
         pub fn remove_node(&mut self, id: &str) {
             if let Some(node) = self.nodes.remove(id) {
-                if let Some(parent_id) = &node.parent {
-                    if let Some(parent) = self.nodes.get_mut(parent_id) {
-                        parent.children.retain(|c| c != id);
-                    }
+                if let Some(parent_id) = &node.parent
+                    && let Some(parent) = self.nodes.get_mut(parent_id)
+                {
+                    parent.children.retain(|c| c != id);
                 }
                 for child_id in node.children {
                     self.remove_node(&child_id);
@@ -1847,11 +1888,11 @@ pub mod a11y {
                 return None;
             }
             let prev = self.active_focus.clone();
-            if let Some(ref prev_id) = prev {
-                if let Some(prev_node) = self.nodes.get_mut(prev_id) {
-                    prev_node.states &= !atspi_state::FOCUSED;
-                    prev_node.states &= !atspi_state::ACTIVE;
-                }
+            if let Some(ref prev_id) = prev
+                && let Some(prev_node) = self.nodes.get_mut(prev_id)
+            {
+                prev_node.states &= !atspi_state::FOCUSED;
+                prev_node.states &= !atspi_state::ACTIVE;
             }
             if let Some(node) = self.nodes.get_mut(id) {
                 node.states |= atspi_state::FOCUSED | atspi_state::ACTIVE;
@@ -1865,8 +1906,13 @@ pub mod a11y {
         }
 
         /// Synchronizes the AT-SPI2 accessible tree with the compositor's current window snapshot
-        pub fn sync_desktop_windows(&mut self, windows: &[WindowA11ySnapshot], active_workspace: u32) {
-            let current_win_ids: Vec<String> = windows.iter().map(|w| format!("win_{}", w.id)).collect();
+        pub fn sync_desktop_windows(
+            &mut self,
+            windows: &[WindowA11ySnapshot],
+            active_workspace: u32,
+        ) {
+            let current_win_ids: Vec<String> =
+                windows.iter().map(|w| format!("win_{}", w.id)).collect();
 
             // 1. Remove closed windows
             let to_remove: Vec<String> = self
@@ -1897,7 +1943,11 @@ pub mod a11y {
                     format!("{} ({})", win.title, win.app_id)
                 };
 
-                let mut states = atspi_state::VISIBLE | atspi_state::SHOWING | atspi_state::ENABLED | atspi_state::SENSITIVE | atspi_state::FOCUSABLE;
+                let mut states = atspi_state::VISIBLE
+                    | atspi_state::SHOWING
+                    | atspi_state::ENABLED
+                    | atspi_state::SENSITIVE
+                    | atspi_state::FOCUSABLE;
                 if win.workspace as u32 == active_workspace {
                     states |= atspi_state::SHOWING;
                 }
@@ -1906,7 +1956,11 @@ pub mod a11y {
                     newly_focused = Some(win_node_id.clone());
                 }
 
-                let desc = format!("Çalışma Alanı {}, {}", win.workspace, if win.is_floating { "Kayar" } else { "Döşeli" });
+                let desc = format!(
+                    "Çalışma Alanı {}, {}",
+                    win.workspace,
+                    if win.is_floating { "Kayar" } else { "Döşeli" }
+                );
 
                 let node = AccessibleNode {
                     id: win_node_id.clone(),
@@ -1932,10 +1986,15 @@ pub mod a11y {
 
         /// Generates a spoken accessibility summary for Orca of the active desktop state
         pub fn generate_summary(&self) -> String {
-            if let Some(ref focus_id) = self.active_focus {
-                if let Some(node) = self.nodes.get(focus_id) {
-                    return format!("{}: {}, {}", node.role.role_name(), node.name, node.description);
-                }
+            if let Some(ref focus_id) = self.active_focus
+                && let Some(node) = self.nodes.get(focus_id)
+            {
+                return format!(
+                    "{}: {}, {}",
+                    node.role.role_name(),
+                    node.name,
+                    node.description
+                );
             }
             if let Some(root) = self.root() {
                 format!("{}: {} açık pencere", root.name, root.children.len())
@@ -1954,73 +2013,72 @@ pub mod a11y {
     #[zbus::interface(name = "org.a11y.atspi.Accessible")]
     impl AtspiAccessibleServer {
         async fn get_role(&self) -> u32 {
-            if let Ok(tree) = self.tree.read() {
-                if let Some(root) = tree.root() {
-                    return root.role as u32;
-                }
+            if let Ok(tree) = self.tree.read()
+                && let Some(root) = tree.root()
+            {
+                return root.role as u32;
             }
             AtspiRole::DesktopFrame as u32
         }
 
         async fn get_role_name(&self) -> String {
-            if let Ok(tree) = self.tree.read() {
-                if let Some(root) = tree.root() {
-                    return root.role.role_name().to_string();
-                }
+            if let Ok(tree) = self.tree.read()
+                && let Some(root) = tree.root()
+            {
+                return root.role.role_name().to_string();
             }
             "desktop frame".to_string()
         }
 
         async fn get_name(&self) -> String {
-            if let Ok(tree) = self.tree.read() {
-                if let Some(root) = tree.root() {
-                    return root.name.clone();
-                }
+            if let Ok(tree) = self.tree.read()
+                && let Some(root) = tree.root()
+            {
+                return root.name.clone();
             }
             "Corten Desktop".to_string()
         }
 
         async fn get_description(&self) -> String {
-            if let Ok(tree) = self.tree.read() {
-                if let Some(root) = tree.root() {
-                    return root.description.clone();
-                }
+            if let Ok(tree) = self.tree.read()
+                && let Some(root) = tree.root()
+            {
+                return root.description.clone();
             }
             String::new()
         }
 
         async fn get_state(&self) -> (u32, u32) {
-            if let Ok(tree) = self.tree.read() {
-                if let Some(root) = tree.root() {
-                    return root.state_tuple();
-                }
+            if let Ok(tree) = self.tree.read()
+                && let Some(root) = tree.root()
+            {
+                return root.state_tuple();
             }
             (0, 0)
         }
 
         async fn get_child_count(&self) -> i32 {
-            if let Ok(tree) = self.tree.read() {
-                if let Some(root) = tree.root() {
-                    return root.children.len() as i32;
-                }
+            if let Ok(tree) = self.tree.read()
+                && let Some(root) = tree.root()
+            {
+                return root.children.len() as i32;
             }
             0
         }
 
         async fn get_children(&self) -> Vec<String> {
-            if let Ok(tree) = self.tree.read() {
-                if let Some(root) = tree.root() {
-                    return root.children.clone();
-                }
+            if let Ok(tree) = self.tree.read()
+                && let Some(root) = tree.root()
+            {
+                return root.children.clone();
             }
             Vec::new()
         }
 
         async fn get_active_summary(&self) -> String {
-            if let Ok(tree) = self.tree.read() {
-                tree.generate_summary()
-            } else {
-                "Corten Desktop".to_string()
+            match self.tree.read() {
+                Ok(tree) => tree.generate_summary(),
+                _ => "Corten Desktop".to_string(),
             }
         }
     }
@@ -2040,7 +2098,9 @@ pub mod a11y {
     impl AtspiBridge {
         pub fn new(desktop_name: &str) -> Self {
             Self {
-                tree: std::sync::Arc::new(std::sync::RwLock::new(AccessibleTree::new(desktop_name))),
+                tree: std::sync::Arc::new(std::sync::RwLock::new(AccessibleTree::new(
+                    desktop_name,
+                ))),
             }
         }
 
@@ -2052,17 +2112,16 @@ pub mod a11y {
 
         pub fn set_focus(&self, id: &str) {
             let mut summary_to_speak = None;
-            if let Ok(mut tree) = self.tree.write() {
-                if let Some((_, new_id)) = tree.set_focused_node(id) {
-                    if let Some(node) = tree.get_node(&new_id) {
-                        summary_to_speak = Some(format!("{}: {}", node.role.role_name(), node.name));
-                    }
-                }
+            if let Ok(mut tree) = self.tree.write()
+                && let Some((_, new_id)) = tree.set_focused_node(id)
+                && let Some(node) = tree.get_node(&new_id)
+            {
+                summary_to_speak = Some(format!("{}: {}", node.role.role_name(), node.name));
             }
-            if let Some(summary) = summary_to_speak {
-                if is_screen_reader_enabled() {
-                    announce_screen_reader(&summary);
-                }
+            if let Some(summary) = summary_to_speak
+                && is_screen_reader_enabled()
+            {
+                announce_screen_reader(&summary);
             }
         }
     }
@@ -2132,10 +2191,22 @@ mod tests {
     #[test]
     fn mpris_playback_status_parsing() {
         use mpris::PlaybackStatus;
-        assert_eq!(PlaybackStatus::from_status_str("Playing"), PlaybackStatus::Playing);
-        assert_eq!(PlaybackStatus::from_status_str("Paused"), PlaybackStatus::Paused);
-        assert_eq!(PlaybackStatus::from_status_str("Stopped"), PlaybackStatus::Stopped);
-        assert_eq!(PlaybackStatus::from_status_str("other"), PlaybackStatus::Stopped);
+        assert_eq!(
+            PlaybackStatus::from_status_str("Playing"),
+            PlaybackStatus::Playing
+        );
+        assert_eq!(
+            PlaybackStatus::from_status_str("Paused"),
+            PlaybackStatus::Paused
+        );
+        assert_eq!(
+            PlaybackStatus::from_status_str("Stopped"),
+            PlaybackStatus::Stopped
+        );
+        assert_eq!(
+            PlaybackStatus::from_status_str("other"),
+            PlaybackStatus::Stopped
+        );
         assert_eq!(PlaybackStatus::Playing.as_str(), "Playing");
     }
 
@@ -2239,7 +2310,7 @@ mod tests {
 
     #[test]
     fn test_gamut_mapping_matrix_inverses() {
-        use color_management::{gamut_matrix, transform_color, ColorSpace};
+        use color_management::{ColorSpace, gamut_matrix, transform_color};
 
         let srgb_red = [1.0f32, 0.0, 0.0];
         let mat_srgb_to_p3 = gamut_matrix(ColorSpace::Srgb, ColorSpace::DciP3);
@@ -2266,7 +2337,10 @@ mod tests {
         for nits in [10.0f32, 100.0, 400.0, 1000.0, 4000.0] {
             let pq = linear_to_pq(nits);
             let restored = pq_to_linear(pq);
-            assert!((nits - restored).abs() / nits < 0.01, "PQ roundtrip failed for {nits} nits");
+            assert!(
+                (nits - restored).abs() / nits < 0.01,
+                "PQ roundtrip failed for {nits} nits"
+            );
         }
     }
 
@@ -2277,7 +2351,10 @@ mod tests {
         let hdr = DrmHdrOutputMetadata::hdr10(ColorSpace::Bt2020, 1000);
         assert_eq!(hdr.metadata_type, 0);
         assert_eq!(hdr.hdmi_metadata_type1.eotf, 2); // SMPTE ST2084 PQ
-        assert_eq!(hdr.hdmi_metadata_type1.max_display_mastering_luminance, 1000);
+        assert_eq!(
+            hdr.hdmi_metadata_type1.max_display_mastering_luminance,
+            1000
+        );
         assert_eq!(hdr.hdmi_metadata_type1.max_cll, 1000);
         assert_eq!(hdr.hdmi_metadata_type1.max_fall, 800);
 
@@ -2291,7 +2368,8 @@ mod tests {
         use color_management::{generate_synthetic_icc_profile, parse_icc_profile};
 
         let profile_bytes = generate_synthetic_icc_profile("Corten Wide Gamut Test");
-        let parsed = parse_icc_profile(&profile_bytes).expect("synthetic profile should parse cleanly");
+        let parsed =
+            parse_icc_profile(&profile_bytes).expect("synthetic profile should parse cleanly");
         assert_eq!(parsed.description, "Corten Wide Gamut Test");
         assert_eq!(parsed.device_class, "Monitör (Ekran)");
         assert_eq!(parsed.color_space, "RGB");
@@ -2300,7 +2378,7 @@ mod tests {
 
     #[test]
     fn test_acoustic_wav_synthesis_and_headers() {
-        use acoustic::{ensure_cached_wav, AcousticCue};
+        use acoustic::{AcousticCue, ensure_cached_wav};
 
         for cue in [
             AcousticCue::ToggleClick,

@@ -32,38 +32,67 @@ impl ActionExecutor {
 
         // Workspace switching
         if (q.contains("çalışma alan") || q.contains("workspace") || q.starts_with("masaüstü"))
-            && (q.contains("geç") || q.contains("değiştir") || q.contains("git") || q.starts_with("workspace") || q.starts_with("çalışma alanı") || q.starts_with("masaüstü"))
+            && (q.contains("geç")
+                || q.contains("değiştir")
+                || q.contains("git")
+                || q.starts_with("workspace")
+                || q.starts_with("çalışma alanı")
+                || q.starts_with("masaüstü"))
+            && let Some(num) = extract_number(&q)
+            && (1..=9).contains(&num)
         {
-            if let Some(num) = extract_number(&q) {
-                if (1..=9).contains(&num) {
-                    return DesktopAction::SwitchWorkspace(num as u8);
-                }
-            }
+            return DesktopAction::SwitchWorkspace(num as u8);
         }
 
         // Overview / Exposé
-        if q.contains("genel bakış") || q == "overview" || q == "exposé" || q.contains("tüm pencereleri göster") {
+        if q.contains("genel bakış")
+            || q == "overview"
+            || q == "exposé"
+            || q.contains("tüm pencereleri göster")
+        {
             return DesktopAction::ToggleOverview;
         }
 
         // App launchers
-        if q.contains("terminal aç") || q.contains("konsol aç") || q.contains("terminal başlat") || q == "terminal" {
+        if q.contains("terminal aç")
+            || q.contains("konsol aç")
+            || q.contains("terminal başlat")
+            || q == "terminal"
+        {
             return DesktopAction::LaunchTerminal;
         }
-        if q.contains("dosya yöneticisi aç") || q.contains("dosyaları aç") || q.contains("dosya yöneticisini aç") || q == "dosyalar" {
+        if q.contains("dosya yöneticisi aç")
+            || q.contains("dosyaları aç")
+            || q.contains("dosya yöneticisini aç")
+            || q == "dosyalar"
+        {
             return DesktopAction::LaunchFileManager;
         }
-        if q.contains("ayarları aç") || q.contains("sistem ayarları") || q == "ayarlar" || q == "ayarları başlat" {
+        if q.contains("ayarları aç")
+            || q.contains("sistem ayarları")
+            || q == "ayarlar"
+            || q == "ayarları başlat"
+        {
             return DesktopAction::LaunchSettings;
         }
 
         // Disk summary
-        if q == "disk" || q == "depolama" || (q.contains("disk") || q.contains("depolama")) && (q.contains("alan") || q.contains("durum") || q.contains("boş") || q.contains("doluluk")) {
+        if q == "disk"
+            || q == "depolama"
+            || (q.contains("disk") || q.contains("depolama"))
+                && (q.contains("alan")
+                    || q.contains("durum")
+                    || q.contains("boş")
+                    || q.contains("doluluk"))
+        {
             return DesktopAction::DiskSummary;
         }
 
         // Show desktop / Minimize all
-        if q.contains("masaüstünü göster") || q.contains("tüm pencereleri küçült") || q == "show desktop" {
+        if q.contains("masaüstünü göster")
+            || q.contains("tüm pencereleri küçült")
+            || q == "show desktop"
+        {
             return DesktopAction::ToggleShowDesktop;
         }
 
@@ -74,19 +103,34 @@ impl ActionExecutor {
         if q.contains("sağa yasla") || q.contains("sağa böl") || q.contains("snap right") {
             return DesktopAction::SnapRight;
         }
-        if q.contains("ekranı kapla") || q == "tam ekran" || q.contains("pencereyi büyüt") || q == "maximize" {
+        if q.contains("ekranı kapla")
+            || q == "tam ekran"
+            || q.contains("pencereyi büyüt")
+            || q == "maximize"
+        {
             return DesktopAction::MaximizeWindow;
         }
 
         // Night light intents
-        if (q.contains("gece ışığı") || q.contains("mavi ışık") || q.contains("sıcak renk") || q.contains("night light"))
-            && (q.contains("aç") || q.contains("kapat") || q.contains("değiştir") || q.contains("toggle") || q == "gece ışığı")
+        if (q.contains("gece ışığı")
+            || q.contains("mavi ışık")
+            || q.contains("sıcak renk")
+            || q.contains("night light"))
+            && (q.contains("aç")
+                || q.contains("kapat")
+                || q.contains("değiştir")
+                || q.contains("toggle")
+                || q == "gece ışığı")
         {
             return DesktopAction::ToggleNightLight;
         }
 
         // Top memory consumer
-        if q.contains("en çok ram") || q.contains("en çok bellek") || q.contains("ağır uygulama") || q.contains("top ram") {
+        if q.contains("en çok ram")
+            || q.contains("en çok bellek")
+            || q.contains("ağır uygulama")
+            || q.contains("top ram")
+        {
             return DesktopAction::TopMemoryApp;
         }
 
@@ -98,7 +142,8 @@ impl ActionExecutor {
             if q.contains("kıs") || q.contains("azalt") || q.contains("down") {
                 return DesktopAction::SetVolume(30);
             }
-            if q.contains("aç") || q.contains("artır") || q.contains("yükselt") || q.contains("up") {
+            if q.contains("aç") || q.contains("artır") || q.contains("yükselt") || q.contains("up")
+            {
                 return DesktopAction::SetVolume(70);
             }
             if q.contains("sessiz") || q.contains("mute") || q.contains("kapat") {
@@ -107,30 +152,49 @@ impl ActionExecutor {
         }
 
         // Brightness intents
-        if q.contains("parlaklık") || q.contains("parlaklığ") || q.contains("ekran ışığı") || q.contains("brightness") {
+        if q.contains("parlaklık")
+            || q.contains("parlaklığ")
+            || q.contains("ekran ışığı")
+            || q.contains("brightness")
+        {
             if let Some(pct) = extract_percentage(&q) {
                 return DesktopAction::SetBrightness(pct);
             }
-            if q.contains("kıs") || q.contains("azalt") || q.contains("dim") || q.contains("düşür") {
+            if q.contains("kıs") || q.contains("azalt") || q.contains("dim") || q.contains("düşür")
+            {
                 return DesktopAction::SetBrightness(30);
             }
-            if q.contains("aç") || q.contains("artır") || q.contains("bright") || q.contains("yükselt") {
+            if q.contains("aç")
+                || q.contains("artır")
+                || q.contains("bright")
+                || q.contains("yükselt")
+            {
                 return DesktopAction::SetBrightness(85);
             }
         }
 
         // Screenshot intents
-        if q.contains("ekran görüntüsü") || q.contains("screenshot") || q.contains("ekranı yakala") || q.contains("ekran resmi") {
+        if q.contains("ekran görüntüsü")
+            || q.contains("screenshot")
+            || q.contains("ekranı yakala")
+            || q.contains("ekran resmi")
+        {
             return DesktopAction::TakeScreenshot;
         }
 
         // Lock screen intents
-        if q == "kilitle" || q == "ekranı kilitle" || q.contains("oturumu kilitle") || q == "lock" {
+        if q == "kilitle" || q == "ekranı kilitle" || q.contains("oturumu kilitle") || q == "lock"
+        {
             return DesktopAction::LockScreen;
         }
 
         // System status
-        if q == "sistem durumu" || q == "sistem bilgisi" || q.contains("sistem durumunu göster") || q.contains("donanım durumu") || q == "cpu ve ram" {
+        if q == "sistem durumu"
+            || q == "sistem bilgisi"
+            || q.contains("sistem durumunu göster")
+            || q.contains("donanım durumu")
+            || q == "cpu ve ram"
+        {
             return DesktopAction::SystemSummary;
         }
 
@@ -147,7 +211,10 @@ impl ActionExecutor {
                 let _ = Command::new("wpctl")
                     .args(["set-volume", "@DEFAULT_AUDIO_SINK@", &format!("{:.2}", dec)])
                     .output();
-                Some(format!("🔊 Corten ses seviyesi %{} olarak ayarlandı.", bounded))
+                Some(format!(
+                    "🔊 Corten ses seviyesi %{} olarak ayarlandı.",
+                    bounded
+                ))
             }
             DesktopAction::SetBrightness(level) => {
                 let bounded = level.clamp(5, 100);
@@ -155,15 +222,20 @@ impl ActionExecutor {
                 let _ = Command::new("brightnessctl")
                     .args(["s", &format!("{}%", bounded)])
                     .output();
-                Some(format!("💡 Ekran parlaklığı %{} olarak ayarlandı.", bounded))
+                Some(format!(
+                    "💡 Ekran parlaklığı %{} olarak ayarlandı.",
+                    bounded
+                ))
             }
             DesktopAction::TakeScreenshot => {
                 info!("Spawning corten-snipper for fullscreen capture");
                 let snipper = resolve_corten_bin("corten-snipper");
                 if snipper.exists() {
                     let _ = Command::new(snipper).arg("--fullscreen").spawn();
-                } else if let Ok(conn) = zbus::Connection::session().await {
-                    if let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await {
+                } else {
+                    if let Ok(conn) = zbus::Connection::session().await
+                        && let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await
+                    {
                         let _ = proxy.take_screenshot(false).await;
                     }
                 }
@@ -181,9 +253,17 @@ impl ActionExecutor {
                 let mut avail_kb = 0u64;
                 for line in mem_info.lines() {
                     if line.starts_with("MemTotal:") {
-                        total_kb = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+                        total_kb = line
+                            .split_whitespace()
+                            .nth(1)
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
                     } else if line.starts_with("MemAvailable:") {
-                        avail_kb = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+                        avail_kb = line
+                            .split_whitespace()
+                            .nth(1)
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
                     }
                 }
                 let used_gb = (total_kb.saturating_sub(avail_kb)) as f32 / 1024.0 / 1024.0;
@@ -192,7 +272,11 @@ impl ActionExecutor {
                     "📊 Corten Sistem Özeti:\n• Bellek Kullanımı: {:.1} GB / {:.1} GB (%{:.0})\n• Kompozitör: Saf Rust Smithay (Wayland)\n• AI Motoru: AURA-CORE / Local GGUF",
                     used_gb,
                     total_gb,
-                    if total_gb > 0.0 { (used_gb / total_gb) * 100.0 } else { 0.0 }
+                    if total_gb > 0.0 {
+                        (used_gb / total_gb) * 100.0
+                    } else {
+                        0.0
+                    }
                 ))
             }
             DesktopAction::TopMemoryApp => {
@@ -228,25 +312,27 @@ impl ActionExecutor {
                     let _ = Command::new("pkill").args(["-f", "wlsunset"]).spawn();
                     Some("☀️ Gece Işığı devre dışı bırakıldı (Doğal renkler).".into())
                 } else {
-                    let _ = Command::new("wlsunset").args(["-t", "4000", "-T", "6500"]).spawn();
+                    let _ = Command::new("wlsunset")
+                        .args(["-t", "4000", "-T", "6500"])
+                        .spawn();
                     Some("🌙 Gece Işığı aktif edildi (Göz yormayan sıcak tonlar).".into())
                 }
             }
             DesktopAction::SwitchWorkspace(ws) => {
                 info!("Switching workspace to {} via D-Bus", ws);
-                if let Ok(conn) = zbus::Connection::session().await {
-                    if let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await {
-                        let _ = proxy.switch_workspace(ws as u32).await;
-                    }
+                if let Ok(conn) = zbus::Connection::session().await
+                    && let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await
+                {
+                    let _ = proxy.switch_workspace(ws as u32).await;
                 }
                 Some(format!("🚀 {}. çalışma alanına geçildi.", ws))
             }
             DesktopAction::ToggleShowDesktop => {
                 info!("Toggling show desktop via D-Bus");
-                if let Ok(conn) = zbus::Connection::session().await {
-                    if let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await {
-                        let _ = proxy.toggle_show_desktop().await;
-                    }
+                if let Ok(conn) = zbus::Connection::session().await
+                    && let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await
+                {
+                    let _ = proxy.toggle_show_desktop().await;
                 }
                 Some("🖥️ Masaüstü görünümü değiştirildi.".into())
             }
@@ -271,7 +357,10 @@ impl ActionExecutor {
                             .map(|l| {
                                 let parts: Vec<&str> = l.split_whitespace().collect();
                                 if parts.len() >= 5 {
-                                    format!("Kullanılan: {}, Boş Alan: {}, Doluluk: {}", parts[2], parts[3], parts[4])
+                                    format!(
+                                        "Kullanılan: {}, Boş Alan: {}, Doluluk: {}",
+                                        parts[2], parts[3], parts[4]
+                                    )
                                 } else {
                                     l.to_string()
                                 }
@@ -283,10 +372,10 @@ impl ActionExecutor {
             }
             DesktopAction::ToggleOverview => {
                 info!("Toggling overview / exposé via IPC");
-                if let Ok(conn) = zbus::Connection::session().await {
-                    if let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await {
-                        let _ = proxy.toggle_overview().await;
-                    }
+                if let Ok(conn) = zbus::Connection::session().await
+                    && let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await
+                {
+                    let _ = proxy.toggle_overview().await;
                 }
                 Some("🪟 Genel bakış (Exposé) modu değiştirildi.".into())
             }
@@ -319,12 +408,12 @@ pub fn resolve_corten_bin(name: &str) -> std::path::PathBuf {
     if p.is_file() {
         return p.to_path_buf();
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return candidate;
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return candidate;
         }
     }
     if let Ok(cur) = std::env::current_dir() {
@@ -341,7 +430,9 @@ pub fn resolve_corten_bin(name: &str) -> std::path::PathBuf {
             return target_cand;
         }
     }
-    let ws_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new("."));
+    let ws_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     let ws_rel = ws_root.join("target/release").join(name);
     if ws_rel.is_file() {
         return ws_rel;
@@ -387,43 +478,82 @@ mod tests {
 
     #[test]
     fn test_intent_parsing_volume() {
-        assert_eq!(ActionExecutor::parse_intent("sesi %60 yap"), DesktopAction::SetVolume(60));
-        assert_eq!(ActionExecutor::parse_intent("sesi kapat sessiz"), DesktopAction::SetVolume(0));
+        assert_eq!(
+            ActionExecutor::parse_intent("sesi %60 yap"),
+            DesktopAction::SetVolume(60)
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("sesi kapat sessiz"),
+            DesktopAction::SetVolume(0)
+        );
     }
 
     #[test]
     fn test_intent_parsing_brightness() {
-        assert_eq!(ActionExecutor::parse_intent("ekran parlaklığını %80 yap"), DesktopAction::SetBrightness(80));
+        assert_eq!(
+            ActionExecutor::parse_intent("ekran parlaklığını %80 yap"),
+            DesktopAction::SetBrightness(80)
+        );
     }
 
     #[test]
     fn test_intent_parsing_screenshot() {
-        assert_eq!(ActionExecutor::parse_intent("ekran görüntüsü al"), DesktopAction::TakeScreenshot);
+        assert_eq!(
+            ActionExecutor::parse_intent("ekran görüntüsü al"),
+            DesktopAction::TakeScreenshot
+        );
     }
 
     #[test]
     fn test_intent_parsing_lock() {
-        assert_eq!(ActionExecutor::parse_intent("ekranı kilitle"), DesktopAction::LockScreen);
+        assert_eq!(
+            ActionExecutor::parse_intent("ekranı kilitle"),
+            DesktopAction::LockScreen
+        );
     }
 
     #[test]
     fn test_intent_parsing_night_light() {
-        assert_eq!(ActionExecutor::parse_intent("gece ışığını aç"), DesktopAction::ToggleNightLight);
+        assert_eq!(
+            ActionExecutor::parse_intent("gece ışığını aç"),
+            DesktopAction::ToggleNightLight
+        );
     }
 
     #[test]
     fn test_intent_parsing_top_memory() {
-        assert_eq!(ActionExecutor::parse_intent("en çok ram kullanan uygulama ne"), DesktopAction::TopMemoryApp);
+        assert_eq!(
+            ActionExecutor::parse_intent("en çok ram kullanan uygulama ne"),
+            DesktopAction::TopMemoryApp
+        );
     }
 
     #[test]
     fn test_intent_parsing_workspace_and_window() {
-        assert_eq!(ActionExecutor::parse_intent("3. çalışma alanına geç"), DesktopAction::SwitchWorkspace(3));
-        assert_eq!(ActionExecutor::parse_intent("masaüstü 2"), DesktopAction::SwitchWorkspace(2));
-        assert_eq!(ActionExecutor::parse_intent("masaüstünü göster"), DesktopAction::ToggleShowDesktop);
-        assert_eq!(ActionExecutor::parse_intent("pencereyi sola yasla"), DesktopAction::SnapLeft);
-        assert_eq!(ActionExecutor::parse_intent("pencereyi sağa böl"), DesktopAction::SnapRight);
-        assert_eq!(ActionExecutor::parse_intent("ekranı kapla tam ekran yap"), DesktopAction::MaximizeWindow);
+        assert_eq!(
+            ActionExecutor::parse_intent("3. çalışma alanına geç"),
+            DesktopAction::SwitchWorkspace(3)
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("masaüstü 2"),
+            DesktopAction::SwitchWorkspace(2)
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("masaüstünü göster"),
+            DesktopAction::ToggleShowDesktop
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("pencereyi sola yasla"),
+            DesktopAction::SnapLeft
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("pencereyi sağa böl"),
+            DesktopAction::SnapRight
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("ekranı kapla tam ekran yap"),
+            DesktopAction::MaximizeWindow
+        );
     }
 
     #[tokio::test]
@@ -439,11 +569,26 @@ mod tests {
 
     #[test]
     fn test_intent_parsing_launchers_and_overview() {
-        assert_eq!(ActionExecutor::parse_intent("terminal aç"), DesktopAction::LaunchTerminal);
-        assert_eq!(ActionExecutor::parse_intent("dosya yöneticisini aç"), DesktopAction::LaunchFileManager);
-        assert_eq!(ActionExecutor::parse_intent("ayarları aç"), DesktopAction::LaunchSettings);
-        assert_eq!(ActionExecutor::parse_intent("genel bakış modu"), DesktopAction::ToggleOverview);
-        assert_eq!(ActionExecutor::parse_intent("boş disk alanım ne kadar"), DesktopAction::DiskSummary);
+        assert_eq!(
+            ActionExecutor::parse_intent("terminal aç"),
+            DesktopAction::LaunchTerminal
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("dosya yöneticisini aç"),
+            DesktopAction::LaunchFileManager
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("ayarları aç"),
+            DesktopAction::LaunchSettings
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("genel bakış modu"),
+            DesktopAction::ToggleOverview
+        );
+        assert_eq!(
+            ActionExecutor::parse_intent("boş disk alanım ne kadar"),
+            DesktopAction::DiskSummary
+        );
     }
 
     #[test]

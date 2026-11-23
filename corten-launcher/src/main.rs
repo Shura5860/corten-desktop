@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tracing::{error, info};
 use zbus::connection::Builder;
 use zbus::interface;
@@ -11,20 +11,20 @@ use corten_config::{AppearanceConfig, ConfigManager};
 use corten_i18n::Language;
 use corten_theme::iced_styles::{acrylic_glass_style, input_style};
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Transition, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, Spacing, ThemeMode, Transition, Typography,
 };
-use iced::keyboard::key::Named;
 use iced::keyboard::Key;
+use iced::keyboard::key::Named;
 use iced::widget::{
-    button, column, container, horizontal_space, image, mouse_area, row, scrollable, text, text_input,
-    Space,
+    Space, button, column, container, horizontal_space, image, mouse_area, row, scrollable, text,
+    text_input,
 };
-use iced::{event, Alignment, Element, Event, Length, Subscription};
+use iced::{Alignment, Element, Event, Length, Subscription, event};
+use iced_layershell::Application;
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use iced_runtime::Task;
 
 mod calc;
@@ -39,12 +39,12 @@ fn resolve_binary(name: &str) -> Option<std::path::PathBuf> {
     if p.is_file() {
         return Some(p.to_path_buf());
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
     if let Ok(cur) = std::env::current_dir() {
@@ -61,7 +61,9 @@ fn resolve_binary(name: &str) -> Option<std::path::PathBuf> {
             return Some(target_cand);
         }
     }
-    let ws_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new("."));
+    let ws_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     let ws_rel = ws_root.join("target/release").join(name);
     if ws_rel.is_file() {
         return Some(ws_rel);
@@ -89,7 +91,10 @@ fn launch_fallback_chain(spec: &str) -> std::io::Result<()> {
         let Some(program) = argv.next() else { continue };
 
         // If candidate contains shell operators, execute via sh -c if binary exists
-        if (trimmed.contains('>') || trimmed.contains('|') || trimmed.contains('&') || trimmed.contains('~'))
+        if (trimmed.contains('>')
+            || trimmed.contains('|')
+            || trimmed.contains('&')
+            || trimmed.contains('~'))
             && resolve_binary(program).is_some()
         {
             match Command::new("sh").arg("-c").arg(trimmed).spawn() {
@@ -109,7 +114,10 @@ fn launch_fallback_chain(spec: &str) -> std::io::Result<()> {
         }
     }
     Err(last_error.unwrap_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "no executable candidate found")
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no executable candidate found",
+        )
     }))
 }
 
@@ -204,18 +212,17 @@ fn app_icon_char(entry: &AppEntry) -> char {
         || combined.contains("telegram")
     {
         Icon::BELL
-    } else if combined.contains("ai") || combined.contains("corten-ai") || combined.contains("assistant") {
+    } else if combined.contains("ai")
+        || combined.contains("corten-ai")
+        || combined.contains("assistant")
+    {
         Icon::CPU
     } else {
         Icon::APP_WINDOW
     }
 }
 
-fn render_app_icon<'a, M: 'a>(
-    entry: &AppEntry,
-    size: f32,
-    primary: iced::Color,
-) -> Element<'a, M> {
+fn render_app_icon<'a, M: 'a>(entry: &AppEntry, size: f32, primary: iced::Color) -> Element<'a, M> {
     if let Some(ref icon_path) = entry.icon_path {
         iced::widget::image(image::Handle::from_path(icon_path))
             .width(Length::Fixed(size))
@@ -223,34 +230,21 @@ fn render_app_icon<'a, M: 'a>(
             .into()
     } else {
         let sym = app_icon_char(entry);
-        container(
-            text(sym)
-                .font(LUCIDE_FONT)
-                .size(size * 0.55)
-                .color(primary),
-        )
-        .center_x(Length::Fixed(size))
-        .center_y(Length::Fixed(size))
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                primary.r,
-                primary.g,
-                primary.b,
-                0.14,
-            ))),
-            border: iced::Border {
-                color: iced::Color::from_rgba(
-                    primary.r,
-                    primary.g,
-                    primary.b,
-                    0.30,
-                ),
-                width: 1.0,
-                radius: iced::border::Radius::from(size * 0.25),
-            },
-            ..Default::default()
-        })
-        .into()
+        container(text(sym).font(LUCIDE_FONT).size(size * 0.55).color(primary))
+            .center_x(Length::Fixed(size))
+            .center_y(Length::Fixed(size))
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    primary.r, primary.g, primary.b, 0.14,
+                ))),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(primary.r, primary.g, primary.b, 0.30),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(size * 0.25),
+                },
+                ..Default::default()
+            })
+            .into()
     }
 }
 
@@ -280,22 +274,47 @@ fn render_smart_empty_state<'a>(query: &'a str, palette: Palette) -> Element<'a,
 
     let term_btn = button(
         row![
-            container(text(Icon::TERMINAL).font(LUCIDE_FONT).size(16.0).color(palette.primary.to_iced()))
-                .width(Length::Fixed(24.0))
-                .center_x(Length::Fill),
+            container(
+                text(Icon::TERMINAL)
+                    .font(LUCIDE_FONT)
+                    .size(16.0)
+                    .color(palette.primary.to_iced())
+            )
+            .width(Length::Fixed(24.0))
+            .center_x(Length::Fill),
             column![
                 row![
-                    text("Terminalde Çalıştır: ").size(12.0).color(palette.text_primary.to_iced()),
-                    text(clean_query).size(12.0).font(iced::Font::MONOSPACE).color(palette.primary.to_iced()),
-                ].spacing(4),
-                text("Komutu terminal konsolunda yürütür").size(10.0).color(palette.text_muted.to_iced()),
-            ].spacing(2).width(Length::Fill),
+                    text("Terminalde Çalıştır: ")
+                        .size(12.0)
+                        .color(palette.text_primary.to_iced()),
+                    text(clean_query)
+                        .size(12.0)
+                        .font(iced::Font::MONOSPACE)
+                        .color(palette.primary.to_iced()),
+                ]
+                .spacing(4),
+                text("Komutu terminal konsolunda yürütür")
+                    .size(10.0)
+                    .color(palette.text_muted.to_iced()),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
             container(text("[Enter]").size(10.0).color(palette.primary.to_iced()))
                 .padding([2, 6])
                 .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.15
+                    ))),
                     border: iced::Border {
-                        color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
+                        color: iced::Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.35
+                        ),
                         width: 1.0,
                         radius: iced::border::Radius::from(4.0),
                     },
@@ -303,147 +322,253 @@ fn render_smart_empty_state<'a>(query: &'a str, palette: Palette) -> Element<'a,
                 }),
         ]
         .spacing(10)
-        .align_y(Alignment::Center)
+        .align_y(Alignment::Center),
     )
     .width(Length::Fill)
     .padding([8, 12])
     .style(move |_, status| {
         let bg = match status {
             button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-            _ => iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8),
+            _ => {
+                iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8)
+            }
         };
         button::Style {
             background: Some(iced::Background::Color(bg)),
             border: iced::Border {
-                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.4),
+                color: iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.4,
+                ),
                 width: 1.0,
                 radius: iced::border::Radius::from(Radius::SM),
             },
             ..Default::default()
         }
     })
-    .on_press(Message::LaunchCommand(format!("corten-terminal -e {} || alacritty -e {} || foot {} || kitty {} || xterm -e {}", q_term, q_term, q_term, q_term, q_term)));
+    .on_press(Message::LaunchCommand(format!(
+        "corten-terminal -e {} || alacritty -e {} || foot {} || kitty {} || xterm -e {}",
+        q_term, q_term, q_term, q_term, q_term
+    )));
 
     let web_btn = button(
         row![
-            container(text(Icon::GLOBE).font(LUCIDE_FONT).size(16.0).color(palette.primary.to_iced()))
-                .width(Length::Fixed(24.0))
-                .center_x(Length::Fill),
+            container(
+                text(Icon::GLOBE)
+                    .font(LUCIDE_FONT)
+                    .size(16.0)
+                    .color(palette.primary.to_iced())
+            )
+            .width(Length::Fixed(24.0))
+            .center_x(Length::Fill),
             column![
                 row![
-                    text("Web'de Ara: ").size(12.0).color(palette.text_primary.to_iced()),
-                    text(clean_query).size(12.0).font(iced::Font::MONOSPACE).color(palette.primary.to_iced()),
-                ].spacing(4),
-                text("Varsayılan tarayıcıda arama yapar").size(10.0).color(palette.text_muted.to_iced()),
-            ].spacing(2).width(Length::Fill),
-            container(text("[Ctrl+Enter]").size(10.0).color(palette.primary.to_iced()))
-                .padding([2, 6])
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
-                    border: iced::Border {
-                        color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
-                        width: 1.0,
-                        radius: iced::border::Radius::from(4.0),
-                    },
-                    ..Default::default()
-                }),
+                    text("Web'de Ara: ")
+                        .size(12.0)
+                        .color(palette.text_primary.to_iced()),
+                    text(clean_query)
+                        .size(12.0)
+                        .font(iced::Font::MONOSPACE)
+                        .color(palette.primary.to_iced()),
+                ]
+                .spacing(4),
+                text("Varsayılan tarayıcıda arama yapar")
+                    .size(10.0)
+                    .color(palette.text_muted.to_iced()),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            container(
+                text("[Ctrl+Enter]")
+                    .size(10.0)
+                    .color(palette.primary.to_iced())
+            )
+            .padding([2, 6])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.15
+                ))),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.35
+                    ),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(4.0),
+                },
+                ..Default::default()
+            }),
         ]
         .spacing(10)
-        .align_y(Alignment::Center)
+        .align_y(Alignment::Center),
     )
     .width(Length::Fill)
     .padding([8, 12])
     .style(move |_, status| {
         let bg = match status {
             button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-            _ => iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8),
+            _ => {
+                iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8)
+            }
         };
         button::Style {
             background: Some(iced::Background::Color(bg)),
             border: iced::Border {
-                color: iced::Color::from_rgba(palette.border.r, palette.border.g, palette.border.b, 0.6),
+                color: iced::Color::from_rgba(
+                    palette.border.r,
+                    palette.border.g,
+                    palette.border.b,
+                    0.6,
+                ),
                 width: 1.0,
                 radius: iced::border::Radius::from(Radius::SM),
             },
             ..Default::default()
         }
     })
-    .on_press(Message::LaunchCommand(format!("xdg-open 'https://duckduckgo.com/?q={}'", q_web)));
+    .on_press(Message::LaunchCommand(format!(
+        "xdg-open 'https://duckduckgo.com/?q={}'",
+        q_web
+    )));
 
     let files_btn = button(
         row![
-            container(text(Icon::FOLDER).font(LUCIDE_FONT).size(16.0).color(palette.primary.to_iced()))
-                .width(Length::Fixed(24.0))
-                .center_x(Length::Fill),
+            container(
+                text(Icon::FOLDER)
+                    .font(LUCIDE_FONT)
+                    .size(16.0)
+                    .color(palette.primary.to_iced())
+            )
+            .width(Length::Fixed(24.0))
+            .center_x(Length::Fill),
             column![
                 row![
-                    text("Dosyalarda Ara: ").size(12.0).color(palette.text_primary.to_iced()),
-                    text(clean_query).size(12.0).font(iced::Font::MONOSPACE).color(palette.primary.to_iced()),
-                ].spacing(4),
-                text("Corten Files dosya yöneticisinde aratır").size(10.0).color(palette.text_muted.to_iced()),
-            ].spacing(2).width(Length::Fill),
-            container(text("[Alt+Enter]").size(10.0).color(palette.primary.to_iced()))
-                .padding([2, 6])
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
-                    border: iced::Border {
-                        color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
-                        width: 1.0,
-                        radius: iced::border::Radius::from(4.0),
-                    },
-                    ..Default::default()
-                }),
+                    text("Dosyalarda Ara: ")
+                        .size(12.0)
+                        .color(palette.text_primary.to_iced()),
+                    text(clean_query)
+                        .size(12.0)
+                        .font(iced::Font::MONOSPACE)
+                        .color(palette.primary.to_iced()),
+                ]
+                .spacing(4),
+                text("Corten Files dosya yöneticisinde aratır")
+                    .size(10.0)
+                    .color(palette.text_muted.to_iced()),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            container(
+                text("[Alt+Enter]")
+                    .size(10.0)
+                    .color(palette.primary.to_iced())
+            )
+            .padding([2, 6])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.15
+                ))),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.35
+                    ),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(4.0),
+                },
+                ..Default::default()
+            }),
         ]
         .spacing(10)
-        .align_y(Alignment::Center)
+        .align_y(Alignment::Center),
     )
     .width(Length::Fill)
     .padding([8, 12])
     .style(move |_, status| {
         let bg = match status {
             button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-            _ => iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8),
+            _ => {
+                iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.8)
+            }
         };
         button::Style {
             background: Some(iced::Background::Color(bg)),
             border: iced::Border {
-                color: iced::Color::from_rgba(palette.border.r, palette.border.g, palette.border.b, 0.6),
+                color: iced::Color::from_rgba(
+                    palette.border.r,
+                    palette.border.g,
+                    palette.border.b,
+                    0.6,
+                ),
                 width: 1.0,
                 radius: iced::border::Radius::from(Radius::SM),
             },
             ..Default::default()
         }
     })
-    .on_press(Message::LaunchCommand(format!("corten-files --search '{}'", q_files)));
+    .on_press(Message::LaunchCommand(format!(
+        "corten-files --search '{}'",
+        q_files
+    )));
 
     container(
         column![
             row![
-                container(text(Icon::SEARCH).font(LUCIDE_FONT).size(14.0).color(palette.primary.to_iced()))
-                    .padding([2, 6])
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.18))),
-                        border: iced::Border {
-                            radius: iced::border::Radius::from(4.0),
-                            ..Default::default()
-                        },
+                container(
+                    text(Icon::SEARCH)
+                        .font(LUCIDE_FONT)
+                        .size(14.0)
+                        .color(palette.primary.to_iced())
+                )
+                .padding([2, 6])
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.18
+                    ))),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(4.0),
                         ..Default::default()
-                    }),
-                text("Eşleşen uygulama bulunamadı").size(13.0).color(palette.text_primary.to_iced()),
-            ].spacing(8).align_y(Alignment::Center),
+                    },
+                    ..Default::default()
+                }),
+                text("Eşleşen uygulama bulunamadı")
+                    .size(13.0)
+                    .color(palette.text_primary.to_iced()),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
             term_btn,
             web_btn,
             files_btn,
         ]
         .spacing(8)
-        .width(Length::Fill)
+        .width(Length::Fill),
     )
     .padding(Spacing::MD)
     .width(Length::Fill)
     .into()
 }
 
-fn render_command_list<'a>(commands: &'a [QuickCommand], selected_index: usize, palette: Palette) -> Element<'a, Message> {
+fn render_command_list<'a>(
+    commands: &'a [QuickCommand],
+    selected_index: usize,
+    palette: Palette,
+) -> Element<'a, Message> {
     let mut list = column![].spacing(4).width(Length::Fill);
     for (idx, cmd) in commands.iter().enumerate() {
         let is_sel = idx == selected_index;
@@ -527,9 +652,9 @@ fn render_command_list<'a>(commands: &'a [QuickCommand], selected_index: usize, 
 use calc::{eval_math_expression, format_calc_result, parse_color_query};
 use clipboard::{ClipboardEntry, ClipboardManager};
 use config::{LauncherConfig, LauncherStyle};
-use entries::{scan_desktop_entries, AppEntry};
-use files::{find_matching_files, LauncherFileEntry};
-use projects::{scan_dev_projects, DevProject};
+use entries::{AppEntry, scan_desktop_entries};
+use files::{LauncherFileEntry, find_matching_files};
+use projects::{DevProject, scan_dev_projects};
 
 const SCROLLABLE_ID: &str = "launcher-results-scrollable";
 
@@ -552,14 +677,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         rt.block_on(async move {
             let server = LauncherServer { tx: dbus_tx };
-            if let Ok(b) = Builder::session() {
-                if let Ok(b_named) = b.name("org.corten.Launcher") {
-                    if let Ok(b_served) = b_named.serve_at("/org/corten/Launcher", server) {
-                        if let Ok(_conn) = b_served.build().await {
-                            std::future::pending::<()>().await;
-                        }
-                    }
-                }
+            if let Ok(b) = Builder::session()
+                && let Ok(b_named) = b.name("org.corten.Launcher")
+                && let Ok(b_served) = b_named.serve_at("/org/corten/Launcher", server)
+                && let Ok(_conn) = b_served.build().await
+            {
+                std::future::pending::<()>().await;
             }
         });
     });
@@ -616,13 +739,19 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         cursor_pos: (cursor_x, cursor_y),
     };
 
-    let (initial_margin, anchor, layer_size) =
-        ((0, 0, 0, 0), Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right, Some((0, 0)));
+    let (initial_margin, anchor, layer_size) = (
+        (0, 0, 0, 0),
+        Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+        Some((0, 0)),
+    );
 
     CortenLauncherApp::run(Settings {
         id: Some("corten-launcher".into()),
         flags,
-        fonts: vec![Cow::Borrowed(LUCIDE_FONT_BYTES), Cow::Borrowed(NOTO_SANS_BYTES)],
+        fonts: vec![
+            Cow::Borrowed(LUCIDE_FONT_BYTES),
+            Cow::Borrowed(NOTO_SANS_BYTES),
+        ],
         layer_settings: LayerShellSettings {
             anchor,
             layer: Layer::Overlay,
@@ -865,86 +994,486 @@ pub struct EmojiEntry {
 }
 
 pub static EMOJI_DATABASE: &[EmojiEntry] = &[
-    EmojiEntry { emoji: "😀", name: "Sırıtan Yüz", category: "İfadeler", keywords: "smile grinning happy sırıt mutlu" },
-    EmojiEntry { emoji: "😃", name: "Gülen Gözler", category: "İfadeler", keywords: "smiley happy neşeli sevinç" },
-    EmojiEntry { emoji: "😄", name: "Mutlu Yüz", category: "İfadeler", keywords: "smile laugh kahkaha" },
-    EmojiEntry { emoji: "😂", name: "Gözünden Yaş Gelen Gülen Yüz", category: "İfadeler", keywords: "joy tears laugh komik ağlama gülmek rofl lol" },
-    EmojiEntry { emoji: "🤣", name: "Gülmekten Kırılan Yüz", category: "İfadeler", keywords: "rofl rolling on the floor laughing komik" },
-    EmojiEntry { emoji: "😊", name: "Tebessüm", category: "İfadeler", keywords: "blush warm tebessüm tatlı sevimli" },
-    EmojiEntry { emoji: "😍", name: "Kalp Gözlü Yüz", category: "İfadeler", keywords: "heart eyes love aşk sevgi aşık" },
-    EmojiEntry { emoji: "🥰", name: "Kalpli Yüz", category: "İfadeler", keywords: "smiling hearts love romantik şefkat" },
-    EmojiEntry { emoji: "😎", name: "Güneş Gözlüklü Yüz", category: "İfadeler", keywords: "cool sunglasses havalı tarz karizma" },
-    EmojiEntry { emoji: "🤔", name: "Düşünen Yüz", category: "İfadeler", keywords: "thinking ponder düşünce soru merak" },
-    EmojiEntry { emoji: "🫡", name: "Asker Selamı", category: "İfadeler", keywords: "salute saygı emret tamamdır" },
-    EmojiEntry { emoji: "🤫", name: "Sessiz Ol", category: "İfadeler", keywords: "shush quiet secret sır sessiz" },
-    EmojiEntry { emoji: "🥳", name: "Parti Yüzü", category: "İfadeler", keywords: "party celebrate kutlama tebrik doğumgünü" },
-    EmojiEntry { emoji: "😴", name: "Uyuyan Yüz", category: "İfadeler", keywords: "sleeping zzz uyku yorgun" },
-    EmojiEntry { emoji: "😭", name: "Hüngür Ağlayan Yüz", category: "İfadeler", keywords: "crying tears üzgün hüzün cry" },
-    EmojiEntry { emoji: "😱", name: "Çığlık / Şaşkın Yüz", category: "İfadeler", keywords: "screaming fear korku şaşkınlık panik shock" },
-    EmojiEntry { emoji: "👍", name: "Başparmak Yukarı", category: "Hareketler", keywords: "thumbs up like onay peki süper evet good" },
-    EmojiEntry { emoji: "👎", name: "Başparmak Aşağı", category: "Hareketler", keywords: "thumbs down dislike hayır kötü red" },
-    EmojiEntry { emoji: "👏", name: "Alkış", category: "Hareketler", keywords: "applause clap alkış tebrik bravo" },
-    EmojiEntry { emoji: "🙌", name: "Eller Havaya", category: "Hareketler", keywords: "raising hands celebration yaşasın şükür" },
-    EmojiEntry { emoji: "🤝", name: "El Sıkışma", category: "Hareketler", keywords: "handshake agreement anlaşma tanışma ortaklık" },
-    EmojiEntry { emoji: "✌️", name: "Barış / Zafer İşareti", category: "Hareketler", keywords: "peace victory zafer barış" },
-    EmojiEntry { emoji: "🤞", name: "Şans Dileği", category: "Hareketler", keywords: "fingers crossed luck şans inşallah" },
-    EmojiEntry { emoji: "👊", name: "Yumruk Çakma", category: "Hareketler", keywords: "fist bump güç bro selam" },
-    EmojiEntry { emoji: "🙏", name: "Dua / Rica", category: "Hareketler", keywords: "please pray folded hands rica dua lütfen teşekkür" },
-    EmojiEntry { emoji: "👋", name: "El Sallama", category: "Hareketler", keywords: "wave waving hello bye merhaba hoşçakal selam" },
-    EmojiEntry { emoji: "❤️", name: "Kırmızı Kalp", category: "Semboller", keywords: "red heart love aşk sevgi kalp" },
-    EmojiEntry { emoji: "💖", name: "Işıldayan Kalp", category: "Semboller", keywords: "sparkling heart aşk parıltı" },
-    EmojiEntry { emoji: "💔", name: "Kırık Kalp", category: "Semboller", keywords: "broken heart üzüntü ayrılık heartbreak" },
-    EmojiEntry { emoji: "🔥", name: "Ateş", category: "Semboller", keywords: "fire flame lit alev sıcak yakıcı popüler" },
-    EmojiEntry { emoji: "✨", name: "Parıltılar", category: "Semboller", keywords: "sparkles shiny sihir parıltı parlak" },
-    EmojiEntry { emoji: "⭐", name: "Yıldız", category: "Semboller", keywords: "star favorite yıldız favori" },
-    EmojiEntry { emoji: "💯", name: "Yüz Puan", category: "Semboller", keywords: "hundred points mükemmel tam puan perfect 100" },
-    EmojiEntry { emoji: "🎉", name: "Parti Konfetisi", category: "Semboller", keywords: "tada party celebration tebrikler kutlama" },
-    EmojiEntry { emoji: "🚀", name: "Roket", category: "Teknoloji", keywords: "rocket fast hız yükseliş uzay deploy fırlatma" },
-    EmojiEntry { emoji: "🦀", name: "Rust Yengeci (Ferris)", category: "Teknoloji", keywords: "rust crab ferris yengeç cargo" },
-    EmojiEntry { emoji: "💻", name: "Dizüstü Bilgisayar", category: "Teknoloji", keywords: "laptop computer pc kod yazılım laptop bilgisayar" },
-    EmojiEntry { emoji: "🖥️", name: "Masaüstü Ekran", category: "Teknoloji", keywords: "desktop monitor ekran display" },
-    EmojiEntry { emoji: "⚙️", name: "Dişli / Ayarlar", category: "Teknoloji", keywords: "gear settings config ayarlar yapılandırma" },
-    EmojiEntry { emoji: "🛠️", name: "Alet Çantası", category: "Teknoloji", keywords: "tools hammer wrench tamir araç geliştirme" },
-    EmojiEntry { emoji: "📦", name: "Paket", category: "Teknoloji", keywords: "package box crate kargo modül" },
-    EmojiEntry { emoji: "🐛", name: "Böcek (Bug)", category: "Teknoloji", keywords: "bug error hata hata ayıklama debug" },
-    EmojiEntry { emoji: "🔒", name: "Kilit / Güvenlik", category: "Teknoloji", keywords: "lock secure security kilit gizli" },
-    EmojiEntry { emoji: "🔑", name: "Anahtar", category: "Teknoloji", keywords: "key password access anahtar token" },
-    EmojiEntry { emoji: "☕", name: "Kahve", category: "Nesneler", keywords: "coffee tea cafe mola dinlenme" },
-    EmojiEntry { emoji: "💡", name: "Ampul / Fikir", category: "Nesneler", keywords: "idea bulb light ampul fikir ilham" },
-    EmojiEntry { emoji: "🎯", name: "Hedef", category: "Nesneler", keywords: "target goal hit isabet amaç" },
-    EmojiEntry { emoji: "📌", name: "Raptiye", category: "Nesneler", keywords: "pin pushpin sabitle iliştir not" },
-    EmojiEntry { emoji: "📝", name: "Not / Belge", category: "Nesneler", keywords: "memo note document yazı metin not" },
-    EmojiEntry { emoji: "🌐", name: "Dünya / Ağ", category: "Teknoloji", keywords: "globe internet network web dünya ağ" },
-    EmojiEntry { emoji: "⚡", name: "Şimşek / Yıldırım", category: "Semboller", keywords: "zap lightning bolt şimşek elektrik hızlı" },
-    EmojiEntry { emoji: "✔️", name: "Onay İşareti", category: "Semboller", keywords: "check checkmark done tamam yapıldı onay" },
-    EmojiEntry { emoji: "❌", name: "Çarpı İşareti", category: "Semboller", keywords: "cross cancel iptal hayır hata" },
-    EmojiEntry { emoji: "⚠️", name: "Uyarı İşareti", category: "Semboller", keywords: "warning caution dikkat ikaz tehlike" },
-    EmojiEntry { emoji: "🟢", name: "Yeşil Daire", category: "Semboller", keywords: "green circle online aktif çevrimiçi" },
-    EmojiEntry { emoji: "🔴", name: "Kırmızı Daire", category: "Semboller", keywords: "red circle offline kapalı dur" },
-    EmojiEntry { emoji: "→", name: "Sağ Ok (Unicode)", category: "Matematik & Unicode", keywords: "arrow right sağ ok lambda return" },
-    EmojiEntry { emoji: "←", name: "Sol Ok (Unicode)", category: "Matematik & Unicode", keywords: "arrow left sol ok geri" },
-    EmojiEntry { emoji: "↔", name: "Çift Yönlü Ok", category: "Matematik & Unicode", keywords: "arrow left right çift yönlü" },
-    EmojiEntry { emoji: "⇒", name: "Çift Sağ Ok (İse)", category: "Matematik & Unicode", keywords: "implies fat arrow double right" },
-    EmojiEntry { emoji: "≠", name: "Eşit Değildir", category: "Matematik & Unicode", keywords: "not equal eşit değil neq" },
-    EmojiEntry { emoji: "≈", name: "Yaklaşık Eşittir", category: "Matematik & Unicode", keywords: "approx almost equal yaklaşık" },
-    EmojiEntry { emoji: "≤", name: "Küçük Eşittir", category: "Matematik & Unicode", keywords: "less than or equal küçük eşit leq" },
-    EmojiEntry { emoji: "≥", name: "Büyük Eşittir", category: "Matematik & Unicode", keywords: "greater than or equal büyük eşit geq" },
-    EmojiEntry { emoji: "±", name: "Artı Eksi", category: "Matematik & Unicode", keywords: "plus minus artı eksi" },
-    EmojiEntry { emoji: "∞", name: "Sonsuzluk", category: "Matematik & Unicode", keywords: "infinity бесконечность sonsuz" },
-    EmojiEntry { emoji: "λ", name: "Lambda", category: "Matematik & Unicode", keywords: "lambda fonksiyonel functional greek" },
-    EmojiEntry { emoji: "π", name: "Pi Sayısı", category: "Matematik & Unicode", keywords: "pi math matematik daire" },
-    EmojiEntry { emoji: "Δ", name: "Delta (Fark)", category: "Matematik & Unicode", keywords: "delta diff değişim fark" },
-    EmojiEntry { emoji: "∑", name: "Sigma (Toplam)", category: "Matematik & Unicode", keywords: "sigma sum toplam" },
-    EmojiEntry { emoji: "√", name: "Karekök", category: "Matematik & Unicode", keywords: "sqrt square root karekök" },
-    EmojiEntry { emoji: "₺", name: "Türk Lirası", category: "Para & Tipografi", keywords: "tl try turkish lira türk lirası para" },
-    EmojiEntry { emoji: "€", name: "Euro", category: "Para & Tipografi", keywords: "eur euro avro para" },
-    EmojiEntry { emoji: "£", name: "Sterlin", category: "Para & Tipografi", keywords: "gbp pound sterlin" },
-    EmojiEntry { emoji: "¥", name: "Yen / Yuan", category: "Para & Tipografi", keywords: "jpy cny yen yuan" },
-    EmojiEntry { emoji: "©", name: "Telif Hakkı (Copyright)", category: "Para & Tipografi", keywords: "copyright telif" },
-    EmojiEntry { emoji: "®", name: "Tescilli Marka", category: "Para & Tipografi", keywords: "registered trademark tescilli" },
-    EmojiEntry { emoji: "™", name: "Ticari Marka (TM)", category: "Para & Tipografi", keywords: "trademark tm marka" },
-    EmojiEntry { emoji: "—", name: "Uzun Tire (Em Dash)", category: "Para & Tipografi", keywords: "em dash uzun tire" },
-    EmojiEntry { emoji: "…", name: "Üç Nokta (Ellipsis)", category: "Para & Tipografi", keywords: "ellipsis üç nokta" },
+    EmojiEntry {
+        emoji: "😀",
+        name: "Sırıtan Yüz",
+        category: "İfadeler",
+        keywords: "smile grinning happy sırıt mutlu",
+    },
+    EmojiEntry {
+        emoji: "😃",
+        name: "Gülen Gözler",
+        category: "İfadeler",
+        keywords: "smiley happy neşeli sevinç",
+    },
+    EmojiEntry {
+        emoji: "😄",
+        name: "Mutlu Yüz",
+        category: "İfadeler",
+        keywords: "smile laugh kahkaha",
+    },
+    EmojiEntry {
+        emoji: "😂",
+        name: "Gözünden Yaş Gelen Gülen Yüz",
+        category: "İfadeler",
+        keywords: "joy tears laugh komik ağlama gülmek rofl lol",
+    },
+    EmojiEntry {
+        emoji: "🤣",
+        name: "Gülmekten Kırılan Yüz",
+        category: "İfadeler",
+        keywords: "rofl rolling on the floor laughing komik",
+    },
+    EmojiEntry {
+        emoji: "😊",
+        name: "Tebessüm",
+        category: "İfadeler",
+        keywords: "blush warm tebessüm tatlı sevimli",
+    },
+    EmojiEntry {
+        emoji: "😍",
+        name: "Kalp Gözlü Yüz",
+        category: "İfadeler",
+        keywords: "heart eyes love aşk sevgi aşık",
+    },
+    EmojiEntry {
+        emoji: "🥰",
+        name: "Kalpli Yüz",
+        category: "İfadeler",
+        keywords: "smiling hearts love romantik şefkat",
+    },
+    EmojiEntry {
+        emoji: "😎",
+        name: "Güneş Gözlüklü Yüz",
+        category: "İfadeler",
+        keywords: "cool sunglasses havalı tarz karizma",
+    },
+    EmojiEntry {
+        emoji: "🤔",
+        name: "Düşünen Yüz",
+        category: "İfadeler",
+        keywords: "thinking ponder düşünce soru merak",
+    },
+    EmojiEntry {
+        emoji: "🫡",
+        name: "Asker Selamı",
+        category: "İfadeler",
+        keywords: "salute saygı emret tamamdır",
+    },
+    EmojiEntry {
+        emoji: "🤫",
+        name: "Sessiz Ol",
+        category: "İfadeler",
+        keywords: "shush quiet secret sır sessiz",
+    },
+    EmojiEntry {
+        emoji: "🥳",
+        name: "Parti Yüzü",
+        category: "İfadeler",
+        keywords: "party celebrate kutlama tebrik doğumgünü",
+    },
+    EmojiEntry {
+        emoji: "😴",
+        name: "Uyuyan Yüz",
+        category: "İfadeler",
+        keywords: "sleeping zzz uyku yorgun",
+    },
+    EmojiEntry {
+        emoji: "😭",
+        name: "Hüngür Ağlayan Yüz",
+        category: "İfadeler",
+        keywords: "crying tears üzgün hüzün cry",
+    },
+    EmojiEntry {
+        emoji: "😱",
+        name: "Çığlık / Şaşkın Yüz",
+        category: "İfadeler",
+        keywords: "screaming fear korku şaşkınlık panik shock",
+    },
+    EmojiEntry {
+        emoji: "👍",
+        name: "Başparmak Yukarı",
+        category: "Hareketler",
+        keywords: "thumbs up like onay peki süper evet good",
+    },
+    EmojiEntry {
+        emoji: "👎",
+        name: "Başparmak Aşağı",
+        category: "Hareketler",
+        keywords: "thumbs down dislike hayır kötü red",
+    },
+    EmojiEntry {
+        emoji: "👏",
+        name: "Alkış",
+        category: "Hareketler",
+        keywords: "applause clap alkış tebrik bravo",
+    },
+    EmojiEntry {
+        emoji: "🙌",
+        name: "Eller Havaya",
+        category: "Hareketler",
+        keywords: "raising hands celebration yaşasın şükür",
+    },
+    EmojiEntry {
+        emoji: "🤝",
+        name: "El Sıkışma",
+        category: "Hareketler",
+        keywords: "handshake agreement anlaşma tanışma ortaklık",
+    },
+    EmojiEntry {
+        emoji: "✌️",
+        name: "Barış / Zafer İşareti",
+        category: "Hareketler",
+        keywords: "peace victory zafer barış",
+    },
+    EmojiEntry {
+        emoji: "🤞",
+        name: "Şans Dileği",
+        category: "Hareketler",
+        keywords: "fingers crossed luck şans inşallah",
+    },
+    EmojiEntry {
+        emoji: "👊",
+        name: "Yumruk Çakma",
+        category: "Hareketler",
+        keywords: "fist bump güç bro selam",
+    },
+    EmojiEntry {
+        emoji: "🙏",
+        name: "Dua / Rica",
+        category: "Hareketler",
+        keywords: "please pray folded hands rica dua lütfen teşekkür",
+    },
+    EmojiEntry {
+        emoji: "👋",
+        name: "El Sallama",
+        category: "Hareketler",
+        keywords: "wave waving hello bye merhaba hoşçakal selam",
+    },
+    EmojiEntry {
+        emoji: "❤️",
+        name: "Kırmızı Kalp",
+        category: "Semboller",
+        keywords: "red heart love aşk sevgi kalp",
+    },
+    EmojiEntry {
+        emoji: "💖",
+        name: "Işıldayan Kalp",
+        category: "Semboller",
+        keywords: "sparkling heart aşk parıltı",
+    },
+    EmojiEntry {
+        emoji: "💔",
+        name: "Kırık Kalp",
+        category: "Semboller",
+        keywords: "broken heart üzüntü ayrılık heartbreak",
+    },
+    EmojiEntry {
+        emoji: "🔥",
+        name: "Ateş",
+        category: "Semboller",
+        keywords: "fire flame lit alev sıcak yakıcı popüler",
+    },
+    EmojiEntry {
+        emoji: "✨",
+        name: "Parıltılar",
+        category: "Semboller",
+        keywords: "sparkles shiny sihir parıltı parlak",
+    },
+    EmojiEntry {
+        emoji: "⭐",
+        name: "Yıldız",
+        category: "Semboller",
+        keywords: "star favorite yıldız favori",
+    },
+    EmojiEntry {
+        emoji: "💯",
+        name: "Yüz Puan",
+        category: "Semboller",
+        keywords: "hundred points mükemmel tam puan perfect 100",
+    },
+    EmojiEntry {
+        emoji: "🎉",
+        name: "Parti Konfetisi",
+        category: "Semboller",
+        keywords: "tada party celebration tebrikler kutlama",
+    },
+    EmojiEntry {
+        emoji: "🚀",
+        name: "Roket",
+        category: "Teknoloji",
+        keywords: "rocket fast hız yükseliş uzay deploy fırlatma",
+    },
+    EmojiEntry {
+        emoji: "🦀",
+        name: "Rust Yengeci (Ferris)",
+        category: "Teknoloji",
+        keywords: "rust crab ferris yengeç cargo",
+    },
+    EmojiEntry {
+        emoji: "💻",
+        name: "Dizüstü Bilgisayar",
+        category: "Teknoloji",
+        keywords: "laptop computer pc kod yazılım laptop bilgisayar",
+    },
+    EmojiEntry {
+        emoji: "🖥️",
+        name: "Masaüstü Ekran",
+        category: "Teknoloji",
+        keywords: "desktop monitor ekran display",
+    },
+    EmojiEntry {
+        emoji: "⚙️",
+        name: "Dişli / Ayarlar",
+        category: "Teknoloji",
+        keywords: "gear settings config ayarlar yapılandırma",
+    },
+    EmojiEntry {
+        emoji: "🛠️",
+        name: "Alet Çantası",
+        category: "Teknoloji",
+        keywords: "tools hammer wrench tamir araç geliştirme",
+    },
+    EmojiEntry {
+        emoji: "📦",
+        name: "Paket",
+        category: "Teknoloji",
+        keywords: "package box crate kargo modül",
+    },
+    EmojiEntry {
+        emoji: "🐛",
+        name: "Böcek (Bug)",
+        category: "Teknoloji",
+        keywords: "bug error hata hata ayıklama debug",
+    },
+    EmojiEntry {
+        emoji: "🔒",
+        name: "Kilit / Güvenlik",
+        category: "Teknoloji",
+        keywords: "lock secure security kilit gizli",
+    },
+    EmojiEntry {
+        emoji: "🔑",
+        name: "Anahtar",
+        category: "Teknoloji",
+        keywords: "key password access anahtar token",
+    },
+    EmojiEntry {
+        emoji: "☕",
+        name: "Kahve",
+        category: "Nesneler",
+        keywords: "coffee tea cafe mola dinlenme",
+    },
+    EmojiEntry {
+        emoji: "💡",
+        name: "Ampul / Fikir",
+        category: "Nesneler",
+        keywords: "idea bulb light ampul fikir ilham",
+    },
+    EmojiEntry {
+        emoji: "🎯",
+        name: "Hedef",
+        category: "Nesneler",
+        keywords: "target goal hit isabet amaç",
+    },
+    EmojiEntry {
+        emoji: "📌",
+        name: "Raptiye",
+        category: "Nesneler",
+        keywords: "pin pushpin sabitle iliştir not",
+    },
+    EmojiEntry {
+        emoji: "📝",
+        name: "Not / Belge",
+        category: "Nesneler",
+        keywords: "memo note document yazı metin not",
+    },
+    EmojiEntry {
+        emoji: "🌐",
+        name: "Dünya / Ağ",
+        category: "Teknoloji",
+        keywords: "globe internet network web dünya ağ",
+    },
+    EmojiEntry {
+        emoji: "⚡",
+        name: "Şimşek / Yıldırım",
+        category: "Semboller",
+        keywords: "zap lightning bolt şimşek elektrik hızlı",
+    },
+    EmojiEntry {
+        emoji: "✔️",
+        name: "Onay İşareti",
+        category: "Semboller",
+        keywords: "check checkmark done tamam yapıldı onay",
+    },
+    EmojiEntry {
+        emoji: "❌",
+        name: "Çarpı İşareti",
+        category: "Semboller",
+        keywords: "cross cancel iptal hayır hata",
+    },
+    EmojiEntry {
+        emoji: "⚠️",
+        name: "Uyarı İşareti",
+        category: "Semboller",
+        keywords: "warning caution dikkat ikaz tehlike",
+    },
+    EmojiEntry {
+        emoji: "🟢",
+        name: "Yeşil Daire",
+        category: "Semboller",
+        keywords: "green circle online aktif çevrimiçi",
+    },
+    EmojiEntry {
+        emoji: "🔴",
+        name: "Kırmızı Daire",
+        category: "Semboller",
+        keywords: "red circle offline kapalı dur",
+    },
+    EmojiEntry {
+        emoji: "→",
+        name: "Sağ Ok (Unicode)",
+        category: "Matematik & Unicode",
+        keywords: "arrow right sağ ok lambda return",
+    },
+    EmojiEntry {
+        emoji: "←",
+        name: "Sol Ok (Unicode)",
+        category: "Matematik & Unicode",
+        keywords: "arrow left sol ok geri",
+    },
+    EmojiEntry {
+        emoji: "↔",
+        name: "Çift Yönlü Ok",
+        category: "Matematik & Unicode",
+        keywords: "arrow left right çift yönlü",
+    },
+    EmojiEntry {
+        emoji: "⇒",
+        name: "Çift Sağ Ok (İse)",
+        category: "Matematik & Unicode",
+        keywords: "implies fat arrow double right",
+    },
+    EmojiEntry {
+        emoji: "≠",
+        name: "Eşit Değildir",
+        category: "Matematik & Unicode",
+        keywords: "not equal eşit değil neq",
+    },
+    EmojiEntry {
+        emoji: "≈",
+        name: "Yaklaşık Eşittir",
+        category: "Matematik & Unicode",
+        keywords: "approx almost equal yaklaşık",
+    },
+    EmojiEntry {
+        emoji: "≤",
+        name: "Küçük Eşittir",
+        category: "Matematik & Unicode",
+        keywords: "less than or equal küçük eşit leq",
+    },
+    EmojiEntry {
+        emoji: "≥",
+        name: "Büyük Eşittir",
+        category: "Matematik & Unicode",
+        keywords: "greater than or equal büyük eşit geq",
+    },
+    EmojiEntry {
+        emoji: "±",
+        name: "Artı Eksi",
+        category: "Matematik & Unicode",
+        keywords: "plus minus artı eksi",
+    },
+    EmojiEntry {
+        emoji: "∞",
+        name: "Sonsuzluk",
+        category: "Matematik & Unicode",
+        keywords: "infinity бесконечность sonsuz",
+    },
+    EmojiEntry {
+        emoji: "λ",
+        name: "Lambda",
+        category: "Matematik & Unicode",
+        keywords: "lambda fonksiyonel functional greek",
+    },
+    EmojiEntry {
+        emoji: "π",
+        name: "Pi Sayısı",
+        category: "Matematik & Unicode",
+        keywords: "pi math matematik daire",
+    },
+    EmojiEntry {
+        emoji: "Δ",
+        name: "Delta (Fark)",
+        category: "Matematik & Unicode",
+        keywords: "delta diff değişim fark",
+    },
+    EmojiEntry {
+        emoji: "∑",
+        name: "Sigma (Toplam)",
+        category: "Matematik & Unicode",
+        keywords: "sigma sum toplam",
+    },
+    EmojiEntry {
+        emoji: "√",
+        name: "Karekök",
+        category: "Matematik & Unicode",
+        keywords: "sqrt square root karekök",
+    },
+    EmojiEntry {
+        emoji: "₺",
+        name: "Türk Lirası",
+        category: "Para & Tipografi",
+        keywords: "tl try turkish lira türk lirası para",
+    },
+    EmojiEntry {
+        emoji: "€",
+        name: "Euro",
+        category: "Para & Tipografi",
+        keywords: "eur euro avro para",
+    },
+    EmojiEntry {
+        emoji: "£",
+        name: "Sterlin",
+        category: "Para & Tipografi",
+        keywords: "gbp pound sterlin",
+    },
+    EmojiEntry {
+        emoji: "¥",
+        name: "Yen / Yuan",
+        category: "Para & Tipografi",
+        keywords: "jpy cny yen yuan",
+    },
+    EmojiEntry {
+        emoji: "©",
+        name: "Telif Hakkı (Copyright)",
+        category: "Para & Tipografi",
+        keywords: "copyright telif",
+    },
+    EmojiEntry {
+        emoji: "®",
+        name: "Tescilli Marka",
+        category: "Para & Tipografi",
+        keywords: "registered trademark tescilli",
+    },
+    EmojiEntry {
+        emoji: "™",
+        name: "Ticari Marka (TM)",
+        category: "Para & Tipografi",
+        keywords: "trademark tm marka",
+    },
+    EmojiEntry {
+        emoji: "—",
+        name: "Uzun Tire (Em Dash)",
+        category: "Para & Tipografi",
+        keywords: "em dash uzun tire",
+    },
+    EmojiEntry {
+        emoji: "…",
+        name: "Üç Nokta (Ellipsis)",
+        category: "Para & Tipografi",
+        keywords: "ellipsis üç nokta",
+    },
 ];
 
 pub struct CortenLauncherApp {
@@ -996,12 +1525,14 @@ impl Application for CortenLauncherApp {
             .map(|rx| Arc::new(tokio::sync::Mutex::new(rx)));
 
         let all_entries = scan_desktop_entries();
-        let initial_limit = if config.style == LauncherStyle::Dashboard { 200 } else if config.style == LauncherStyle::StartMenu { 120 } else { config.max_results };
-        let filtered_entries = all_entries
-            .iter()
-            .take(initial_limit)
-            .cloned()
-            .collect();
+        let initial_limit = if config.style == LauncherStyle::Dashboard {
+            200
+        } else if config.style == LauncherStyle::StartMenu {
+            120
+        } else {
+            config.max_results
+        };
+        let filtered_entries = all_entries.iter().take(initial_limit).cloned().collect();
 
         let all_projects = scan_dev_projects();
         let filtered_projects = all_projects
@@ -1015,17 +1546,24 @@ impl Application for CortenLauncherApp {
             iced::font::load(LUCIDE_FONT_BYTES).map(|_| Message::SearchInputChanged(String::new()));
 
         let stay_open = flags.stay_open;
-        let (language, active_patina, theme_mode) = ConfigManager::<AppearanceConfig>::load_or_default("appearance")
-            .map(|c| {
-                let pat = PatinaVariant::from_code(&c.get().patina);
-                let lang = Language::from_code(&c.get().language);
-                let mode = match c.get().theme_mode {
-                    corten_config::ThemeModeChoice::Light => ThemeMode::Light,
-                    _ => ThemeMode::Dark,
-                };
-                (lang, pat, mode)
-            })
-            .unwrap_or_else(|_| (Language::detect_system(), PatinaVariant::Rust, ThemeMode::Dark));
+        let (language, active_patina, theme_mode) =
+            ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                .map(|c| {
+                    let pat = PatinaVariant::from_code(&c.get().patina);
+                    let lang = Language::from_code(&c.get().language);
+                    let mode = match c.get().theme_mode {
+                        corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                        _ => ThemeMode::Dark,
+                    };
+                    (lang, pat, mode)
+                })
+                .unwrap_or_else(|_| {
+                    (
+                        Language::detect_system(),
+                        PatinaVariant::Rust,
+                        ThemeMode::Dark,
+                    )
+                });
 
         (
             Self {
@@ -1126,7 +1664,11 @@ impl Application for CortenLauncherApp {
                     self.mode = LauncherMode::Applications;
                     self.search_query = query.trim_start_matches(":app").trim().to_string();
                     self.filter_entries();
-                } else if (query.starts_with(":emoji") || query.starts_with(":e ") || query.starts_with(". ")) && self.mode != LauncherMode::Emoji {
+                } else if (query.starts_with(":emoji")
+                    || query.starts_with(":e ")
+                    || query.starts_with(". "))
+                    && self.mode != LauncherMode::Emoji
+                {
                     self.mode = LauncherMode::Emoji;
                     self.search_query = query
                         .trim_start_matches(":emoji")
@@ -1135,13 +1677,33 @@ impl Application for CortenLauncherApp {
                         .trim()
                         .to_string();
                     self.filter_emojis();
-                } else if (query.starts_with(":notes") || query.starts_with(":note") || query.starts_with(":n ")) && self.mode != LauncherMode::Notes {
+                } else if (query.starts_with(":notes")
+                    || query.starts_with(":note")
+                    || query.starts_with(":n "))
+                    && self.mode != LauncherMode::Notes
+                {
                     self.mode = LauncherMode::Notes;
-                    self.search_query = query.trim_start_matches(":notes").trim_start_matches(":note").trim_start_matches(":n ").trim().to_string();
+                    self.search_query = query
+                        .trim_start_matches(":notes")
+                        .trim_start_matches(":note")
+                        .trim_start_matches(":n ")
+                        .trim()
+                        .to_string();
                     self.load_notes_entries();
-                } else if (query.starts_with(":keys") || query.starts_with(":cheat") || query.starts_with(":help") || query.starts_with(":k ")) && self.mode != LauncherMode::CheatSheet {
+                } else if (query.starts_with(":keys")
+                    || query.starts_with(":cheat")
+                    || query.starts_with(":help")
+                    || query.starts_with(":k "))
+                    && self.mode != LauncherMode::CheatSheet
+                {
                     self.mode = LauncherMode::CheatSheet;
-                    self.search_query = query.trim_start_matches(":keys").trim_start_matches(":cheat").trim_start_matches(":help").trim_start_matches(":k ").trim().to_string();
+                    self.search_query = query
+                        .trim_start_matches(":keys")
+                        .trim_start_matches(":cheat")
+                        .trim_start_matches(":help")
+                        .trim_start_matches(":k ")
+                        .trim()
+                        .to_string();
                     self.selected_index = 0;
                 } else {
                     self.search_query = query;
@@ -1322,7 +1884,11 @@ impl Application for CortenLauncherApp {
                     }
 
                     if self.search_query.starts_with('?') || self.search_query.starts_with("ai:") {
-                        let prompt = self.search_query.trim_start_matches('?').trim_start_matches("ai:").trim();
+                        let prompt = self
+                            .search_query
+                            .trim_start_matches('?')
+                            .trim_start_matches("ai:")
+                            .trim();
                         let _ = Command::new("corten-ai").args(["--prompt", prompt]).spawn();
                         if !self.stay_open {
                             self.should_exit = true;
@@ -1336,7 +1902,10 @@ impl Application for CortenLauncherApp {
                         && !self.search_query.trim().is_empty()
                     {
                         let q = self.search_query.trim();
-                        let term_cmd = format!("corten-terminal -e {} || alacritty -e {} || foot {} || kitty {} || xterm -e {}", q, q, q, q, q);
+                        let term_cmd = format!(
+                            "corten-terminal -e {} || alacritty -e {} || foot {} || kitty {} || xterm -e {}",
+                            q, q, q, q, q
+                        );
                         let _ = launch_fallback_chain(&term_cmd);
                         if !self.stay_open {
                             self.should_exit = true;
@@ -1345,10 +1914,10 @@ impl Application for CortenLauncherApp {
                     }
 
                     let app_offset = if self.calc_result.is_some() { 1 } else { 0 };
-                    if let Some((_, ref res)) = self.calc_result {
-                        if self.selected_index == 0 {
-                            return Task::done(Message::CopyCalcResult(res.clone()));
-                        }
+                    if let Some((_, ref res)) = self.calc_result
+                        && self.selected_index == 0
+                    {
+                        return Task::done(Message::CopyCalcResult(res.clone()));
                     }
 
                     let app_idx = self.selected_index.saturating_sub(app_offset);
@@ -1434,11 +2003,11 @@ impl Application for CortenLauncherApp {
                             .stdin(std::process::Stdio::piped())
                             .spawn()
                             .ok();
-                        if let Some(ref mut c) = child {
-                            if let Some(ref mut stdin) = c.stdin {
-                                use std::io::Write;
-                                let _ = stdin.write_all(clean.as_bytes());
-                            }
+                        if let Some(ref mut c) = child
+                            && let Some(ref mut stdin) = c.stdin
+                        {
+                            use std::io::Write;
+                            let _ = stdin.write_all(clean.as_bytes());
                         }
                         self.status_message = Some("📋 Not panoya kopyalandı!".into());
                         if !self.stay_open {
@@ -1510,19 +2079,17 @@ impl Application for CortenLauncherApp {
                 self.should_exit = true;
             }
             Message::NoOp => {}
-            Message::LaunchCommand(cmd) => {
-                match launch_fallback_chain(&cmd) {
-                    Ok(_) => {
-                        if !self.stay_open {
-                            self.should_exit = true;
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to launch command '{}': {}", cmd, e);
-                        self.status_message = Some(format!("Başlatma başarısız: {}", e));
+            Message::LaunchCommand(cmd) => match launch_fallback_chain(&cmd) {
+                Ok(_) => {
+                    if !self.stay_open {
+                        self.should_exit = true;
                     }
                 }
-            }
+                Err(e) => {
+                    error!("Failed to launch command '{}': {}", cmd, e);
+                    self.status_message = Some(format!("Başlatma başarısız: {}", e));
+                }
+            },
             Message::IpcCommand(cmd) => match cmd {
                 LauncherIpcCommand::Toggle => {
                     self.is_visible = !self.is_visible;
@@ -1537,7 +2104,9 @@ impl Application for CortenLauncherApp {
                     self.should_exit = true;
                 }
                 LauncherIpcCommand::ReloadConfig => {
-                    info!("Launcher: ReloadConfig received, reading from ~/.config/corten/launcher.toml");
+                    info!(
+                        "Launcher: ReloadConfig received, reading from ~/.config/corten/launcher.toml"
+                    );
                     if let Ok(new_cfg) =
                         ConfigManager::<LauncherConfig>::load_or_default("launcher")
                     {
@@ -1583,8 +2152,9 @@ impl Application for CortenLauncherApp {
                         scrollable::RelativeOffset::START,
                     );
                 }
-                ref k if matches!(k, Key::Named(Named::ArrowDown))
-                    || matches!(k, Key::Character(ref c) if (c == "j" || c == "J" || c == "n" || c == "N") && modifiers.control()) =>
+                ref k
+                    if matches!(k, Key::Named(Named::ArrowDown))
+                        || matches!(k, Key::Character(c) if (c == "j" || c == "J" || c == "n" || c == "N") && modifiers.control()) =>
                 {
                     let total = self.current_count();
                     if total > 0 {
@@ -1602,8 +2172,9 @@ impl Application for CortenLauncherApp {
                         );
                     }
                 }
-                ref k if matches!(k, Key::Named(Named::ArrowUp))
-                    || matches!(k, Key::Character(ref c) if (c == "k" || c == "K" || c == "p" || c == "P") && modifiers.control()) =>
+                ref k
+                    if matches!(k, Key::Named(Named::ArrowUp))
+                        || matches!(k, Key::Character(c) if (c == "k" || c == "K" || c == "p" || c == "P") && modifiers.control()) =>
                 {
                     let total = self.current_count();
                     if total > 0 {
@@ -1800,7 +2371,12 @@ impl Application for CortenLauncherApp {
                 .padding([4, 10])
                 .style(move |_, status| {
                     let bg = if is_active {
-                        iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.18)
+                        iced::Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.18,
+                        )
                     } else {
                         match status {
                             button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10),
@@ -1811,7 +2387,12 @@ impl Application for CortenLauncherApp {
                         background: Some(iced::Background::Color(bg)),
                         border: iced::Border {
                             color: if is_active {
-                                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.4)
+                                iced::Color::from_rgba(
+                                    palette.primary.r,
+                                    palette.primary.g,
+                                    palette.primary.b,
+                                    0.4,
+                                )
                             } else {
                                 iced::Color::TRANSPARENT
                             },
@@ -1848,12 +2429,36 @@ impl Application for CortenLauncherApp {
             };
 
             let categories_row = row![
-                cat_pill("Tümü", AppCategory::All, self.selected_category == AppCategory::All),
-                cat_pill("Geliştirme", AppCategory::Development, self.selected_category == AppCategory::Development),
-                cat_pill("Grafik", AppCategory::Media, self.selected_category == AppCategory::Media),
-                cat_pill("İnternet", AppCategory::Internet, self.selected_category == AppCategory::Internet),
-                cat_pill("Ofis", AppCategory::Office, self.selected_category == AppCategory::Office),
-                cat_pill("Sistem", AppCategory::System, self.selected_category == AppCategory::System),
+                cat_pill(
+                    "Tümü",
+                    AppCategory::All,
+                    self.selected_category == AppCategory::All
+                ),
+                cat_pill(
+                    "Geliştirme",
+                    AppCategory::Development,
+                    self.selected_category == AppCategory::Development
+                ),
+                cat_pill(
+                    "Grafik",
+                    AppCategory::Media,
+                    self.selected_category == AppCategory::Media
+                ),
+                cat_pill(
+                    "İnternet",
+                    AppCategory::Internet,
+                    self.selected_category == AppCategory::Internet
+                ),
+                cat_pill(
+                    "Ofis",
+                    AppCategory::Office,
+                    self.selected_category == AppCategory::Office
+                ),
+                cat_pill(
+                    "Sistem",
+                    AppCategory::System,
+                    self.selected_category == AppCategory::System
+                ),
                 mode_pill("Emoji (.)", ". "),
                 mode_pill("Komut (>)", "> "),
                 mode_pill("AI (?)", "? "),
@@ -1922,7 +2527,11 @@ impl Application for CortenLauncherApp {
             }
 
             if self.search_query.starts_with('>') {
-                apps_list = apps_list.push(render_command_list(&self.filtered_commands, self.selected_index, palette));
+                apps_list = apps_list.push(render_command_list(
+                    &self.filtered_commands,
+                    self.selected_index,
+                    palette,
+                ));
             } else if self.filtered_entries.is_empty() && self.calc_result.is_none() {
                 apps_list = apps_list.push(render_smart_empty_state(&self.search_query, palette));
             } else {
@@ -2015,7 +2624,9 @@ impl Application for CortenLauncherApp {
                             .font(LUCIDE_FONT)
                             .size(14.0)
                             .color(palette.text_muted.to_iced()),
-                        text("Ayarlar").size(12.0).color(palette.text_muted.to_iced()),
+                        text("Ayarlar")
+                            .size(12.0)
+                            .color(palette.text_muted.to_iced()),
                     ]
                     .spacing(6)
                     .align_y(Alignment::Center),
@@ -2042,7 +2653,9 @@ impl Application for CortenLauncherApp {
                             .font(LUCIDE_FONT)
                             .size(14.0)
                             .color(palette.primary.to_iced()),
-                        text("Izgara").size(12.0).color(palette.text_primary.to_iced()),
+                        text("Izgara")
+                            .size(12.0)
+                            .color(palette.text_primary.to_iced()),
                     ]
                     .spacing(6)
                     .align_y(Alignment::Center),
@@ -2052,12 +2665,22 @@ impl Application for CortenLauncherApp {
                 .style(move |_, status| {
                     let bg = match status {
                         button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
-                        _ => iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.10),
+                        _ => iced::Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.10,
+                        ),
                     };
                     button::Style {
                         background: Some(bg.into()),
                         border: iced::Border {
-                            color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.25),
+                            color: iced::Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.25,
+                            ),
                             width: 1.0,
                             radius: iced::border::Radius::from(6.0),
                         },
@@ -2070,7 +2693,9 @@ impl Application for CortenLauncherApp {
                             .font(LUCIDE_FONT)
                             .size(13.0)
                             .color(palette.primary.to_iced()),
-                        text("Spotlight").size(12.0).color(palette.text_primary.to_iced()),
+                        text("Spotlight")
+                            .size(12.0)
+                            .color(palette.text_primary.to_iced()),
                     ]
                     .spacing(6)
                     .align_y(Alignment::Center),
@@ -2190,8 +2815,14 @@ impl Application for CortenLauncherApp {
                         }),
                         Space::new(Length::Fill, Length::Fill),
                         row![
-                            text(Icon::ARROW_UP).font(LUCIDE_FONT).size(10.0).color(palette.text_muted.to_iced()),
-                            text(Icon::ARROW_DOWN).font(LUCIDE_FONT).size(10.0).color(palette.text_muted.to_iced()),
+                            text(Icon::ARROW_UP)
+                                .font(LUCIDE_FONT)
+                                .size(10.0)
+                                .color(palette.text_muted.to_iced()),
+                            text(Icon::ARROW_DOWN)
+                                .font(LUCIDE_FONT)
+                                .size(10.0)
+                                .color(palette.text_muted.to_iced()),
                             text("Seç • Enter Aç")
                                 .size(10.0)
                                 .color(palette.text_muted.to_iced()),
@@ -2442,11 +3073,13 @@ impl Application for CortenLauncherApp {
             .on_press(Message::SwitchMode(LauncherMode::Emoji)),
             button(
                 row![
-                    text(Icon::CLIPBOARD).font(LUCIDE_FONT).size(13.0).color(if self.mode == LauncherMode::Notes {
-                        palette.primary.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
+                    text(Icon::CLIPBOARD).font(LUCIDE_FONT).size(13.0).color(
+                        if self.mode == LauncherMode::Notes {
+                            palette.primary.to_iced()
+                        } else {
+                            palette.text_muted.to_iced()
+                        }
+                    ),
                     text("Notlar").size(Typography::BODY_SM)
                 ]
                 .spacing(Spacing::XXS)
@@ -2607,7 +3240,10 @@ impl Application for CortenLauncherApp {
             let quick_chip = |icon: char, label: &'static str, msg: Message| {
                 button(
                     row![
-                        text(icon).font(LUCIDE_FONT).size(11.0).color(palette.primary.to_iced()),
+                        text(icon)
+                            .font(LUCIDE_FONT)
+                            .size(11.0)
+                            .color(palette.primary.to_iced()),
                         text(label).size(10.5).color(palette.text_primary.to_iced()),
                     ]
                     .spacing(4)
@@ -2633,10 +3269,26 @@ impl Application for CortenLauncherApp {
             };
 
             let quick_chips_row = row![
-                quick_chip(Icon::ZAP, "AI Sor (?)", Message::SearchInputChanged("?".into())),
-                quick_chip(Icon::CLIPBOARD, "Pano", Message::SwitchMode(LauncherMode::Clipboard)),
-                quick_chip(Icon::CODE, "Projeler", Message::SwitchMode(LauncherMode::Projects)),
-                quick_chip(Icon::SMILE, "Emojiler", Message::SwitchMode(LauncherMode::Emoji)),
+                quick_chip(
+                    Icon::ZAP,
+                    "AI Sor (?)",
+                    Message::SearchInputChanged("?".into())
+                ),
+                quick_chip(
+                    Icon::CLIPBOARD,
+                    "Pano",
+                    Message::SwitchMode(LauncherMode::Clipboard)
+                ),
+                quick_chip(
+                    Icon::CODE,
+                    "Projeler",
+                    Message::SwitchMode(LauncherMode::Projects)
+                ),
+                quick_chip(
+                    Icon::SMILE,
+                    "Emojiler",
+                    Message::SwitchMode(LauncherMode::Emoji)
+                ),
             ]
             .spacing(6)
             .align_y(Alignment::Center);
@@ -2691,13 +3343,13 @@ impl Application for CortenLauncherApp {
                             ]
                             .spacing(2.0)
                             .width(Length::Fill),
-                            text("Panoya Kopyala ↵")
-                                .size(Typography::CAPTION)
-                                .color(if is_selected {
+                            text("Panoya Kopyala ↵").size(Typography::CAPTION).color(
+                                if is_selected {
                                     palette.primary.to_iced()
                                 } else {
                                     palette.text_muted.to_iced()
-                                }),
+                                }
+                            ),
                         ]
                         .spacing(Spacing::SM)
                         .align_y(Alignment::Center)
@@ -2738,18 +3390,19 @@ impl Application for CortenLauncherApp {
 
                     for fav in self.filtered_entries.iter().take(3) {
                         let fav_clone = fav.clone();
-                        let fav_icon: Element<'_, Self::Message> = if let Some(ref ip) = fav.icon_path {
-                            iced::widget::image(image::Handle::from_path(ip))
-                                .width(Length::Fixed(16.0))
-                                .height(Length::Fixed(16.0))
-                                .into()
-                        } else {
-                            text(app_icon_char(fav))
-                                .font(LUCIDE_FONT)
-                                .size(12.0)
-                                .color(palette.primary.to_iced())
-                                .into()
-                        };
+                        let fav_icon: Element<'_, Self::Message> =
+                            if let Some(ref ip) = fav.icon_path {
+                                iced::widget::image(image::Handle::from_path(ip))
+                                    .width(Length::Fixed(16.0))
+                                    .height(Length::Fixed(16.0))
+                                    .into()
+                            } else {
+                                text(app_icon_char(fav))
+                                    .font(LUCIDE_FONT)
+                                    .size(12.0)
+                                    .color(palette.primary.to_iced())
+                                    .into()
+                            };
                         let fav_btn = button(
                             row![
                                 fav_icon,
@@ -2762,7 +3415,9 @@ impl Application for CortenLauncherApp {
                         )
                         .padding([3, 8])
                         .style(move |_, _| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                1.0, 1.0, 1.0, 0.06,
+                            ))),
                             border: iced::Border {
                                 radius: iced::border::Radius::from(6.0),
                                 ..Default::default()
@@ -2772,18 +3427,22 @@ impl Application for CortenLauncherApp {
                         .on_press(Message::LaunchSpecificApp(fav_clone));
                         fav_row = fav_row.push(fav_btn);
                     }
-                    results_column = results_column.push(
-                        container(column![fav_label, fav_row].spacing(5)).padding([4, 6]),
-                    );
+                    results_column = results_column
+                        .push(container(column![fav_label, fav_row].spacing(5)).padding([4, 6]));
                 }
 
                 if self.search_query.starts_with('>') {
-                    results_column = results_column.push(render_command_list(&self.filtered_commands, self.selected_index, palette));
+                    results_column = results_column.push(render_command_list(
+                        &self.filtered_commands,
+                        self.selected_index,
+                        palette,
+                    ));
                 } else if self.filtered_entries.is_empty()
                     && self.calc_result.is_none()
                     && self.filtered_files.is_empty()
                 {
-                    results_column = results_column.push(render_smart_empty_state(&self.search_query, palette));
+                    results_column =
+                        results_column.push(render_smart_empty_state(&self.search_query, palette));
                 } else {
                     for (idx, entry) in self.filtered_entries.iter().enumerate() {
                         let is_selected = (idx + app_offset) == self.selected_index;
@@ -3298,14 +3957,13 @@ impl Application for CortenLauncherApp {
 
                         let row_item = button(
                             row![
-                                text(Icon::CLIPBOARD)
-                                    .font(LUCIDE_FONT)
-                                    .size(16.0)
-                                    .color(if is_selected {
+                                text(Icon::CLIPBOARD).font(LUCIDE_FONT).size(16.0).color(
+                                    if is_selected {
                                         palette.primary.to_iced()
                                     } else {
                                         palette.text_muted.to_iced()
-                                    }),
+                                    }
+                                ),
                                 column![
                                     text(clean_line)
                                         .size(Typography::BODY)
@@ -3368,13 +4026,20 @@ impl Application for CortenLauncherApp {
                             container(
                                 text(part.trim())
                                     .size(11.0)
-                                    .color(palette.primary.to_iced())
+                                    .color(palette.primary.to_iced()),
                             )
                             .padding([2, 6])
                             .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    1.0, 1.0, 1.0, 0.08,
+                                ))),
                                 border: iced::Border {
-                                    color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.3),
+                                    color: iced::Color::from_rgba(
+                                        palette.primary.r,
+                                        palette.primary.g,
+                                        palette.primary.b,
+                                        0.3,
+                                    ),
                                     width: 1.0,
                                     radius: iced::border::Radius::from(4.0),
                                 },
@@ -3387,12 +4052,13 @@ impl Application for CortenLauncherApp {
 
                         let row_item = button(
                             row![
-                                container(
-                                    text(sc.icon_char)
-                                        .font(LUCIDE_FONT)
-                                        .size(16.0)
-                                        .color(if is_selected { palette.primary.to_iced() } else { palette.text_muted.to_iced() })
-                                )
+                                container(text(sc.icon_char).font(LUCIDE_FONT).size(16.0).color(
+                                    if is_selected {
+                                        palette.primary.to_iced()
+                                    } else {
+                                        palette.text_muted.to_iced()
+                                    }
+                                ))
                                 .padding([4, 6]),
                                 chords_row,
                                 column![
@@ -3412,7 +4078,9 @@ impl Application for CortenLauncherApp {
                                 )
                                 .padding([2, 6])
                                 .style(|_| container::Style {
-                                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04))),
+                                    background: Some(iced::Background::Color(
+                                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04)
+                                    )),
                                     border: iced::Border {
                                         radius: iced::border::Radius::from(4.0),
                                         ..Default::default()
@@ -3470,14 +4138,13 @@ impl Application for CortenLauncherApp {
 
                     let row_item = button(
                         row![
-                            text(item.icon_char)
-                                .font(LUCIDE_FONT)
-                                .size(16.0)
-                                .color(if is_selected {
+                            text(item.icon_char).font(LUCIDE_FONT).size(16.0).color(
+                                if is_selected {
                                     palette.primary.to_iced()
                                 } else {
                                     palette.text_muted.to_iced()
-                                }),
+                                }
+                            ),
                             Space::new(Length::Fixed(6.0), Length::Shrink),
                             text(item.title)
                                 .size(Typography::BODY)
@@ -3559,33 +4226,36 @@ impl Application for CortenLauncherApp {
 
         let key_badge = |key: &'static str, desc: &'static str| {
             row![
-                container(
-                    text(key)
-                        .size(10.0)
-                        .color(palette.primary.to_iced()),
-                )
-                .padding([2, 5])
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
-                    border: iced::Border {
-                        color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.4),
-                        width: 1.0,
-                        radius: iced::border::Radius::from(4.0),
-                    },
-                    ..Default::default()
-                }),
-                text(desc)
-                    .size(10.0)
-                    .color(palette.text_muted.to_iced()),
+                container(text(key).size(10.0).color(palette.primary.to_iced()),)
+                    .padding([2, 5])
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(
+                            1.0, 1.0, 1.0, 0.08
+                        ))),
+                        border: iced::Border {
+                            color: iced::Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.4
+                            ),
+                            width: 1.0,
+                            radius: iced::border::Radius::from(4.0),
+                        },
+                        ..Default::default()
+                    }),
+                text(desc).size(10.0).color(palette.text_muted.to_iced()),
             ]
             .spacing(4)
             .align_y(Alignment::Center)
         };
 
         let footer_shortcuts = if let Some(msg) = &self.status_message {
-            row![text(msg)
-                .size(Typography::CAPTION)
-                .color(palette.primary.to_iced())]
+            row![
+                text(msg)
+                    .size(Typography::CAPTION)
+                    .color(palette.primary.to_iced())
+            ]
             .align_y(Alignment::Center)
         } else {
             row![
@@ -3641,145 +4311,160 @@ impl Application for CortenLauncherApp {
                 },
                 gap: None,
             })
-            .height(if self.mode == LauncherMode::DesktopMenu { Length::Shrink } else { Length::Fixed(320.0) })
-            .width(if self.mode == LauncherMode::DesktopMenu { Length::Fill } else { Length::FillPortion(12) });
+            .height(if self.mode == LauncherMode::DesktopMenu {
+                Length::Shrink
+            } else {
+                Length::Fixed(320.0)
+            })
+            .width(if self.mode == LauncherMode::DesktopMenu {
+                Length::Fill
+            } else {
+                Length::FillPortion(12)
+            });
 
         // Right-hand Preview Pane (Raycast / macOS Spotlight style)
         let preview_pane: Element<'_, Self::Message> = match self.mode {
             LauncherMode::Applications => {
-                if self.search_query.starts_with('>') {
-                    if let Some(cmd) = self.filtered_commands.get(self.selected_index) {
-                        let cmd_exec = cmd.command.to_string();
-                        return container(
-                            column![
-                                Space::new(Length::Fill, Length::Fixed(16.0)),
-                                container(
-                                    text(cmd.icon_char)
-                                        .font(LUCIDE_FONT)
-                                        .size(36.0)
-                                        .color(palette.primary.to_iced()),
-                                )
-                                .width(Length::Fixed(64.0))
-                                .height(Length::Fixed(64.0))
-                                .center_x(Length::Fill)
-                                .center_y(Length::Fill)
-                                .style(move |_| container::Style {
-                                    background: Some(iced::Background::Color(palette.surface_hover.to_iced())),
-                                    border: iced::Border {
-                                        color: palette.border.to_iced(),
-                                        width: 1.0,
-                                        radius: iced::border::Radius::from(Radius::MD),
-                                    },
+                if self.search_query.starts_with('>')
+                    && let Some(cmd) = self.filtered_commands.get(self.selected_index)
+                {
+                    let cmd_exec = cmd.command.to_string();
+                    return container(
+                        column![
+                            Space::new(Length::Fill, Length::Fixed(16.0)),
+                            container(
+                                text(cmd.icon_char)
+                                    .font(LUCIDE_FONT)
+                                    .size(36.0)
+                                    .color(palette.primary.to_iced()),
+                            )
+                            .width(Length::Fixed(64.0))
+                            .height(Length::Fixed(64.0))
+                            .center_x(Length::Fill)
+                            .center_y(Length::Fill)
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(
+                                    palette.surface_hover.to_iced()
+                                )),
+                                border: iced::Border {
+                                    color: palette.border.to_iced(),
+                                    width: 1.0,
+                                    radius: iced::border::Radius::from(Radius::MD),
+                                },
+                                ..Default::default()
+                            }),
+                            Space::new(Length::Fill, Length::Fixed(6.0)),
+                            text(format!("> {}", cmd.name))
+                                .size(Typography::TITLE_SM)
+                                .color(palette.text_primary.to_iced()),
+                            text(cmd.description)
+                                .size(Typography::CAPTION)
+                                .color(palette.text_muted.to_iced()),
+                            Space::new(Length::Fill, Length::Fixed(12.0)),
+                            container(
+                                text(cmd.command)
+                                    .size(11.0)
+                                    .font(iced::Font::MONOSPACE)
+                                    .color(palette.primary.to_iced()),
+                            )
+                            .padding([6, 10])
+                            .width(Length::Fill)
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(
+                                    palette.stage().to_iced()
+                                )),
+                                border: iced::Border {
+                                    color: palette.border.to_iced(),
+                                    width: 1.0,
+                                    radius: iced::border::Radius::from(Radius::SM),
+                                },
+                                ..Default::default()
+                            }),
+                            Space::new(Length::Fill, Length::Fill),
+                            button(
+                                row![
+                                    text(Icon::TERMINAL).font(LUCIDE_FONT).size(12.0),
+                                    text("Komutu Çalıştır ↵").size(12.0),
+                                ]
+                                .spacing(6)
+                                .align_y(Alignment::Center),
+                            )
+                            .padding([6, 14])
+                            .style(move |_, _| button::Style {
+                                background: Some(iced::Background::Color(
+                                    palette.primary.to_iced()
+                                )),
+                                text_color: palette.on_primary().to_iced(),
+                                border: iced::Border {
+                                    radius: iced::border::Radius::from(Radius::SM),
                                     ..Default::default()
-                                }),
-                                Space::new(Length::Fill, Length::Fixed(6.0)),
-                                text(format!("> {}", cmd.name))
-                                    .size(Typography::TITLE_SM)
-                                    .color(palette.text_primary.to_iced()),
-                                text(cmd.description)
-                                    .size(Typography::CAPTION)
-                                    .color(palette.text_muted.to_iced()),
-                                Space::new(Length::Fill, Length::Fixed(12.0)),
-                                container(
-                                    text(cmd.command)
-                                        .size(11.0)
-                                        .font(iced::Font::MONOSPACE)
-                                        .color(palette.primary.to_iced()),
-                                )
-                                .padding([6, 10])
-                                .width(Length::Fill)
-                                .style(move |_| container::Style {
-                                    background: Some(iced::Background::Color(palette.stage().to_iced())),
-                                    border: iced::Border {
-                                        color: palette.border.to_iced(),
-                                        width: 1.0,
-                                        radius: iced::border::Radius::from(Radius::SM),
-                                    },
-                                    ..Default::default()
-                                }),
-                                Space::new(Length::Fill, Length::Fill),
-                                button(
-                                    row![
-                                        text(Icon::TERMINAL).font(LUCIDE_FONT).size(12.0),
-                                        text("Komutu Çalıştır ↵").size(12.0),
-                                    ]
-                                    .spacing(6)
-                                    .align_y(Alignment::Center),
-                                )
-                                .padding([6, 14])
-                                .style(move |_, _| button::Style {
-                                    background: Some(iced::Background::Color(palette.primary.to_iced())),
-                                    text_color: palette.on_primary().to_iced(),
-                                    border: iced::Border {
-                                        radius: iced::border::Radius::from(Radius::SM),
-                                        ..Default::default()
-                                    },
-                                    ..Default::default()
-                                })
-                                .on_press(Message::LaunchCommand(cmd_exec)),
-                            ]
-                            .spacing(Spacing::XS)
-                            .align_x(Alignment::Center)
-                            .width(Length::Fill),
-                        )
-                        .padding(Spacing::MD)
-                        .width(Length::FillPortion(9))
-                        .height(Length::Fixed(320.0))
-                        .into();
-                    }
+                                },
+                                ..Default::default()
+                            })
+                            .on_press(Message::LaunchCommand(cmd_exec)),
+                        ]
+                        .spacing(Spacing::XS)
+                        .align_x(Alignment::Center)
+                        .width(Length::Fill),
+                    )
+                    .padding(Spacing::MD)
+                    .width(Length::FillPortion(9))
+                    .height(Length::Fixed(320.0))
+                    .into();
                 }
 
                 let app_offset = if self.calc_result.is_some() { 1 } else { 0 };
 
-                if let Some((expr, res)) = &self.calc_result {
-                    if self.selected_index == 0 {
-                        return container(
-                            column![
-                                Space::new(Length::Fill, Length::Fixed(16.0)),
-                                text(Icon::ACTIVITY)
-                                    .font(LUCIDE_FONT)
-                                    .size(48.0)
-                                    .color(palette.primary.to_iced()),
-                                Space::new(Length::Fill, Length::Fixed(8.0)),
-                                text(format!("= {}", res))
-                                    .size(Typography::TITLE)
-                                    .color(palette.primary.to_iced()),
-                                text(format!("İfade: {}", expr))
-                                    .size(Typography::BODY)
-                                    .color(palette.text_muted.to_iced()),
-                                Space::new(Length::Fill, Length::Fixed(16.0)),
-                                text("↵ Enter: Sonucu panoya kopyala")
-                                    .size(Typography::CAPTION)
-                                    .color(palette.primary.to_iced()),
-                            ]
-                            .spacing(Spacing::XS)
-                            .align_x(Alignment::Center)
-                            .width(Length::Fill),
-                        )
-                        .padding(Spacing::MD)
-                        .center_x(Length::Fill)
-                        .center_y(Length::Fill)
-                        .width(Length::FillPortion(9))
-                        .height(Length::Fixed(320.0))
-                        .into();
-                    }
+                if let Some((expr, res)) = &self.calc_result
+                    && self.selected_index == 0
+                {
+                    return container(
+                        column![
+                            Space::new(Length::Fill, Length::Fixed(16.0)),
+                            text(Icon::ACTIVITY)
+                                .font(LUCIDE_FONT)
+                                .size(48.0)
+                                .color(palette.primary.to_iced()),
+                            Space::new(Length::Fill, Length::Fixed(8.0)),
+                            text(format!("= {}", res))
+                                .size(Typography::TITLE)
+                                .color(palette.primary.to_iced()),
+                            text(format!("İfade: {}", expr))
+                                .size(Typography::BODY)
+                                .color(palette.text_muted.to_iced()),
+                            Space::new(Length::Fill, Length::Fixed(16.0)),
+                            text("↵ Enter: Sonucu panoya kopyala")
+                                .size(Typography::CAPTION)
+                                .color(palette.primary.to_iced()),
+                        ]
+                        .spacing(Spacing::XS)
+                        .align_x(Alignment::Center)
+                        .width(Length::Fill),
+                    )
+                    .padding(Spacing::MD)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+                    .width(Length::FillPortion(9))
+                    .height(Length::Fixed(320.0))
+                    .into();
                 }
 
                 let app_idx = self.selected_index.saturating_sub(app_offset);
                 if let Some(entry) = self.filtered_entries.get(app_idx) {
-                    let icon_view: Element<'_, Self::Message> = if let Some(ref icon_path) = entry.icon_path {
-                        iced::widget::image(image::Handle::from_path(icon_path))
-                            .width(Length::Fixed(56.0))
-                            .height(Length::Fixed(56.0))
-                            .into()
-                    } else {
-                        let icon_glyph = app_icon_char(entry);
-                        text(icon_glyph)
-                            .font(LUCIDE_FONT)
-                            .size(36.0)
-                            .color(palette.primary.to_iced())
-                            .into()
-                    };
+                    let icon_view: Element<'_, Self::Message> =
+                        if let Some(ref icon_path) = entry.icon_path {
+                            iced::widget::image(image::Handle::from_path(icon_path))
+                                .width(Length::Fixed(56.0))
+                                .height(Length::Fixed(56.0))
+                                .into()
+                        } else {
+                            let icon_glyph = app_icon_char(entry);
+                            text(icon_glyph)
+                                .font(LUCIDE_FONT)
+                                .size(36.0)
+                                .color(palette.primary.to_iced())
+                                .into()
+                        };
 
                     let icon_box = container(icon_view)
                         .width(Length::Fixed(72.0))
@@ -3947,89 +4632,90 @@ impl Application for CortenLauncherApp {
                             format!("{} B", file_size_bytes)
                         };
 
-                        let quick_look_stage: Element<'_, Message> =
-                            if is_img && file_size_bytes > 0 && file_size_bytes < 12 * 1024 * 1024 {
-                                container(
-                                    iced::widget::image(iced::widget::image::Handle::from_path(
-                                        &file.path,
-                                    ))
-                                    .width(Length::Fixed(180.0))
-                                    .height(Length::Fixed(110.0))
-                                    .content_fit(iced::ContentFit::Contain),
-                                )
-                                .padding(6)
-                                .style(move |_| container::Style {
-                                    background: Some(iced::Background::Color(
-                                        iced::Color::from_rgba(0.04, 0.05, 0.07, 0.90),
-                                    )),
-                                    border: iced::Border {
-                                        color: palette.border.to_iced(),
-                                        width: 1.0,
-                                        radius: iced::border::Radius::from(Radius::MD),
-                                    },
-                                    ..Default::default()
+                        let quick_look_stage: Element<'_, Message> = if is_img
+                            && file_size_bytes > 0
+                            && file_size_bytes < 12 * 1024 * 1024
+                        {
+                            container(
+                                iced::widget::image(iced::widget::image::Handle::from_path(
+                                    &file.path,
+                                ))
+                                .width(Length::Fixed(180.0))
+                                .height(Length::Fixed(110.0))
+                                .content_fit(iced::ContentFit::Contain),
+                            )
+                            .padding(6)
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    0.04, 0.05, 0.07, 0.90,
+                                ))),
+                                border: iced::Border {
+                                    color: palette.border.to_iced(),
+                                    width: 1.0,
+                                    radius: iced::border::Radius::from(Radius::MD),
+                                },
+                                ..Default::default()
+                            })
+                            .into()
+                        } else if is_text && file_size_bytes > 0 && file_size_bytes < 512 * 1024 {
+                            let snippet = std::fs::read_to_string(&file.path)
+                                .unwrap_or_default()
+                                .lines()
+                                .take(8)
+                                .enumerate()
+                                .map(|(i, l)| {
+                                    let trimmed: String = l.chars().take(36).collect();
+                                    format!("{:>2} │ {}", i + 1, trimmed)
                                 })
-                                .into()
-                            } else if is_text && file_size_bytes > 0 && file_size_bytes < 512 * 1024
-                            {
-                                let snippet = std::fs::read_to_string(&file.path)
-                                    .unwrap_or_default()
-                                    .lines()
-                                    .take(8)
-                                    .enumerate()
-                                    .map(|(i, l)| {
-                                        let trimmed: String = l.chars().take(36).collect();
-                                        format!("{:>2} │ {}", i + 1, trimmed)
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-                                container(
-                                    text(snippet)
-                                        .font(iced::Font::MONOSPACE)
-                                        .size(10.5)
-                                        .color(palette.text_primary.to_iced()),
-                                )
-                                .width(Length::Fill)
-                                .height(Length::Fixed(115.0))
-                                .padding(8)
-                                .style(move |_| container::Style {
-                                    background: Some(iced::Background::Color(
-                                        iced::Color::from_rgba(0.05, 0.06, 0.08, 0.94),
-                                    )),
-                                    border: iced::Border {
-                                        color: palette.border.to_iced(),
-                                        width: 1.0,
-                                        radius: iced::border::Radius::from(Radius::SM),
-                                    },
-                                    ..Default::default()
-                                })
-                                .into()
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            container(
+                                text(snippet)
+                                    .font(iced::Font::MONOSPACE)
+                                    .size(10.5)
+                                    .color(palette.text_primary.to_iced()),
+                            )
+                            .width(Length::Fill)
+                            .height(Length::Fixed(115.0))
+                            .padding(8)
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    0.05, 0.06, 0.08, 0.94,
+                                ))),
+                                border: iced::Border {
+                                    color: palette.border.to_iced(),
+                                    width: 1.0,
+                                    radius: iced::border::Radius::from(Radius::SM),
+                                },
+                                ..Default::default()
+                            })
+                            .into()
+                        } else {
+                            let icon_glyph = if file.is_dir {
+                                Icon::FOLDER
                             } else {
-                                let icon_glyph = if file.is_dir {
-                                    Icon::FOLDER
-                                } else {
-                                    Icon::APP_WINDOW
-                                };
-                                container(
-                                    text(icon_glyph)
-                                        .font(LUCIDE_FONT)
-                                        .size(34.0)
-                                        .color(palette.primary.to_iced()),
-                                )
-                                .padding(Spacing::MD)
-                                .style(move |_| container::Style {
-                                    background: Some(iced::Background::Color(
-                                        palette.surface.to_iced(),
-                                    )),
-                                    border: iced::Border {
-                                        color: palette.border.to_iced(),
-                                        width: 1.0,
-                                        radius: iced::border::Radius::from(Radius::MD),
-                                    },
-                                    ..Default::default()
-                                })
-                                .into()
+                                Icon::APP_WINDOW
                             };
+                            container(
+                                text(icon_glyph)
+                                    .font(LUCIDE_FONT)
+                                    .size(34.0)
+                                    .color(palette.primary.to_iced()),
+                            )
+                            .padding(Spacing::MD)
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(
+                                    palette.surface.to_iced(),
+                                )),
+                                border: iced::Border {
+                                    color: palette.border.to_iced(),
+                                    width: 1.0,
+                                    radius: iced::border::Radius::from(Radius::MD),
+                                },
+                                ..Default::default()
+                            })
+                            .into()
+                        };
 
                         let details = column![
                             quick_look_stage,
@@ -4047,15 +4733,17 @@ impl Application for CortenLauncherApp {
                         .spacing(Spacing::XS)
                         .align_x(Alignment::Center);
 
-                        let metadata_col = column![row![
-                            text("Yol:")
-                                .size(Typography::CAPTION)
-                                .color(palette.text_muted.to_iced()),
-                            text(file.path.to_string_lossy().to_string())
-                                .size(Typography::CAPTION)
-                                .color(palette.text_primary.to_iced()),
+                        let metadata_col = column![
+                            row![
+                                text("Yol:")
+                                    .size(Typography::CAPTION)
+                                    .color(palette.text_muted.to_iced()),
+                                text(file.path.to_string_lossy().to_string())
+                                    .size(Typography::CAPTION)
+                                    .color(palette.text_primary.to_iced()),
+                            ]
+                            .spacing(Spacing::XS),
                         ]
-                        .spacing(Spacing::XS),]
                         .spacing(Spacing::XXS);
 
                         let meta_container = container(metadata_col)
@@ -4161,7 +4849,10 @@ impl Application for CortenLauncherApp {
                         row![
                             container(
                                 row![
-                                    text(Icon::CODE).font(LUCIDE_FONT).size(10.0).color(palette.success.to_iced()),
+                                    text(Icon::CODE)
+                                        .font(LUCIDE_FONT)
+                                        .size(10.0)
+                                        .color(palette.success.to_iced()),
                                     text(branch.clone())
                                         .size(Typography::CAPTION)
                                         .color(palette.text_primary.to_iced()),
@@ -4171,7 +4862,9 @@ impl Application for CortenLauncherApp {
                             )
                             .padding([2, 6])
                             .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(0.2, 0.7, 0.4, 0.15))),
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    0.2, 0.7, 0.4, 0.15
+                                ))),
                                 border: iced::Border {
                                     color: iced::Color::from_rgba(0.2, 0.7, 0.4, 0.35),
                                     width: 1.0,
@@ -4179,21 +4872,19 @@ impl Application for CortenLauncherApp {
                                 },
                                 ..Default::default()
                             }),
-                            container(
-                                text(dirty_str)
-                                    .size(Typography::CAPTION)
-                                    .color(dirty_color)
-                            )
-                            .padding([2, 6])
-                            .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04))),
-                                border: iced::Border {
-                                    color: palette.border.to_iced(),
-                                    width: 1.0,
-                                    radius: iced::border::Radius::from(Radius::SM),
-                                },
-                                ..Default::default()
-                            }),
+                            container(text(dirty_str).size(Typography::CAPTION).color(dirty_color))
+                                .padding([2, 6])
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(
+                                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04)
+                                    )),
+                                    border: iced::Border {
+                                        color: palette.border.to_iced(),
+                                        width: 1.0,
+                                        radius: iced::border::Radius::from(Radius::SM),
+                                    },
+                                    ..Default::default()
+                                }),
                         ]
                         .spacing(Spacing::XS)
                     } else {
@@ -4249,9 +4940,12 @@ impl Application for CortenLauncherApp {
 
                     let action_buttons = row![
                         button(
-                            row![text(Icon::CODE).font(LUCIDE_FONT).size(11.0), text("IDE").size(Typography::CAPTION)]
-                                .spacing(4)
-                                .align_y(Alignment::Center)
+                            row![
+                                text(Icon::CODE).font(LUCIDE_FONT).size(11.0),
+                                text("IDE").size(Typography::CAPTION)
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center)
                         )
                         .padding([4, 8])
                         .style(move |_, _| button::Style {
@@ -4265,9 +4959,12 @@ impl Application for CortenLauncherApp {
                         })
                         .on_press(Message::LaunchSpecificProject(proj.clone())),
                         button(
-                            row![text(Icon::TERMINAL).font(LUCIDE_FONT).size(11.0), text("Terminal").size(Typography::CAPTION)]
-                                .spacing(4)
-                                .align_y(Alignment::Center)
+                            row![
+                                text(Icon::TERMINAL).font(LUCIDE_FONT).size(11.0),
+                                text("Terminal").size(Typography::CAPTION)
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center)
                         )
                         .padding([4, 8])
                         .style(move |_, _| button::Style {
@@ -4282,9 +4979,12 @@ impl Application for CortenLauncherApp {
                         })
                         .on_press(Message::OpenProjectTerminal(proj.path.clone())),
                         button(
-                            row![text(Icon::FOLDER).font(LUCIDE_FONT).size(11.0), text("Dosyalar").size(Typography::CAPTION)]
-                                .spacing(4)
-                                .align_y(Alignment::Center)
+                            row![
+                                text(Icon::FOLDER).font(LUCIDE_FONT).size(11.0),
+                                text("Dosyalar").size(Typography::CAPTION)
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center)
                         )
                         .padding([4, 8])
                         .style(move |_, _| button::Style {
@@ -4429,9 +5129,9 @@ impl Application for CortenLauncherApp {
                             .padding([8, 12])
                             .width(Length::Fill)
                             .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(
-                                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04)
-                                )),
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    1.0, 1.0, 1.0, 0.04
+                                ))),
                                 border: iced::Border {
                                     radius: iced::border::Radius::from(Radius::SM),
                                     ..Default::default()
@@ -4494,7 +5194,9 @@ impl Application for CortenLauncherApp {
                             .padding(12)
                             .width(Length::Fill)
                             .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04))),
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    1.0, 1.0, 1.0, 0.04
+                                ))),
                                 border: iced::Border {
                                     radius: iced::border::Radius::from(Radius::SM),
                                     ..Default::default()
@@ -4527,7 +5229,10 @@ impl Application for CortenLauncherApp {
                             column![
                                 Space::new(Length::Fill, Length::Fixed(12.0)),
                                 row![
-                                    text(Icon::CLIPBOARD).font(LUCIDE_FONT).size(15.0).color(palette.primary.to_iced()),
+                                    text(Icon::CLIPBOARD)
+                                        .font(LUCIDE_FONT)
+                                        .size(15.0)
+                                        .color(palette.primary.to_iced()),
                                     text("Not İçeriği")
                                         .size(Typography::TITLE_SM)
                                         .color(palette.primary.to_iced()),
@@ -4543,7 +5248,9 @@ impl Application for CortenLauncherApp {
                                 .padding(12)
                                 .width(Length::Fill)
                                 .style(move |_| container::Style {
-                                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04))),
+                                    background: Some(iced::Background::Color(
+                                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04)
+                                    )),
                                     border: iced::Border {
                                         radius: iced::border::Radius::from(Radius::SM),
                                         ..Default::default()
@@ -4592,13 +5299,20 @@ impl Application for CortenLauncherApp {
                         container(
                             text(part.trim())
                                 .size(13.0)
-                                .color(palette.primary.to_iced())
+                                .color(palette.primary.to_iced()),
                         )
                         .padding([4, 10])
                         .style(move |_| container::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                1.0, 1.0, 1.0, 0.08,
+                            ))),
                             border: iced::Border {
-                                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.4),
+                                color: iced::Color::from_rgba(
+                                    palette.primary.r,
+                                    palette.primary.g,
+                                    palette.primary.b,
+                                    0.4,
+                                ),
                                 width: 1.5,
                                 radius: iced::border::Radius::from(6.0),
                             },
@@ -4624,7 +5338,12 @@ impl Application for CortenLauncherApp {
                             )
                             .padding([2, 8])
                             .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    palette.primary.r,
+                                    palette.primary.g,
+                                    palette.primary.b,
+                                    0.15
+                                ))),
                                 border: iced::Border {
                                     radius: iced::border::Radius::from(4.0),
                                     ..Default::default()
@@ -4638,7 +5357,10 @@ impl Application for CortenLauncherApp {
                             Space::new(Length::Fill, Length::Fixed(12.0)),
                             container(
                                 row![
-                                    text(Icon::ZAP).font(LUCIDE_FONT).size(12.0).color(palette.primary.to_iced()),
+                                    text(Icon::ZAP)
+                                        .font(LUCIDE_FONT)
+                                        .size(12.0)
+                                        .color(palette.primary.to_iced()),
                                     text(format!("İpucu: {}", sc.tip))
                                         .size(Typography::CAPTION)
                                         .color(palette.text_primary.to_iced()),
@@ -4649,7 +5371,9 @@ impl Application for CortenLauncherApp {
                             .padding(10)
                             .width(Length::Fill)
                             .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04))),
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    1.0, 1.0, 1.0, 0.04
+                                ))),
                                 border: iced::Border {
                                     radius: iced::border::Radius::from(6.0),
                                     ..Default::default()
@@ -4707,7 +5431,14 @@ impl Application for CortenLauncherApp {
                         .width(Length::Fill)
                         .into()
                 };
-                (split, if self.mode == LauncherMode::DesktopMenu { 300.0 } else { (self.config.width as f32).max(740.0) })
+                (
+                    split,
+                    if self.mode == LauncherMode::DesktopMenu {
+                        300.0
+                    } else {
+                        (self.config.width as f32).max(740.0)
+                    },
+                )
             }
             LauncherStyle::Dashboard => {
                 if self.mode != LauncherMode::Applications {
@@ -4735,7 +5466,8 @@ impl Application for CortenLauncherApp {
                                 .unwrap_or(false);
                             let entry_clone = entry.clone();
 
-                            let app_icon_view: Element<'_, Self::Message> = render_app_icon(entry, 44.0, palette.primary.to_iced());
+                            let app_icon_view: Element<'_, Self::Message> =
+                                render_app_icon(entry, 44.0, palette.primary.to_iced());
 
                             let display_name = if entry.name.chars().count() > 18 {
                                 format!("{}…", entry.name.chars().take(16).collect::<String>())
@@ -4752,13 +5484,22 @@ impl Application for CortenLauncherApp {
                                         .center_y(Length::Fill)
                                         .style(move |_| container::Style {
                                             background: Some(iced::Background::Color(if is_sel {
-                                                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.20)
+                                                iced::Color::from_rgba(
+                                                    palette.primary.r,
+                                                    palette.primary.g,
+                                                    palette.primary.b,
+                                                    0.20,
+                                                )
                                             } else {
                                                 iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
                                             })),
                                             border: iced::Border {
                                                 radius: iced::border::Radius::from(Radius::MD),
-                                                color: if is_sel { palette.primary.to_iced() } else { iced::Color::TRANSPARENT },
+                                                color: if is_sel {
+                                                    palette.primary.to_iced()
+                                                } else {
+                                                    iced::Color::TRANSPARENT
+                                                },
                                                 width: if is_sel { 1.0 } else { 0.0 },
                                             },
                                             ..Default::default()
@@ -4779,7 +5520,12 @@ impl Application for CortenLauncherApp {
                                     button::Status::Hovered => {
                                         iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
                                     }
-                                    _ if is_sel => iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15),
+                                    _ if is_sel => iced::Color::from_rgba(
+                                        palette.primary.r,
+                                        palette.primary.g,
+                                        palette.primary.b,
+                                        0.15,
+                                    ),
                                     _ => iced::Color::TRANSPARENT,
                                 };
                                 button::Style {
@@ -4817,8 +5563,7 @@ impl Application for CortenLauncherApp {
                 }
             }
             LauncherStyle::StartMenu => {
-                let view = row![results_scrollable]
-                    .width(Length::Fill);
+                let view = row![results_scrollable].width(Length::Fill);
                 (view.into(), 480.0)
             }
         };
@@ -4883,7 +5628,11 @@ impl CortenLauncherApp {
             LauncherMode::Clipboard => self.filtered_clipboard.len(),
             LauncherMode::Emoji => self.filtered_emojis.len(),
             LauncherMode::Notes => {
-                let add_new = if !self.search_query.trim().is_empty() { 1 } else { 0 };
+                let add_new = if !self.search_query.trim().is_empty() {
+                    1
+                } else {
+                    0
+                };
                 add_new + self.filtered_notes.len()
             }
             LauncherMode::CheatSheet => self.filtered_shortcuts().len(),
@@ -5028,7 +5777,11 @@ impl CortenLauncherApp {
 
     fn filter_entries(&mut self) {
         if self.search_query.starts_with('>') {
-            let cmd_query = self.search_query.trim_start_matches('>').trim().to_lowercase();
+            let cmd_query = self
+                .search_query
+                .trim_start_matches('>')
+                .trim()
+                .to_lowercase();
             self.filtered_commands = QUICK_COMMANDS
                 .iter()
                 .filter(|c| {
@@ -5113,11 +5866,14 @@ impl CortenLauncherApp {
             .collect();
 
         if self.search_query.trim().is_empty() {
-            let limit = if self.config.style == LauncherStyle::Dashboard { 200 } else if self.config.style == LauncherStyle::StartMenu { 120 } else { self.config.max_results };
-            self.filtered_entries = category_filtered
-                .into_iter()
-                .take(limit)
-                .collect();
+            let limit = if self.config.style == LauncherStyle::Dashboard {
+                200
+            } else if self.config.style == LauncherStyle::StartMenu {
+                120
+            } else {
+                self.config.max_results
+            };
+            self.filtered_entries = category_filtered.into_iter().take(limit).collect();
             return;
         }
 
@@ -5348,46 +6104,45 @@ impl CortenLauncherApp {
         entrance_alpha: f32,
         content_alpha: f32,
     ) -> Element<'_, Message> {
-        let ribbon_pill = |icon_ch: char, label: &'static str, action: DesktopAction| -> Element<'_, Message> {
-            button(
-                column![
-                    text(icon_ch)
-                        .font(LUCIDE_FONT)
-                        .size(14.5)
-                        .color(palette.primary.to_iced()),
-                    text(label)
-                        .size(9.5)
-                        .color(palette.text_primary.to_iced()),
-                ]
-                .spacing(2)
-                .align_x(Alignment::Center),
-            )
-            .width(Length::FillPortion(1))
-            .padding([6, 4])
-            .style(move |_, status| {
-                let bg = match status {
-                    button::Status::Hovered => iced::Color::from_rgba(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.20,
-                    ),
-                    _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
-                };
-                button::Style {
-                    background: Some(iced::Background::Color(bg)),
-                    text_color: palette.text_primary.to_iced(),
-                    border: iced::Border {
-                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-                        width: 1.0,
-                        radius: iced::border::Radius::from(Radius::SM),
-                    },
-                    shadow: iced::Shadow::default(),
-                }
-            })
-            .on_press(Message::SelectDesktopAction(action))
-            .into()
-        };
+        let ribbon_pill =
+            |icon_ch: char, label: &'static str, action: DesktopAction| -> Element<'_, Message> {
+                button(
+                    column![
+                        text(icon_ch)
+                            .font(LUCIDE_FONT)
+                            .size(14.5)
+                            .color(palette.primary.to_iced()),
+                        text(label).size(9.5).color(palette.text_primary.to_iced()),
+                    ]
+                    .spacing(2)
+                    .align_x(Alignment::Center),
+                )
+                .width(Length::FillPortion(1))
+                .padding([6, 4])
+                .style(move |_, status| {
+                    let bg = match status {
+                        button::Status::Hovered => iced::Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.20,
+                        ),
+                        _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+                    };
+                    button::Style {
+                        background: Some(iced::Background::Color(bg)),
+                        text_color: palette.text_primary.to_iced(),
+                        border: iced::Border {
+                            color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                            width: 1.0,
+                            radius: iced::border::Radius::from(Radius::SM),
+                        },
+                        shadow: iced::Shadow::default(),
+                    }
+                })
+                .on_press(Message::SelectDesktopAction(action))
+                .into()
+            };
 
         let quick_ribbon = row![
             ribbon_pill(Icon::FOLDER, "+ Klasör", DesktopAction::NewFolder),
@@ -5544,8 +6299,12 @@ impl CortenLauncherApp {
             .on_press(Message::NoOp)
             .on_right_press(Message::NoOp);
 
-        let (pad_left, pad_top) = if let (Some(x), Some(y)) = (self.cursor_pos.0, self.cursor_pos.1) {
-            ((x as f32).clamp(12.0, 1680.0), (y as f32).clamp(12.0, 720.0))
+        let (pad_left, pad_top) = if let (Some(x), Some(y)) = (self.cursor_pos.0, self.cursor_pos.1)
+        {
+            (
+                (x as f32).clamp(12.0, 1680.0),
+                (y as f32).clamp(12.0, 720.0),
+            )
         } else {
             (200.0, 150.0)
         };
@@ -5649,7 +6408,9 @@ impl CortenLauncherApp {
                 }
             }
             DesktopAction::Terminal => {
-                let _ = launch_fallback_chain("corten-terminal || alacritty || foot || kitty || pterm || xterm || bash");
+                let _ = launch_fallback_chain(
+                    "corten-terminal || alacritty || foot || kitty || pterm || xterm || bash",
+                );
             }
             DesktopAction::FileManager => {
                 let home = std::env::var("HOME").unwrap_or_else(|_| "/home".into());
@@ -5693,7 +6454,10 @@ impl CortenLauncherApp {
 
 fn notes_file_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let dir = std::path::PathBuf::from(home).join(".local").join("share").join("corten");
+    let dir = std::path::PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("corten");
     let _ = std::fs::create_dir_all(&dir);
     dir.join("notes.md")
 }
@@ -5757,6 +6521,9 @@ mod tests {
             nucleo::Utf32Str::new(haystack, &mut utf32_buf),
             &mut matcher,
         );
-        assert!(score.is_some(), "Multi-byte Turkish UTF-8 and emoji should score successfully");
+        assert!(
+            score.is_some(),
+            "Multi-byte Turkish UTF-8 and emoji should score successfully"
+        );
     }
 }

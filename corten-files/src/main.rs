@@ -3,24 +3,28 @@ mod fs_ops;
 use std::path::PathBuf;
 
 use corten_config::ConfigManager;
-use corten_theme::iced_styles::{card_style, input_style, primary_button_style, secondary_button_style};
+use corten_theme::iced_styles::{
+    card_style, input_style, primary_button_style, secondary_button_style,
+};
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, Spacing, ThemeMode, Typography,
 };
 use fs_ops::{
+    EntryInspection, EntryKind, FileEntry, SidebarPlace, SortColumn, SortDirection, ViewMode,
     breadcrumbs, copy_entry_recursive, create_archive, create_file, create_folder,
     delete_permanently, empty_trash, extract_archive, format_relative_time, format_size,
     inspect_entry, move_entry, move_to_trash, open_with_system, query_disk_usage, read_directory,
     rename_entry, restore_from_trash, sibling_directories, spawn_terminal_in, standard_places,
-    trash_files_dir, EntryInspection, EntryKind, FileEntry, SidebarPlace, SortColumn,
-    SortDirection, ViewMode,
+    trash_files_dir,
 };
 use iced::widget::{
     button, column, container, horizontal_space, mouse_area, row, scrollable, stack, text,
     text_input, vertical_space,
 };
-use iced::{border, event, keyboard, Alignment, Border, Color, Element, Event, Length, Shadow, Subscription};
+use iced::{
+    Alignment, Border, Color, Element, Event, Length, Shadow, Subscription, border, event, keyboard,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -173,27 +177,23 @@ pub enum Message {
 pub fn main() -> iced::Result {
     tracing_subscriber::fmt::init();
 
-    iced::application(
-        "Corten Files",
-        CortenFilesApp::update,
-        CortenFilesApp::view,
-    )
-    .window(iced::window::Settings {
-        size: iced::Size::new(1160.0, 740.0),
-        min_size: Some(iced::Size::new(860.0, 540.0)),
-        resizable: true,
-        #[cfg(target_os = "linux")]
-        platform_specific: iced::window::settings::PlatformSpecific {
-            application_id: "corten-files".into(),
+    iced::application("Corten Files", CortenFilesApp::update, CortenFilesApp::view)
+        .window(iced::window::Settings {
+            size: iced::Size::new(1160.0, 740.0),
+            min_size: Some(iced::Size::new(860.0, 540.0)),
+            resizable: true,
+            #[cfg(target_os = "linux")]
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: "corten-files".into(),
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    })
-    .subscription(CortenFilesApp::subscription)
-    .font(LUCIDE_FONT_BYTES)
-    .font(NOTO_SANS_BYTES)
-    .default_font(NOTO_SANS)
-    .run()
+        })
+        .subscription(CortenFilesApp::subscription)
+        .font(LUCIDE_FONT_BYTES)
+        .font(NOTO_SANS_BYTES)
+        .default_font(NOTO_SANS)
+        .run()
 }
 
 pub struct CortenFilesApp {
@@ -234,25 +234,25 @@ impl Default for CortenFilesApp {
             .map(|c| c.get().clone())
             .unwrap_or_default();
 
-        let (active_patina, theme_mode) = corten_config::ConfigManager::<corten_config::AppearanceConfig>::load_or_default("appearance")
-            .map(|c| {
-                let p = PatinaVariant::from_code(&c.get().patina);
-                let tm = match c.get().theme_mode {
-                    corten_config::ThemeModeChoice::Light => ThemeMode::Light,
-                    corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
-                };
-                (p, tm)
-            })
-            .unwrap_or((PatinaVariant::Rust, ThemeMode::Dark));
+        let (active_patina, theme_mode) = corten_config::ConfigManager::<
+            corten_config::AppearanceConfig,
+        >::load_or_default("appearance")
+        .map(|c| {
+            let p = PatinaVariant::from_code(&c.get().patina);
+            let tm = match c.get().theme_mode {
+                corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
+            };
+            (p, tm)
+        })
+        .unwrap_or((PatinaVariant::Rust, ThemeMode::Dark));
 
         // Allow passing initial directory as CLI argument (e.g. `corten-files ~/Pictures`)
         let initial_dir = std::env::args()
             .nth(1)
             .map(PathBuf::from)
             .filter(|p| p.exists() && p.is_dir())
-            .or_else(|| {
-                directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf())
-            })
+            .or_else(|| directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("/"));
 
         let mut app = Self {
@@ -298,8 +298,15 @@ impl Default for CortenFilesApp {
 
 impl CortenFilesApp {
     fn should_gatekeep(path: &std::path::Path) -> bool {
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-        let is_executable_ext = matches!(ext.as_str(), "sh" | "bash" | "appimage" | "bin" | "run" | "py" | "elf");
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let is_executable_ext = matches!(
+            ext.as_str(),
+            "sh" | "bash" | "appimage" | "bin" | "run" | "py" | "elf"
+        );
 
         let in_downloads = if let Some(base) = directories::UserDirs::new() {
             if let Some(dl) = base.download_dir() {
@@ -376,7 +383,11 @@ impl CortenFilesApp {
                 self.entries = list;
                 self.selected_index = prev_selected_path
                     .and_then(|p| self.entries.iter().position(|e| e.path == p))
-                    .or(if self.entries.is_empty() { None } else { Some(0) });
+                    .or(if self.entries.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    });
                 self.refresh_inspection();
                 self.address_input = self.current_dir.to_string_lossy().to_string();
                 self.status_message = format!("{} öğe listeleniyor", self.entries.len());
@@ -406,8 +417,7 @@ impl CortenFilesApp {
                     } else {
                         Some(0)
                     });
-                self.right_pane.address_input =
-                    self.right_pane.dir.to_string_lossy().to_string();
+                self.right_pane.address_input = self.right_pane.dir.to_string_lossy().to_string();
             }
         }
     }
@@ -464,7 +474,8 @@ impl CortenFilesApp {
             }
             _ => None,
         });
-        let timer_sub = iced::time::every(std::time::Duration::from_secs(6)).map(|_| Message::RefreshDevices);
+        let timer_sub =
+            iced::time::every(std::time::Duration::from_secs(6)).map(|_| Message::RefreshDevices);
         Subscription::batch([key_sub, timer_sub])
     }
 
@@ -508,18 +519,16 @@ impl CortenFilesApp {
                     Message::TerminalCommandFinished,
                 )
             }
-            Message::RefreshDevices => {
-                iced::Task::perform(
-                    async {
-                        tokio::task::spawn_blocking(|| {
-                            corten_services::udisks2::list_devices().unwrap_or_default()
-                        })
-                        .await
-                        .unwrap_or_default()
-                    },
-                    Message::DevicesRefreshed,
-                )
-            }
+            Message::RefreshDevices => iced::Task::perform(
+                async {
+                    tokio::task::spawn_blocking(|| {
+                        corten_services::udisks2::list_devices().unwrap_or_default()
+                    })
+                    .await
+                    .unwrap_or_default()
+                },
+                Message::DevicesRefreshed,
+            ),
             Message::MountDevice(obj_path) => {
                 let obj_clone = obj_path.clone();
                 iced::Task::perform(
@@ -622,10 +631,10 @@ impl CortenFilesApp {
             Message::ToggleSplitView => {
                 self.split_view = !self.split_view;
                 if self.split_view {
-                    if self.right_pane.dir == self.current_dir {
-                        if let Some(parent) = self.current_dir.parent() {
-                            self.right_pane.dir = parent.to_path_buf();
-                        }
+                    if self.right_pane.dir == self.current_dir
+                        && let Some(parent) = self.current_dir.parent()
+                    {
+                        self.right_pane.dir = parent.to_path_buf();
                     }
                     self.reload_entries();
                     self.status_message = "Çift Panel (Dual-Pane) modu aktif (F3 / Tab)".into();
@@ -642,7 +651,9 @@ impl CortenFilesApp {
                     return;
                 }
                 let (src_entry, target_dir) = match self.active_pane {
-                    ActivePane::Left => (self.selected_entry().cloned(), self.right_pane.dir.clone()),
+                    ActivePane::Left => {
+                        (self.selected_entry().cloned(), self.right_pane.dir.clone())
+                    }
                     ActivePane::Right => (
                         self.right_pane
                             .selected_index
@@ -654,7 +665,8 @@ impl CortenFilesApp {
                     match copy_entry_recursive(&entry.path, &target_dir) {
                         Ok(dst) => {
                             self.reload_entries();
-                            self.status_message = format!("Diğer panele kopyalandı: {}", dst.display());
+                            self.status_message =
+                                format!("Diğer panele kopyalandı: {}", dst.display());
                         }
                         Err(e) => self.status_message = e,
                     }
@@ -665,7 +677,9 @@ impl CortenFilesApp {
                     return;
                 }
                 let (src_entry, target_dir) = match self.active_pane {
-                    ActivePane::Left => (self.selected_entry().cloned(), self.right_pane.dir.clone()),
+                    ActivePane::Left => {
+                        (self.selected_entry().cloned(), self.right_pane.dir.clone())
+                    }
                     ActivePane::Right => (
                         self.right_pane
                             .selected_index
@@ -677,7 +691,8 @@ impl CortenFilesApp {
                     match move_entry(&entry.path, &target_dir) {
                         Ok(dst) => {
                             self.reload_entries();
-                            self.status_message = format!("Diğer panele taşındı: {}", dst.display());
+                            self.status_message =
+                                format!("Diğer panele taşındı: {}", dst.display());
                         }
                         Err(e) => self.status_message = e,
                     }
@@ -888,9 +903,9 @@ impl CortenFilesApp {
                 }
             }
             Message::ModalInputChanged(val) => match &mut self.modal {
-                Some(InlineModal::NewFolder(ref mut s))
-                | Some(InlineModal::NewFile(ref mut s))
-                | Some(InlineModal::Rename(_, ref mut s)) => {
+                Some(InlineModal::NewFolder(s))
+                | Some(InlineModal::NewFile(s))
+                | Some(InlineModal::Rename(_, s)) => {
                     *s = val;
                 }
                 _ => {}
@@ -937,16 +952,15 @@ impl CortenFilesApp {
                         }
                         Err(e) => self.status_message = e,
                     },
-                    InlineModal::SecurityGatekeeper { path, .. } => {
-                        match open_with_system(&path) {
-                            Ok(()) => {
-                                self.status_message = format!("Güvenle çalıştırıldı: {}", path.display());
-                            }
-                            Err(e) => {
-                                self.status_message = e;
-                            }
+                    InlineModal::SecurityGatekeeper { path, .. } => match open_with_system(&path) {
+                        Ok(()) => {
+                            self.status_message =
+                                format!("Güvenle çalıştırıldı: {}", path.display());
                         }
-                    }
+                        Err(e) => {
+                            self.status_message = e;
+                        }
+                    },
                 }
             }
             Message::AnalyzeWithAi(path) => {
@@ -954,7 +968,8 @@ impl CortenFilesApp {
                     .arg("--audit")
                     .arg(&path)
                     .spawn();
-                self.status_message = format!("Corten AI güvenlik denetimi başlatıldı: {}", path.display());
+                self.status_message =
+                    format!("Corten AI güvenlik denetimi başlatıldı: {}", path.display());
             }
             Message::CancelModal => {
                 self.modal = None;
@@ -1061,12 +1076,7 @@ impl CortenFilesApp {
             }
             Message::ToggleBookmarkCurrent => {
                 let current_str = self.current_dir.to_string_lossy().to_string();
-                if let Some(pos) = self
-                    .config
-                    .bookmarks
-                    .iter()
-                    .position(|b| b == &current_str)
-                {
+                if let Some(pos) = self.config.bookmarks.iter().position(|b| b == &current_str) {
                     self.config.bookmarks.remove(pos);
                     self.status_message = "Yer imlerinden kaldırıldı".into();
                 } else {
@@ -1078,34 +1088,31 @@ impl CortenFilesApp {
             Message::DevicesRefreshed(devs) => {
                 self.devices = devs;
             }
-            Message::DeviceMounted(res) => {
-                match res {
-                    Ok(mount_path) => {
-                        self.status_message = format!("Aygıt bağlandı: {}", mount_path.display());
-                        self.reload_devices();
-                        self.navigate_to(mount_path, true);
-                    }
-                    Err(e) => {
-                        self.status_message = format!("Bağlama hatası: {e}");
+            Message::DeviceMounted(res) => match res {
+                Ok(mount_path) => {
+                    self.status_message = format!("Aygıt bağlandı: {}", mount_path.display());
+                    self.reload_devices();
+                    self.navigate_to(mount_path, true);
+                }
+                Err(e) => {
+                    self.status_message = format!("Bağlama hatası: {e}");
+                }
+            },
+            Message::DeviceUnmounted(res) => match res {
+                Ok(()) => {
+                    self.status_message = "Aygıt güvenle çıkarıldı".into();
+                    self.reload_devices();
+                    if let Some(home) =
+                        directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf())
+                        && !self.current_dir.exists()
+                    {
+                        self.navigate_to(home, true);
                     }
                 }
-            }
-            Message::DeviceUnmounted(res) => {
-                match res {
-                    Ok(()) => {
-                        self.status_message = "Aygıt güvenle çıkarıldı".into();
-                        self.reload_devices();
-                        if let Some(home) = directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf()) {
-                            if !self.current_dir.exists() {
-                                self.navigate_to(home, true);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        self.status_message = format!("Çıkarma hatası: {e}");
-                    }
+                Err(e) => {
+                    self.status_message = format!("Çıkarma hatası: {e}");
                 }
-            }
+            },
             Message::ExecuteTerminalCommand
             | Message::RefreshDevices
             | Message::MountDevice(_)
@@ -1113,8 +1120,7 @@ impl CortenFilesApp {
                 // Handled in async task above
             }
             Message::KeyEvent(key, modifiers) => {
-                if self.show_quick_look
-                    && key == keyboard::Key::Named(keyboard::key::Named::Escape)
+                if self.show_quick_look && key == keyboard::Key::Named(keyboard::key::Named::Escape)
                 {
                     self.show_quick_look = false;
                     return;
@@ -1145,7 +1151,9 @@ impl CortenFilesApp {
                     }
                     return;
                 }
-                if !self.search_query.is_empty() && key == keyboard::Key::Named(keyboard::key::Named::Escape) {
+                if !self.search_query.is_empty()
+                    && key == keyboard::Key::Named(keyboard::key::Named::Escape)
+                {
                     self.handle_sync_message(Message::SearchChanged(String::new()));
                     return;
                 }
@@ -1206,10 +1214,10 @@ impl CortenFilesApp {
                         if self.config.view_mode == ViewMode::Columns
                             && self.search_query.is_empty() =>
                     {
-                        if let Some(entry) = self.selected_entry() {
-                            if entry.is_dir {
-                                self.handle_sync_message(Message::ActivateSelected);
-                            }
+                        if let Some(entry) = self.selected_entry()
+                            && entry.is_dir
+                        {
+                            self.handle_sync_message(Message::ActivateSelected);
                         }
                     }
                     keyboard::Key::Character("1") if modifiers.control() => {
@@ -1352,12 +1360,9 @@ impl CortenFilesApp {
             self.view_explorer_pane(palette)
         };
 
-        let main_body = row![
-            self.view_sidebar(palette),
-            explorer_col,
-        ]
-        .spacing(0)
-        .height(Length::Fill);
+        let main_body = row![self.view_sidebar(palette), explorer_col,]
+            .spacing(0)
+            .height(Length::Fill);
 
         let full_row = if self.config.show_inspector && self.config.view_mode != ViewMode::Columns {
             main_body.push(self.view_inspector_pane(palette))
@@ -1443,27 +1448,22 @@ impl CortenFilesApp {
         let modified_str = format_relative_time(entry.modified_secs);
 
         let header = row![
-            container(
-                text(icon_char)
-                    .font(LUCIDE_FONT)
-                    .size(18)
-                    .color(icon_color),
-            )
-            .padding([6, 8])
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(
-                    icon_color.r,
-                    icon_color.g,
-                    icon_color.b,
-                    0.14,
-                ))),
-                border: Border {
-                    color: Color::from_rgba(icon_color.r, icon_color.g, icon_color.b, 0.30),
-                    width: 1.0,
-                    radius: border::Radius::from(Radius::SM),
-                },
-                ..Default::default()
-            }),
+            container(text(icon_char).font(LUCIDE_FONT).size(18).color(icon_color),)
+                .padding([6, 8])
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        icon_color.r,
+                        icon_color.g,
+                        icon_color.b,
+                        0.14,
+                    ))),
+                    border: Border {
+                        color: Color::from_rgba(icon_color.r, icon_color.g, icon_color.b, 0.30),
+                        width: 1.0,
+                        radius: border::Radius::from(Radius::SM),
+                    },
+                    ..Default::default()
+                }),
             column![
                 row![
                     text(entry.name.clone())
@@ -1497,144 +1497,149 @@ impl CortenFilesApp {
             ]
             .spacing(2),
             horizontal_space(),
-            Self::accent_button("Uygulama İle Aç (Enter)", Message::ActivateSelected, palette),
+            Self::accent_button(
+                "Uygulama İle Aç (Enter)",
+                Message::ActivateSelected,
+                palette
+            ),
             Self::small_button("✕ Kapat (Space)", "", Message::CloseQuickLook, palette),
         ]
         .spacing(Spacing::SM)
         .align_y(Alignment::Center);
 
-        let stage_body: Element<'_, Message> = if let Some(img_path) =
-            fs_ops::get_image_preview_path(&entry.path)
-        {
-            container(
-                iced::widget::image(iced::widget::image::Handle::from_path(img_path))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .content_fit(iced::ContentFit::Contain),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(Spacing::MD)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(
-                    0.04, 0.05, 0.07, 0.90,
-                ))),
-                border: Border {
-                    color: Color::from_rgba(1.0, 1.0, 1.0, 0.07),
-                    width: 1.0,
-                    radius: border::Radius::from(Radius::MD),
-                },
-                ..Default::default()
-            })
-            .into()
-        } else if entry.is_dir {
-            let children = read_directory(
-                &entry.path,
-                self.config.show_hidden,
-                "",
-                SortColumn::Name,
-                SortDirection::Ascending,
-            )
-            .unwrap_or_default();
-            let mut list_col = column![
-                text(format!("KLASÖR İÇERİĞİ ({} öğe)", children.len()))
-                    .size(Typography::CAPTION)
-                    .color(palette.text_muted.to_iced()),
-            ]
-            .spacing(6);
-            for child in children.iter().take(24) {
-                let c_icon = Self::entry_icon(child.kind);
-                let c_color = Self::entry_color(child.kind, palette);
-                list_col = list_col.push(
-                    row![
-                        text(c_icon).font(LUCIDE_FONT).size(14).color(c_color),
-                        text(child.name.clone())
-                            .size(Typography::BODY_SM)
-                            .color(palette.text_primary.to_iced())
-                            .width(Length::Fill),
-                        text(if child.is_dir {
-                            "Klasör".to_string()
-                        } else {
-                            format_size(child.size)
-                        })
-                        .size(Typography::CAPTION)
-                        .color(palette.text_muted.to_iced()),
-                    ]
-                    .spacing(Spacing::SM)
-                    .align_y(Alignment::Center),
-                );
-            }
-            container(scrollable(list_col).height(Length::Fill))
+        let stage_body: Element<'_, Message> =
+            if let Some(img_path) = fs_ops::get_image_preview_path(&entry.path) {
+                container(
+                    iced::widget::image(iced::widget::image::Handle::from_path(img_path))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .content_fit(iced::ContentFit::Contain),
+                )
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding(Spacing::MD)
-                .style(move |_| input_style(palette))
-                .into()
-        } else if let Some(preview) =
-            self.inspection.as_ref().and_then(|i| i.text_preview.as_ref())
-        {
-            let mut numbered_lines = column![].spacing(2);
-            for (line_idx, line_str) in preview.lines().take(80).enumerate() {
-                numbered_lines = numbered_lines.push(
-                    row![
-                        text(format!("{:>3} │", line_idx + 1))
-                            .font(iced::Font::MONOSPACE)
-                            .size(11.5)
-                            .color(Color::from_rgba(1.0, 1.0, 1.0, 0.30))
-                            .width(Length::Fixed(44.0)),
-                        text(line_str.to_string())
-                            .font(iced::Font::MONOSPACE)
-                            .size(12.0)
-                            .color(palette.text_primary.to_iced()),
-                    ]
-                    .spacing(8),
-                );
-            }
-            container(scrollable(numbered_lines).height(Length::Fill))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .padding(Spacing::MD)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
                 .style(|_| container::Style {
                     background: Some(iced::Background::Color(Color::from_rgba(
-                        0.05, 0.06, 0.08, 0.94,
+                        0.04, 0.05, 0.07, 0.90,
                     ))),
                     border: Border {
-                        color: Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                        color: Color::from_rgba(1.0, 1.0, 1.0, 0.07),
                         width: 1.0,
                         radius: border::Radius::from(Radius::MD),
                     },
                     ..Default::default()
                 })
                 .into()
-        } else {
-            let perms = self
+            } else if entry.is_dir {
+                let children = read_directory(
+                    &entry.path,
+                    self.config.show_hidden,
+                    "",
+                    SortColumn::Name,
+                    SortDirection::Ascending,
+                )
+                .unwrap_or_default();
+                let mut list_col = column![
+                    text(format!("KLASÖR İÇERİĞİ ({} öğe)", children.len()))
+                        .size(Typography::CAPTION)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(6);
+                for child in children.iter().take(24) {
+                    let c_icon = Self::entry_icon(child.kind);
+                    let c_color = Self::entry_color(child.kind, palette);
+                    list_col = list_col.push(
+                        row![
+                            text(c_icon).font(LUCIDE_FONT).size(14).color(c_color),
+                            text(child.name.clone())
+                                .size(Typography::BODY_SM)
+                                .color(palette.text_primary.to_iced())
+                                .width(Length::Fill),
+                            text(if child.is_dir {
+                                "Klasör".to_string()
+                            } else {
+                                format_size(child.size)
+                            })
+                            .size(Typography::CAPTION)
+                            .color(palette.text_muted.to_iced()),
+                        ]
+                        .spacing(Spacing::SM)
+                        .align_y(Alignment::Center),
+                    );
+                }
+                container(scrollable(list_col).height(Length::Fill))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding(Spacing::MD)
+                    .style(move |_| input_style(palette))
+                    .into()
+            } else if let Some(preview) = self
                 .inspection
                 .as_ref()
-                .map(|i| i.permissions.as_str())
-                .unwrap_or("---");
-            container(
-                column![
-                    text(icon_char).font(LUCIDE_FONT).size(48).color(icon_color),
-                    text(entry.name.clone())
-                        .size(Typography::TITLE)
-                        .color(palette.text_primary.to_iced()),
-                    Self::meta_row("Tür", entry.kind.label(), palette),
-                    Self::meta_row("Boyut", &size_str, palette),
-                    Self::meta_row("İzinler", perms, palette),
-                    Self::meta_row("Değiştirilme", &modified_str, palette),
-                ]
-                .spacing(Spacing::SM)
-                .align_x(Alignment::Center),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .style(move |_| input_style(palette))
-            .into()
-        };
+                .and_then(|i| i.text_preview.as_ref())
+            {
+                let mut numbered_lines = column![].spacing(2);
+                for (line_idx, line_str) in preview.lines().take(80).enumerate() {
+                    numbered_lines = numbered_lines.push(
+                        row![
+                            text(format!("{:>3} │", line_idx + 1))
+                                .font(iced::Font::MONOSPACE)
+                                .size(11.5)
+                                .color(Color::from_rgba(1.0, 1.0, 1.0, 0.30))
+                                .width(Length::Fixed(44.0)),
+                            text(line_str.to_string())
+                                .font(iced::Font::MONOSPACE)
+                                .size(12.0)
+                                .color(palette.text_primary.to_iced()),
+                        ]
+                        .spacing(8),
+                    );
+                }
+                container(scrollable(numbered_lines).height(Length::Fill))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding(Spacing::MD)
+                    .style(|_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba(
+                            0.05, 0.06, 0.08, 0.94,
+                        ))),
+                        border: Border {
+                            color: Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                            width: 1.0,
+                            radius: border::Radius::from(Radius::MD),
+                        },
+                        ..Default::default()
+                    })
+                    .into()
+            } else {
+                let perms = self
+                    .inspection
+                    .as_ref()
+                    .map(|i| i.permissions.as_str())
+                    .unwrap_or("---");
+                container(
+                    column![
+                        text(icon_char).font(LUCIDE_FONT).size(48).color(icon_color),
+                        text(entry.name.clone())
+                            .size(Typography::TITLE)
+                            .color(palette.text_primary.to_iced()),
+                        Self::meta_row("Tür", entry.kind.label(), palette),
+                        Self::meta_row("Boyut", &size_str, palette),
+                        Self::meta_row("İzinler", perms, palette),
+                        Self::meta_row("Değiştirilme", &modified_str, palette),
+                    ]
+                    .spacing(Spacing::SM)
+                    .align_x(Alignment::Center),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .style(move |_| input_style(palette))
+                .into()
+            };
 
         let footer = row![
             text(entry.path.to_string_lossy().to_string())
@@ -1805,17 +1810,14 @@ impl CortenFilesApp {
             ext_lower.as_str(),
             "zip" | "tar" | "gz" | "xz" | "7z" | "zst"
         );
-        let is_image = !entry.is_dir
-            && matches!(ext_lower.as_str(), "png" | "jpg" | "jpeg" | "webp");
+        let is_image =
+            !entry.is_dir && matches!(ext_lower.as_str(), "png" | "jpg" | "jpeg" | "webp");
 
         let icon_char = Self::entry_icon(entry.kind);
         let icon_color = Self::entry_accent_color(entry, palette);
 
         let header = row![
-            text(icon_char)
-                .font(LUCIDE_FONT)
-                .size(16)
-                .color(icon_color),
+            text(icon_char).font(LUCIDE_FONT).size(16).color(icon_color),
             text(entry.name.clone())
                 .size(Typography::BODY_SM)
                 .color(palette.text_primary.to_iced()),
@@ -1975,9 +1977,12 @@ impl CortenFilesApp {
                 .font(LUCIDE_FONT)
                 .size(13.0)
                 .color(palette.primary.to_iced()),
-            text(format!("Hızlı Komut & Terminal — {}", self.current_dir.display()))
-                .size(11.0)
-                .color(palette.text_primary.to_iced()),
+            text(format!(
+                "Hızlı Komut & Terminal — {}",
+                self.current_dir.display()
+            ))
+            .size(11.0)
+            .color(palette.text_primary.to_iced()),
             horizontal_space(),
             button(text("✕").size(10.0).color(palette.text_muted.to_iced()))
                 .padding([1, 4])
@@ -1996,28 +2001,26 @@ impl CortenFilesApp {
             );
         } else {
             for line in self.terminal_log.iter().rev().take(6).rev() {
-                log_col = log_col.push(
-                    text(line)
-                        .size(11.0)
-                        .color(if line.starts_with('$') {
-                            palette.primary.to_iced()
-                        } else if line.starts_with("err:") {
-                            palette.danger.to_iced()
-                        } else {
-                            palette.text_primary.to_iced()
-                        }),
-                );
+                log_col = log_col.push(text(line).size(11.0).color(if line.starts_with('$') {
+                    palette.primary.to_iced()
+                } else if line.starts_with("err:") {
+                    palette.danger.to_iced()
+                } else {
+                    palette.text_primary.to_iced()
+                }));
             }
         }
 
         let input_row = row![
-            text("$")
-                .size(12.0)
-                .color(palette.primary.to_iced()),
+            text("$").size(12.0).color(palette.primary.to_iced()),
             text_input("Komut girin...", &self.terminal_input)
                 .size(12.0)
                 .padding([5, 10])
-                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status))
+                .style(
+                    move |_, status| corten_theme::iced_styles::corten_text_input_style(
+                        palette, status
+                    )
+                )
                 .on_input(Message::TerminalInputChanged)
                 .on_submit(Message::ExecuteTerminalCommand),
             button(
@@ -2039,21 +2042,26 @@ impl CortenFilesApp {
         .spacing(6)
         .align_y(Alignment::Center);
 
-        container(
-            column![title_row, log_col, input_row].spacing(6)
-        )
-        .padding([8, 12])
-        .width(Length::Fill)
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(0.06, 0.07, 0.09, 0.95))),
-            border: Border {
-                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
-                width: 1.0,
-                radius: border::Radius::from(8.0),
-            },
-            ..Default::default()
-        })
-        .into()
+        container(column![title_row, log_col, input_row].spacing(6))
+            .padding([8, 12])
+            .width(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.06, 0.07, 0.09, 0.95,
+                ))),
+                border: Border {
+                    color: iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.35,
+                    ),
+                    width: 1.0,
+                    radius: border::Radius::from(8.0),
+                },
+                ..Default::default()
+            })
+            .into()
     }
 
     fn view_tab_bar(&self, palette: Palette) -> Element<'_, Message> {
@@ -2077,46 +2085,36 @@ impl CortenFilesApp {
                     } else {
                         palette.text_muted.to_iced()
                     }),
-                text(folder_label)
-                    .size(12.0)
-                    .color(if is_active {
-                        palette.text_primary.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
+                text(folder_label).size(12.0).color(if is_active {
+                    palette.text_primary.to_iced()
+                } else {
+                    palette.text_muted.to_iced()
+                }),
             ]
             .spacing(5)
             .align_y(Alignment::Center);
 
             if is_active {
-                let dup_btn = button(
-                    text("⧉")
-                        .size(10.5)
-                        .color(palette.text_muted.to_iced()),
-                )
-                .padding([0, 3])
-                .on_press(Message::DuplicateTab(idx))
-                .style(move |_, _| button::Style {
-                    background: None,
-                    text_color: palette.text_muted.to_iced(),
-                    ..Default::default()
-                });
+                let dup_btn = button(text("⧉").size(10.5).color(palette.text_muted.to_iced()))
+                    .padding([0, 3])
+                    .on_press(Message::DuplicateTab(idx))
+                    .style(move |_, _| button::Style {
+                        background: None,
+                        text_color: palette.text_muted.to_iced(),
+                        ..Default::default()
+                    });
                 item_row = item_row.push(dup_btn);
             }
 
             if self.tabs.len() > 1 {
-                let close_btn = button(
-                    text("×")
-                        .size(12.0)
-                        .color(palette.text_muted.to_iced()),
-                )
-                .padding([0, 3])
-                .on_press(Message::CloseTab(idx))
-                .style(move |_, _| button::Style {
-                    background: None,
-                    text_color: palette.text_muted.to_iced(),
-                    ..Default::default()
-                });
+                let close_btn = button(text("×").size(12.0).color(palette.text_muted.to_iced()))
+                    .padding([0, 3])
+                    .on_press(Message::CloseTab(idx))
+                    .style(move |_, _| button::Style {
+                        background: None,
+                        text_color: palette.text_muted.to_iced(),
+                        ..Default::default()
+                    });
                 item_row = item_row.push(close_btn);
             }
 
@@ -2143,19 +2141,18 @@ impl CortenFilesApp {
         }
 
         tab_row = tab_row.push(
-            button(
-                text("+")
-                    .size(13.0)
-                    .color(palette.primary.to_iced()),
-            )
-            .padding([3, 8])
-            .on_press(Message::NewTab)
-            .style(move |_, status| secondary_button_style(palette, status)),
+            button(text("+").size(13.0).color(palette.primary.to_iced()))
+                .padding([3, 8])
+                .on_press(Message::NewTab)
+                .style(move |_, status| secondary_button_style(palette, status)),
         );
 
         let has_selection = self.selected_entry().is_some();
         let has_clipboard = self.clipboard.is_some();
-        let is_archive = self.selected_entry().map(|e| e.is_archive()).unwrap_or(false);
+        let is_archive = self
+            .selected_entry()
+            .map(|e| e.is_archive())
+            .unwrap_or(false);
         let in_trash = self.is_in_trash();
         let current_bookmarked = self
             .config
@@ -2166,7 +2163,11 @@ impl CortenFilesApp {
             Self::small_button("+ Klasör", "", Message::PromptNewFolder, palette),
             Self::small_button("+ Dosya", "", Message::PromptNewFile, palette),
             Self::small_button(
-                if current_bookmarked { "★ Yer İmi" } else { "☆ Yer İmi" },
+                if current_bookmarked {
+                    "★ Yer İmi"
+                } else {
+                    "☆ Yer İmi"
+                },
                 "",
                 Message::ToggleBookmarkCurrent,
                 palette,
@@ -2185,7 +2186,12 @@ impl CortenFilesApp {
 
         if has_selection {
             quick_actions = quick_actions
-                .push(Self::small_button("Adlandır", "", Message::PromptRename, palette))
+                .push(Self::small_button(
+                    "Adlandır",
+                    "",
+                    Message::PromptRename,
+                    palette,
+                ))
                 .push(Self::small_button(
                     if in_trash { "Kalıcı Sil" } else { "Çöp" },
                     "",
@@ -2259,7 +2265,11 @@ impl CortenFilesApp {
                     .padding([6, 10])
                     .size(Typography::BODY_SM)
                     .width(Length::Fill)
-                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+                    .style(
+                        move |_, status| corten_theme::iced_styles::corten_text_input_style(
+                            palette, status
+                        )
+                    ),
                 Self::small_button("Git", "", Message::AddressSubmitted, palette),
                 Self::small_button("İptal", "", Message::ToggleAddressEdit, palette),
             ]
@@ -2281,11 +2291,7 @@ impl CortenFilesApp {
                 }
                 let is_last = path == self.current_dir;
                 let is_dropdown_open = self.breadcrumb_dropdown.as_ref() == Some(&path);
-                let icon_ch = if idx == 0 {
-                    Icon::USER
-                } else {
-                    Icon::FOLDER
-                };
+                let icon_ch = if idx == 0 { Icon::USER } else { Icon::FOLDER };
                 let path_for_nav = path.clone();
                 let path_for_drop = path.clone();
 
@@ -2299,13 +2305,11 @@ impl CortenFilesApp {
                             } else {
                                 palette.text_muted.to_iced()
                             }),
-                        text(label)
-                            .size(12.0)
-                            .color(if is_last {
-                                palette.primary.to_iced()
-                            } else {
-                                palette.text_primary.to_iced()
-                            }),
+                        text(label).size(12.0).color(if is_last {
+                            palette.primary.to_iced()
+                        } else {
+                            palette.text_primary.to_iced()
+                        }),
                     ]
                     .spacing(4)
                     .align_y(Alignment::Center),
@@ -2391,14 +2395,10 @@ impl CortenFilesApp {
                             scrollable::Scrollbar::new().width(0).scroller_width(0),
                         ))
                         .width(Length::Fill),
-                    button(
-                        text("✎ Yol")
-                            .size(11.0)
-                            .color(palette.text_muted.to_iced()),
-                    )
-                    .padding([2, 7])
-                    .on_press(Message::ToggleAddressEdit)
-                    .style(move |_, _| secondary_button_style(palette, button::Status::Active)),
+                    button(text("✎ Yol").size(11.0).color(palette.text_muted.to_iced()),)
+                        .padding([2, 7])
+                        .on_press(Message::ToggleAddressEdit)
+                        .style(move |_, _| secondary_button_style(palette, button::Status::Active)),
                 ]
                 .align_y(Alignment::Center)
                 .spacing(Spacing::XS),
@@ -2447,7 +2447,11 @@ impl CortenFilesApp {
                     .padding([5, 10])
                     .size(12.0)
                     .width(Length::Fixed(145.0))
-                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+                    .style(
+                        move |_, status| corten_theme::iced_styles::corten_text_input_style(
+                            palette, status
+                        )
+                    ),
                 match_count,
             ]
             .spacing(Spacing::XS)
@@ -2481,12 +2485,7 @@ impl CortenFilesApp {
                 Message::ToggleHidden,
                 palette,
             ),
-            Self::toggle_pill(
-                "İkili",
-                self.split_view,
-                Message::ToggleSplitView,
-                palette,
-            ),
+            Self::toggle_pill("İkili", self.split_view, Message::ToggleSplitView, palette,),
             Self::toggle_pill(
                 "Denetçi",
                 self.config.show_inspector,
@@ -2504,7 +2503,9 @@ impl CortenFilesApp {
         .padding([6, 10])
         .width(Length::Fill)
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(Color::from_rgba(0.08, 0.09, 0.12, 0.95))),
+            background: Some(iced::Background::Color(Color::from_rgba(
+                0.08, 0.09, 0.12, 0.95,
+            ))),
             border: Border {
                 color: Color::from_rgba(1.0, 1.0, 1.0, 0.07),
                 width: 1.0,
@@ -2586,7 +2587,9 @@ impl CortenFilesApp {
         .padding([5, 12])
         .width(Length::Fill)
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(Color::from_rgba(0.09, 0.10, 0.14, 0.96))),
+            background: Some(iced::Background::Color(Color::from_rgba(
+                0.09, 0.10, 0.14, 0.96,
+            ))),
             border: Border {
                 color: Color::from_rgba(
                     palette.primary.r,
@@ -2618,7 +2621,11 @@ impl CortenFilesApp {
                     .padding([6, 10])
                     .size(Typography::BODY_SM)
                     .width(Length::Fixed(280.0))
-                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+                    .style(
+                        move |_, status| corten_theme::iced_styles::corten_text_input_style(
+                            palette, status
+                        )
+                    ),
                 Self::accent_button("Oluştur", Message::ConfirmModal, palette),
                 Self::small_button("İptal", "", Message::CancelModal, palette),
             ]
@@ -2635,7 +2642,11 @@ impl CortenFilesApp {
                     .padding([6, 10])
                     .size(Typography::BODY_SM)
                     .width(Length::Fixed(280.0))
-                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+                    .style(
+                        move |_, status| corten_theme::iced_styles::corten_text_input_style(
+                            palette, status
+                        )
+                    ),
                 Self::accent_button("Oluştur", Message::ConfirmModal, palette),
                 Self::small_button("İptal", "", Message::CancelModal, palette),
             ]
@@ -2652,7 +2663,11 @@ impl CortenFilesApp {
                     .padding([6, 10])
                     .size(Typography::BODY_SM)
                     .width(Length::Fixed(280.0))
-                    .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+                    .style(
+                        move |_, status| corten_theme::iced_styles::corten_text_input_style(
+                            palette, status
+                        )
+                    ),
                 Self::accent_button("Kaydet", Message::ConfirmModal, palette),
                 Self::small_button("İptal", "", Message::CancelModal, palette),
             ]
@@ -2676,9 +2691,16 @@ impl CortenFilesApp {
             .align_y(Alignment::Center)
             .into(),
             InlineModal::SecurityGatekeeper { path, sha256 } => {
-                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 let short_hash = if sha256.len() > 16 {
-                    format!("{}...{}", &sha256[..8], &sha256[sha256.len().saturating_sub(8)..])
+                    format!(
+                        "{}...{}",
+                        &sha256[..8],
+                        &sha256[sha256.len().saturating_sub(8)..]
+                    )
                 } else {
                     sha256.clone()
                 };
@@ -2691,11 +2713,19 @@ impl CortenFilesApp {
                     text("Corten Gatekeeper:")
                         .size(Typography::BODY_SM)
                         .color(palette.warning.to_iced()),
-                    text(format!("\"{}\" (SHA256: {}) dış kaynaktan indirildi veya çalıştırılabilir betik.", name, short_hash))
-                        .size(Typography::BODY_SM)
-                        .color(palette.text_primary.to_iced()),
+                    text(format!(
+                        "\"{}\" (SHA256: {}) dış kaynaktan indirildi veya çalıştırılabilir betik.",
+                        name, short_hash
+                    ))
+                    .size(Typography::BODY_SM)
+                    .color(palette.text_primary.to_iced()),
                     horizontal_space(),
-                    Self::small_button("AI Analizi", "", Message::AnalyzeWithAi(path_clone), palette),
+                    Self::small_button(
+                        "AI Analizi",
+                        "",
+                        Message::AnalyzeWithAi(path_clone),
+                        palette
+                    ),
                     Self::accent_button("Yine de Çalıştır", Message::ConfirmModal, palette),
                     Self::small_button("İptal", "", Message::CancelModal, palette),
                 ]
@@ -2747,15 +2777,11 @@ impl CortenFilesApp {
             };
 
             let badge_el: Element<'_, Message> = if let Some(count) = place.item_count {
-                container(
-                    text(format!("{count}"))
-                        .size(9.5)
-                        .color(if is_active {
-                            Color::WHITE
-                        } else {
-                            palette.text_muted.to_iced()
-                        }),
-                )
+                container(text(format!("{count}")).size(9.5).color(if is_active {
+                    Color::WHITE
+                } else {
+                    palette.text_muted.to_iced()
+                }))
                 .padding([1, 6])
                 .style(move |_| container::Style {
                     background: Some(iced::Background::Color(if is_active {
@@ -2814,13 +2840,11 @@ impl CortenFilesApp {
         }
 
         if !self.config.bookmarks.is_empty() {
-            col = col
-                .push(vertical_space().height(Spacing::XS))
-                .push(
-                    text("YER İMLERİ")
-                        .size(10.5)
-                        .color(palette.text_muted.to_iced()),
-                );
+            col = col.push(vertical_space().height(Spacing::XS)).push(
+                text("YER İMLERİ")
+                    .size(10.5)
+                    .color(palette.text_muted.to_iced()),
+            );
 
             for bm in &self.config.bookmarks {
                 let path = PathBuf::from(bm);
@@ -2831,13 +2855,11 @@ impl CortenFilesApp {
                 let is_active = self.current_dir == path;
                 let btn = button(
                     row![
-                        text("★")
-                            .size(12.0)
-                            .color(if is_active {
-                                Color::WHITE
-                            } else {
-                                palette.warning.to_iced()
-                            }),
+                        text("★").size(12.0).color(if is_active {
+                            Color::WHITE
+                        } else {
+                            palette.warning.to_iced()
+                        }),
                         text(label).size(12.0),
                     ]
                     .spacing(8)
@@ -2858,13 +2880,11 @@ impl CortenFilesApp {
         }
 
         if !self.devices.is_empty() {
-            col = col
-                .push(vertical_space().height(Spacing::XS))
-                .push(
-                    text("DEPOLAMA & AYGITLAR")
-                        .size(10.5)
-                        .color(palette.text_muted.to_iced()),
-                );
+            col = col.push(vertical_space().height(Spacing::XS)).push(
+                text("DEPOLAMA & AYGITLAR")
+                    .size(10.5)
+                    .color(palette.text_muted.to_iced()),
+            );
 
             for dev in &self.devices {
                 let is_active = if let Some(ref mp) = dev.mount_point {
@@ -2893,13 +2913,11 @@ impl CortenFilesApp {
                                     } else {
                                         palette.success.to_iced()
                                     }),
-                                text(dev_label)
-                                    .size(11.5)
-                                    .color(if is_active {
-                                        Color::WHITE
-                                    } else {
-                                        palette.text_primary.to_iced()
-                                    }),
+                                text(dev_label).size(11.5).color(if is_active {
+                                    Color::WHITE
+                                } else {
+                                    palette.text_primary.to_iced()
+                                }),
                             ]
                             .spacing(Spacing::SM)
                             .align_y(Alignment::Center),
@@ -2914,14 +2932,10 @@ impl CortenFilesApp {
                                 secondary_button_style(palette, status)
                             }
                         }),
-                        button(
-                            text("⏏")
-                                .size(13)
-                                .color(palette.text_muted.to_iced()),
-                        )
-                        .padding([4, 6])
-                        .on_press(Message::UnmountDevice(obj_path))
-                        .style(move |_, status| secondary_button_style(palette, status)),
+                        button(text("⏏").size(13).color(palette.text_muted.to_iced()),)
+                            .padding([4, 6])
+                            .on_press(Message::UnmountDevice(obj_path))
+                            .style(move |_, status| secondary_button_style(palette, status)),
                     ]
                     .spacing(Spacing::XXS)
                     .align_y(Alignment::Center)
@@ -3009,9 +3023,13 @@ impl CortenFilesApp {
                         },
                         ..Default::default()
                     }),
-                    text(format!("{} boş / {}", format_size(free), format_size(total)))
-                        .size(10.0)
-                        .color(palette.text_muted.to_iced()),
+                    text(format!(
+                        "{} boş / {}",
+                        format_size(free),
+                        format_size(total)
+                    ))
+                    .size(10.0)
+                    .color(palette.text_muted.to_iced()),
                 ]
                 .spacing(5),
             )
@@ -3034,18 +3052,17 @@ impl CortenFilesApp {
         };
 
         container(
-            column![
-                scrollable(col).height(Length::Fill),
-                disk_card,
-            ]
-            .spacing(Spacing::XS)
-            .height(Length::Fill),
+            column![scrollable(col).height(Length::Fill), disk_card,]
+                .spacing(Spacing::XS)
+                .height(Length::Fill),
         )
         .width(Length::Fixed(214.0))
         .height(Length::Fill)
         .padding(Spacing::SM)
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(Color::from_rgba(0.06, 0.07, 0.09, 0.75))),
+            background: Some(iced::Background::Color(Color::from_rgba(
+                0.06, 0.07, 0.09, 0.75,
+            ))),
             border: Border {
                 color: Color::from_rgba(1.0, 1.0, 1.0, 0.05),
                 width: 1.0,
@@ -3150,11 +3167,7 @@ impl CortenFilesApp {
                                 text(ext_badge)
                                     .size(9.5)
                                     .font(iced::Font::MONOSPACE)
-                                    .color(if is_selected {
-                                        Color::WHITE
-                                    } else {
-                                        accent
-                                    }),
+                                    .color(if is_selected { Color::WHITE } else { accent }),
                             )
                             .padding([1, 6])
                             .style(move |_| container::Style {
@@ -3250,11 +3263,10 @@ impl CortenFilesApp {
                                 .into()
                         } else {
                             container(
-                                text(icon_ch).font(LUCIDE_FONT).size(26).color(if is_selected {
-                                    Color::WHITE
-                                } else {
-                                    accent
-                                }),
+                                text(icon_ch)
+                                    .font(LUCIDE_FONT)
+                                    .size(26)
+                                    .color(if is_selected { Color::WHITE } else { accent }),
                             )
                             .padding([10, 14])
                             .style(move |_| container::Style {
@@ -3282,11 +3294,7 @@ impl CortenFilesApp {
                                     text(badge_txt)
                                         .size(9.5)
                                         .font(iced::Font::MONOSPACE)
-                                        .color(if is_selected {
-                                            Color::WHITE
-                                        } else {
-                                            accent
-                                        }),
+                                        .color(if is_selected { Color::WHITE } else { accent }),
                                 )
                                 .padding([2, 6])
                                 .style(move |_| container::Style {
@@ -3303,20 +3311,16 @@ impl CortenFilesApp {
                                 }),
                             ]
                             .align_y(Alignment::Start),
-                            text(entry.name.clone())
-                                .size(12.5)
-                                .color(if is_selected {
-                                    Color::WHITE
-                                } else {
-                                    palette.text_primary.to_iced()
-                                }),
-                            text(subtitle)
-                                .size(10.5)
-                                .color(if is_selected {
-                                    Color::WHITE
-                                } else {
-                                    palette.text_muted.to_iced()
-                                }),
+                            text(entry.name.clone()).size(12.5).color(if is_selected {
+                                Color::WHITE
+                            } else {
+                                palette.text_primary.to_iced()
+                            }),
+                            text(subtitle).size(10.5).color(if is_selected {
+                                Color::WHITE
+                            } else {
+                                palette.text_muted.to_iced()
+                            }),
                         ]
                         .spacing(6),
                     )
@@ -3338,20 +3342,26 @@ impl CortenFilesApp {
             scrollable(grid_col).height(Length::Fill).into()
         };
 
-        container(column![header, body].spacing(Spacing::XS).height(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(Spacing::SM)
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(0.08, 0.09, 0.12, 0.50))),
-                border: Border {
-                    color: Color::from_rgba(1.0, 1.0, 1.0, 0.04),
-                    width: 1.0,
-                    radius: border::Radius::from(0.0),
-                },
-                ..Default::default()
-            })
-            .into()
+        container(
+            column![header, body]
+                .spacing(Spacing::XS)
+                .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Spacing::SM)
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgba(
+                0.08, 0.09, 0.12, 0.50,
+            ))),
+            border: Border {
+                color: Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+                width: 1.0,
+                radius: border::Radius::from(0.0),
+            },
+            ..Default::default()
+        })
+        .into()
     }
 
     fn view_miller_columns_pane<'a>(&'a self, palette: Palette) -> Element<'a, Message> {
@@ -3485,7 +3495,8 @@ impl CortenFilesApp {
                     secondary_button_style(palette, status)
                 }
             });
-            col2_list = col2_list.push(mouse_area(btn).on_right_press(Message::OpenContextMenu(idx)));
+            col2_list =
+                col2_list.push(mouse_area(btn).on_right_press(Message::OpenContextMenu(idx)));
         }
 
         // Column 3: Child directory preview OR file inspector preview
@@ -3501,9 +3512,13 @@ impl CortenFilesApp {
                 .unwrap_or_default();
 
                 let mut child_col = column![
-                    text(format!("ALT KLASÖR: {} ({})", selected.name, children.len()))
-                        .size(10.5)
-                        .color(palette.text_muted.to_iced()),
+                    text(format!(
+                        "ALT KLASÖR: {} ({})",
+                        selected.name,
+                        children.len()
+                    ))
+                    .size(10.5)
+                    .color(palette.text_muted.to_iced()),
                 ]
                 .spacing(3);
 
@@ -3524,10 +3539,7 @@ impl CortenFilesApp {
                         };
                         let c_btn = button(
                             row![
-                                text(c_icon)
-                                    .font(LUCIDE_FONT)
-                                    .size(13.5)
-                                    .color(c_accent),
+                                text(c_icon).font(LUCIDE_FONT).size(13.5).color(c_accent),
                                 text(child.name)
                                     .size(11.5)
                                     .color(palette.text_primary.to_iced())
@@ -3666,12 +3678,16 @@ impl CortenFilesApp {
             rows = rows.push(row_btn);
         }
 
-        container(column![header, scrollable(rows).height(Length::Fill)].spacing(Spacing::XS).height(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(Spacing::SM)
-            .style(move |_| card_style(palette))
-            .into()
+        container(
+            column![header, scrollable(rows).height(Length::Fill)]
+                .spacing(Spacing::XS)
+                .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Spacing::SM)
+        .style(move |_| card_style(palette))
+        .into()
     }
 
     fn view_inspector_pane(&self, palette: Palette) -> Element<'_, Message> {
@@ -3686,24 +3702,19 @@ impl CortenFilesApp {
 
             let hero_header = container(
                 row![
-                    container(
-                        text(icon_ch)
-                            .font(LUCIDE_FONT)
-                            .size(22)
-                            .color(accent),
-                    )
-                    .padding([8, 10])
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(Color::from_rgba(
-                            accent.r, accent.g, accent.b, 0.16,
-                        ))),
-                        border: Border {
-                            color: Color::from_rgba(accent.r, accent.g, accent.b, 0.35),
-                            width: 1.0,
-                            radius: border::Radius::from(Radius::MD),
-                        },
-                        ..Default::default()
-                    }),
+                    container(text(icon_ch).font(LUCIDE_FONT).size(22).color(accent),)
+                        .padding([8, 10])
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(Color::from_rgba(
+                                accent.r, accent.g, accent.b, 0.16,
+                            ))),
+                            border: Border {
+                                color: Color::from_rgba(accent.r, accent.g, accent.b, 0.35),
+                                width: 1.0,
+                                radius: border::Radius::from(Radius::MD),
+                            },
+                            ..Default::default()
+                        }),
                     column![
                         text(info.name.clone())
                             .size(13.5)
@@ -3773,12 +3784,15 @@ impl CortenFilesApp {
                 ));
             }
             if let Some(lines) = info.line_count {
-                col = col.push(Self::meta_row("Satır Sayısı", &format!("{lines} satır"), palette));
+                col = col.push(Self::meta_row(
+                    "Satır Sayısı",
+                    &format!("{lines} satır"),
+                    palette,
+                ));
             }
 
             // Image thumbnail OR Audio Waveform OR Line-numbered Code Preview
-            if let Some(img_path) = selected.and_then(|e| fs_ops::get_image_preview_path(&e.path))
-            {
+            if let Some(img_path) = selected.and_then(|e| fs_ops::get_image_preview_path(&e.path)) {
                 col = col.push(
                     container(
                         iced::widget::image(iced::widget::image::Handle::from_path(img_path))
@@ -3791,10 +3805,16 @@ impl CortenFilesApp {
                     .style(move |_| input_style(palette)),
                 );
                 col = col.push(vertical_space());
-            } else if selected.map(|e| e.kind == EntryKind::AudioVideo).unwrap_or(false) {
+            } else if selected
+                .map(|e| e.kind == EntryKind::AudioVideo)
+                .unwrap_or(false)
+            {
                 // Audio / Media Waveform Visual Card
                 let mut wave_row = row![].spacing(3).align_y(Alignment::Center);
-                for h in [10.0, 18.0, 26.0, 14.0, 30.0, 22.0, 12.0, 28.0, 20.0, 15.0, 24.0, 12.0, 19.0, 25.0, 14.0, 10.0] {
+                for h in [
+                    10.0, 18.0, 26.0, 14.0, 30.0, 22.0, 12.0, 28.0, 20.0, 15.0, 24.0, 12.0, 19.0,
+                    25.0, 14.0, 10.0,
+                ] {
                     wave_row = wave_row.push(
                         container(row![])
                             .width(Length::Fixed(4.0))
@@ -3940,7 +3960,9 @@ impl CortenFilesApp {
         .padding([Spacing::XS + 2.0, Spacing::MD])
         .width(Length::Fill)
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(Color::from_rgba(0.06, 0.07, 0.09, 0.90))),
+            background: Some(iced::Background::Color(Color::from_rgba(
+                0.06, 0.07, 0.09, 0.90,
+            ))),
             border: Border {
                 color: Color::from_rgba(1.0, 1.0, 1.0, 0.05),
                 width: 1.0,

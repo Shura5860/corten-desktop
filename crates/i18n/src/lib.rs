@@ -179,74 +179,169 @@ impl Language {
         match self {
             Language::Tr => {
                 let w = match weekday_1_to_7 {
-                    1 => "Pazartesi", 2 => "Salı", 3 => "Çarşamba", 4 => "Perşembe",
-                    5 => "Cuma", 6 => "Cumartesi", _ => "Pazar",
+                    1 => "Pazartesi",
+                    2 => "Salı",
+                    3 => "Çarşamba",
+                    4 => "Perşembe",
+                    5 => "Cuma",
+                    6 => "Cumartesi",
+                    _ => "Pazar",
                 };
                 let m = match month_1_to_12 {
-                    1 => "Ocak", 2 => "Şubat", 3 => "Mart", 4 => "Nisan", 5 => "Mayıs", 6 => "Haziran",
-                    7 => "Temmuz", 8 => "Ağustos", 9 => "Eylül", 10 => "Ekim", 11 => "Kasım", _ => "Aralık",
+                    1 => "Ocak",
+                    2 => "Şubat",
+                    3 => "Mart",
+                    4 => "Nisan",
+                    5 => "Mayıs",
+                    6 => "Haziran",
+                    7 => "Temmuz",
+                    8 => "Ağustos",
+                    9 => "Eylül",
+                    10 => "Ekim",
+                    11 => "Kasım",
+                    _ => "Aralık",
                 };
                 format!("{}, {} {}", w, day, m)
             }
             Language::En => {
                 let w = match weekday_1_to_7 {
-                    1 => "Monday", 2 => "Tuesday", 3 => "Wednesday", 4 => "Thursday",
-                    5 => "Friday", 6 => "Saturday", _ => "Sunday",
+                    1 => "Monday",
+                    2 => "Tuesday",
+                    3 => "Wednesday",
+                    4 => "Thursday",
+                    5 => "Friday",
+                    6 => "Saturday",
+                    _ => "Sunday",
                 };
                 let m = match month_1_to_12 {
-                    1 => "January", 2 => "February", 3 => "March", 4 => "April", 5 => "May", 6 => "June",
-                    7 => "July", 8 => "August", 9 => "September", 10 => "October", 11 => "November", _ => "December",
+                    1 => "January",
+                    2 => "February",
+                    3 => "March",
+                    4 => "April",
+                    5 => "May",
+                    6 => "June",
+                    7 => "July",
+                    8 => "August",
+                    9 => "September",
+                    10 => "October",
+                    11 => "November",
+                    _ => "December",
                 };
                 format!("{}, {} {}", w, m, day)
             }
             Language::De => {
                 let w = match weekday_1_to_7 {
-                    1 => "Montag", 2 => "Dienstag", 3 => "Mittwoch", 4 => "Donnerstag",
-                    5 => "Freitag", 6 => "Samstag", _ => "Sonntag",
+                    1 => "Montag",
+                    2 => "Dienstag",
+                    3 => "Mittwoch",
+                    4 => "Donnerstag",
+                    5 => "Freitag",
+                    6 => "Samstag",
+                    _ => "Sonntag",
                 };
                 let m = match month_1_to_12 {
-                    1 => "Januar", 2 => "Februar", 3 => "März", 4 => "April", 5 => "Mai", 6 => "Juni",
-                    7 => "Juli", 8 => "August", 9 => "September", 10 => "Oktober", 11 => "November", _ => "Dezember",
+                    1 => "Januar",
+                    2 => "Februar",
+                    3 => "März",
+                    4 => "April",
+                    5 => "Mai",
+                    6 => "Juni",
+                    7 => "Juli",
+                    8 => "August",
+                    9 => "September",
+                    10 => "Oktober",
+                    11 => "November",
+                    _ => "Dezember",
                 };
                 format!("{}, {}. {}", w, day, m)
             }
             Language::Fr => {
                 let w = match weekday_1_to_7 {
-                    1 => "Lundi", 2 => "Mardi", 3 => "Mercredi", 4 => "Jeudi",
-                    5 => "Vendredi", 6 => "Samedi", _ => "Dimanche",
+                    1 => "Lundi",
+                    2 => "Mardi",
+                    3 => "Mercredi",
+                    4 => "Jeudi",
+                    5 => "Vendredi",
+                    6 => "Samedi",
+                    _ => "Dimanche",
                 };
                 let m = match month_1_to_12 {
-                    1 => "janvier", 2 => "février", 3 => "mars", 4 => "avril", 5 => "mai", 6 => "juin",
-                    7 => "juillet", 8 => "août", 9 => "septembre", 10 => "octobre", 11 => "novembre", _ => "décembre",
+                    1 => "janvier",
+                    2 => "février",
+                    3 => "mars",
+                    4 => "avril",
+                    5 => "mai",
+                    6 => "juin",
+                    7 => "juillet",
+                    8 => "août",
+                    9 => "septembre",
+                    10 => "octobre",
+                    11 => "novembre",
+                    _ => "décembre",
                 };
                 format!("{} {} {}", w, day, m)
             }
             Language::Es => {
                 let w = match weekday_1_to_7 {
-                    1 => "Lunes", 2 => "Martes", 3 => "Miércoles", 4 => "Jueves",
-                    5 => "Viernes", 6 => "Sábado", _ => "Domingo",
+                    1 => "Lunes",
+                    2 => "Martes",
+                    3 => "Miércoles",
+                    4 => "Jueves",
+                    5 => "Viernes",
+                    6 => "Sábado",
+                    _ => "Domingo",
                 };
                 let m = match month_1_to_12 {
-                    1 => "enero", 2 => "febrero", 3 => "marzo", 4 => "abril", 5 => "mayo", 6 => "junio",
-                    7 => "julio", 8 => "agosto", 9 => "septiembre", 10 => "octubre", 11 => "noviembre", _ => "diciembre",
+                    1 => "enero",
+                    2 => "febrero",
+                    3 => "marzo",
+                    4 => "abril",
+                    5 => "mayo",
+                    6 => "junio",
+                    7 => "julio",
+                    8 => "agosto",
+                    9 => "septiembre",
+                    10 => "octubre",
+                    11 => "noviembre",
+                    _ => "diciembre",
                 };
                 format!("{}, {} de {}", w, day, m)
             }
             Language::Ru => {
                 let w = match weekday_1_to_7 {
-                    1 => "Понедельник", 2 => "Вторник", 3 => "Среда", 4 => "Четверг",
-                    5 => "Пятница", 6 => "Суббота", _ => "Воскресенье",
+                    1 => "Понедельник",
+                    2 => "Вторник",
+                    3 => "Среда",
+                    4 => "Четверг",
+                    5 => "Пятница",
+                    6 => "Суббота",
+                    _ => "Воскресенье",
                 };
                 let m = match month_1_to_12 {
-                    1 => "января", 2 => "февраля", 3 => "марта", 4 => "апреля", 5 => "мая", 6 => "июня",
-                    7 => "июля", 8 => "августа", 9 => "сентября", 10 => "октября", 11 => "ноября", _ => "декабря",
+                    1 => "января",
+                    2 => "февраля",
+                    3 => "марта",
+                    4 => "апреля",
+                    5 => "мая",
+                    6 => "июня",
+                    7 => "июля",
+                    8 => "августа",
+                    9 => "сентября",
+                    10 => "октября",
+                    11 => "ноября",
+                    _ => "декабря",
                 };
                 format!("{}, {} {}", w, day, m)
             }
             Language::Ja => {
                 let w = match weekday_1_to_7 {
-                    1 => "月", 2 => "火", 3 => "水", 4 => "木",
-                    5 => "金", 6 => "土", _ => "日",
+                    1 => "月",
+                    2 => "火",
+                    3 => "水",
+                    4 => "木",
+                    5 => "金",
+                    6 => "土",
+                    _ => "日",
                 };
                 format!("{}月{}日 ({})", month_1_to_12, day, w)
             }
@@ -1034,4 +1129,3 @@ mod tests {
         assert_eq!(Language::from_code("ja_JP.UTF-8"), Language::Ja);
     }
 }
-

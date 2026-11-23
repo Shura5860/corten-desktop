@@ -5,8 +5,8 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use corten_config::{AppearanceConfig, ConfigManager, InputSettingsConfig};
 use corten_theme::{Palette, PatinaVariant, ThemeMode};
-use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::allocator::Fourcc;
+use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::drm::compositor::FrameFlags;
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::output::{DrmOutputManager, DrmOutputRenderElements};
@@ -14,31 +14,31 @@ use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmNode, NodeType};
 use smithay::backend::egl::{EGLContext, EGLDisplay};
 use smithay::backend::input::{Axis, AxisSource, ButtonState, KeyState, KeyboardKeyEvent};
 use smithay::backend::libinput::LibinputSessionInterface;
+use smithay::backend::renderer::Color32F;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+    WaylandSurfaceRenderElement, render_elements_from_surface_tree,
 };
 use smithay::backend::renderer::element::{Id, Kind};
 use smithay::backend::renderer::glow::GlowRenderer;
 use smithay::backend::renderer::utils::CommitCounter;
-use smithay::backend::renderer::Color32F;
-use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::Session;
-use smithay::backend::udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent};
-use smithay::desktop::{layer_map_for_output, PopupManager, WindowSurfaceType};
-use smithay::input::keyboard::keysyms;
+use smithay::backend::session::libseat::LibSeatSession;
+use smithay::backend::udev::{UdevBackend, UdevEvent, all_gpus, primary_gpu};
+use smithay::desktop::{PopupManager, WindowSurfaceType, layer_map_for_output};
 use smithay::input::keyboard::FilterResult;
+use smithay::input::keyboard::keysyms;
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent, RelativeMotionEvent,
 };
 use smithay::output::{Mode as OutputMode, OutputModeSource};
-use smithay::reexports::drm::control::{connector, Device as ControlDevice};
-use smithay::reexports::input::event::pointer::PointerEventTrait;
-use smithay::reexports::input::event::{keyboard::KeyboardEventTrait, EventTrait};
+use smithay::reexports::drm::control::{Device as ControlDevice, connector};
 use smithay::reexports::input::Libinput;
+use smithay::reexports::input::event::pointer::PointerEventTrait;
+use smithay::reexports::input::event::{EventTrait, keyboard::KeyboardEventTrait};
 use smithay::reexports::rustix::fs::OFlags;
-use smithay::utils::{DeviceFd, Point, Rectangle, Scale, Size, SERIAL_COUNTER};
+use smithay::utils::{DeviceFd, Point, Rectangle, SERIAL_COUNTER, Scale, Size};
 use smithay::wayland::shell::wlr_layer::Layer;
 use tracing::info;
 use wayland_server::{Display, ListeningSocket};
@@ -47,9 +47,9 @@ use crate::glow_shader::{DualKawaseBlurPipeline, GlassRegion, GlowShaderManager}
 use crate::handlers::ClientState;
 use crate::state::CortenCompositor;
 use crate::{
-    apply_display_settings, binding_matches, draw_glow_ring, draw_semantic_cursor,
-    draw_window_titlebar, secondary_display_settings, secondary_output_location,
-    send_frames_surface_tree, CompositorConfig, CustomRenderElement,
+    CompositorConfig, CustomRenderElement, apply_display_settings, binding_matches, draw_glow_ring,
+    draw_semantic_cursor, draw_window_titlebar, secondary_display_settings,
+    secondary_output_location, send_frames_surface_tree,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,11 +78,12 @@ fn try_enable_vrr<D: ControlDevice>(
     if let Ok(props) = drm.get_properties(conn_handle) {
         let (ids, vals) = props.as_props_and_values();
         for (&id, &val) in ids.iter().zip(vals.iter()) {
-            if let Ok(info) = drm.get_property(id) {
-                if info.name().to_bytes() == b"vrr_capable" && val != 0 {
-                    vrr_supported = true;
-                    break;
-                }
+            if let Ok(info) = drm.get_property(id)
+                && info.name().to_bytes() == b"vrr_capable"
+                && val != 0
+            {
+                vrr_supported = true;
+                break;
             }
         }
     }
@@ -92,17 +93,17 @@ fn try_enable_vrr<D: ControlDevice>(
     if let Ok(props) = drm.get_properties(crtc_handle) {
         let (ids, _) = props.as_props_and_values();
         for &id in ids {
-            if let Ok(info) = drm.get_property(id) {
-                if info.name().to_bytes() == b"VRR_ENABLED" {
-                    if drm.set_property(crtc_handle, id, 1).is_ok() {
-                        info!(
-                            ?conn_handle,
-                            ?crtc_handle,
-                            "Enabled Adaptive Sync / VRR (FreeSync) on DRM CRTC"
-                        );
-                    }
-                    break;
+            if let Ok(info) = drm.get_property(id)
+                && info.name().to_bytes() == b"VRR_ENABLED"
+            {
+                if drm.set_property(crtc_handle, id, 1).is_ok() {
+                    info!(
+                        ?conn_handle,
+                        ?crtc_handle,
+                        "Enabled Adaptive Sync / VRR (FreeSync) on DRM CRTC"
+                    );
                 }
+                break;
             }
         }
     }
@@ -129,51 +130,56 @@ fn apply_drm_hdr_and_color_management<D: ControlDevice>(
                         let hdr_meta = DrmHdrOutputMetadata::hdr10(color_space, max_nits);
                         match drm.create_property_blob(&hdr_meta) {
                             Ok(blob_val) => {
-                                if let Some(blob_id) = blob_val.as_blob() {
-                                    if drm.set_property(conn_handle, id, blob_id).is_ok() {
-                                        info!(
-                                            ?conn_handle,
-                                            nits = max_nits,
-                                            cs = %color_space.as_str(),
-                                            "Applied DRM HDR_OUTPUT_METADATA to connector"
-                                        );
-                                    }
+                                if let Some(blob_id) = blob_val.as_blob()
+                                    && drm.set_property(conn_handle, id, blob_id).is_ok()
+                                {
+                                    info!(
+                                        ?conn_handle,
+                                        nits = max_nits,
+                                        cs = %color_space.as_str(),
+                                        "Applied DRM HDR_OUTPUT_METADATA to connector"
+                                    );
                                 }
                             }
                             Err(e) => {
-                                tracing::warn!(?conn_handle, "Failed to create HDR property blob: {:?}", e);
+                                tracing::warn!(
+                                    ?conn_handle,
+                                    "Failed to create HDR property blob: {:?}",
+                                    e
+                                );
                             }
                         }
                     } else {
                         // Clear HDR metadata
                         let _ = drm.set_property(conn_handle, id, 0);
                     }
-                } else if name == b"Colorspace" {
-                    if let ValueType::Enum(ref enum_vals) = info.value_type() {
-                        let (_, enums) = enum_vals.values();
-                        let target_name: &[u8] = if config.hdr_enabled {
-                            match color_space {
-                                ColorSpace::Bt2020 => b"BT2020_RGB",
-                                ColorSpace::DciP3 => b"DCI-P3_RGB_D65",
-                                ColorSpace::Srgb => b"Default",
-                            }
-                        } else {
-                            b"Default"
-                        };
-
-                        if let Some(target_enum) = enums.iter().find(|e| {
-                            let ename = e.name().to_bytes();
-                            ename == target_name
-                                || (target_name == b"BT2020_RGB" && ename == b"BT2020_CYCC")
-                        }) {
-                            if drm.set_property(conn_handle, id, target_enum.value()).is_ok() {
-                                info!(
-                                    ?conn_handle,
-                                    target = ?target_enum.name(),
-                                    "Configured DRM connector Colorspace"
-                                );
-                            }
+                } else if name == b"Colorspace"
+                    && let ValueType::Enum(ref enum_vals) = info.value_type()
+                {
+                    let (_, enums) = enum_vals.values();
+                    let target_name: &[u8] = if config.hdr_enabled {
+                        match color_space {
+                            ColorSpace::Bt2020 => b"BT2020_RGB",
+                            ColorSpace::DciP3 => b"DCI-P3_RGB_D65",
+                            ColorSpace::Srgb => b"Default",
                         }
+                    } else {
+                        b"Default"
+                    };
+
+                    if let Some(target_enum) = enums.iter().find(|e| {
+                        let ename = e.name().to_bytes();
+                        ename == target_name
+                            || (target_name == b"BT2020_RGB" && ename == b"BT2020_CYCC")
+                    }) && drm
+                        .set_property(conn_handle, id, target_enum.value())
+                        .is_ok()
+                    {
+                        info!(
+                            ?conn_handle,
+                            target = ?target_enum.name(),
+                            "Configured DRM connector Colorspace"
+                        );
                     }
                 }
             }
@@ -306,7 +312,9 @@ fn build_secondary_scene(
     let output_scale = output.current_scale();
     let fractional_scale = output_scale.fractional_scale();
     let render_scale = Scale::from(fractional_scale);
-    if !state.overview_mode && state.layout_for_output(output).mode() != corten_config::LayoutMode::Floating {
+    if !state.overview_mode
+        && state.layout_for_output(output).mode() != corten_config::LayoutMode::Floating
+    {
         let tiled_targets = state.layout_for_output_mut(output).arrange(usable_area);
         for (window, target_rect) in tiled_targets {
             crate::layout::configure_window_geometry(&window, target_rect);
@@ -371,13 +379,14 @@ fn build_secondary_scene(
         let is_fs = state.layout_for_output(output).is_fullscreen(&window);
         let titlebar_h = crate::layout::window_titlebar_height(&window, is_fs);
         let csd_offset = crate::layout::window_csd_offset(&window);
-        let client_logical_loc = rect.loc - csd_offset + smithay::utils::Point::from((0, titlebar_h));
+        let client_logical_loc =
+            rect.loc - csd_offset + smithay::utils::Point::from((0, titlebar_h));
 
         if let Some(surface) = crate::layout::window_wl_surface(&window) {
             // 1. Popups (frontmost)
             for (popup, popup_offset) in PopupManager::popups_for_surface(&surface) {
-                let popup_loc = (client_logical_loc + popup_offset)
-                    .to_physical_precise_round(fractional_scale);
+                let popup_loc =
+                    (client_logical_loc + popup_offset).to_physical_precise_round(fractional_scale);
                 let surfaces: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                     render_elements_from_surface_tree(
                         renderer,
@@ -426,8 +435,7 @@ fn build_secondary_scene(
 
         // 3. Client Surface Content
         if let Some(surface) = crate::layout::window_wl_surface(&window) {
-            let client_loc = client_logical_loc
-                .to_physical_precise_round(fractional_scale);
+            let client_loc = client_logical_loc.to_physical_precise_round(fractional_scale);
             let win_alpha = state.layout_for_output(output).window_alpha(&window);
             let surfaces: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                 render_elements_from_surface_tree(
@@ -537,15 +545,15 @@ fn find_surface_under_loc(
         let mut found = None;
         for layer in [Layer::Overlay, Layer::Top] {
             for layer_surface in layer_map.layers_on(layer).rev() {
-                if let Some(geo) = layer_map.layer_geometry(layer_surface) {
-                    if geo.to_f64().contains(out_rel_loc) {
-                        let rel_point = out_rel_loc - geo.loc.to_f64();
-                        if let Some((surface, sub_loc)) =
-                            layer_surface.surface_under(rel_point, WindowSurfaceType::all())
-                        {
-                            found = Some((surface, out_loc + (geo.loc + sub_loc).to_f64()));
-                            break;
-                        }
+                if let Some(geo) = layer_map.layer_geometry(layer_surface)
+                    && geo.to_f64().contains(out_rel_loc)
+                {
+                    let rel_point = out_rel_loc - geo.loc.to_f64();
+                    if let Some((surface, sub_loc)) =
+                        layer_surface.surface_under(rel_point, WindowSurfaceType::all())
+                    {
+                        found = Some((surface, out_loc + (geo.loc + sub_loc).to_f64()));
+                        break;
                     }
                 }
             }
@@ -580,7 +588,9 @@ fn find_surface_under_loc(
             continue;
         }
         if rect.to_f64().contains(out_rel_loc) {
-            let is_fs = state.layout_for_output(&target_output).is_fullscreen(&window);
+            let is_fs = state
+                .layout_for_output(&target_output)
+                .is_fullscreen(&window);
             let titlebar_h = crate::layout::window_titlebar_height(&window, is_fs) as f64;
             if titlebar_h > 0.0 && (out_rel_loc.y - rect.loc.y as f64) < titlebar_h {
                 // Inside server titlebar! DO NOT return client surface so buttons get clicks
@@ -597,10 +607,11 @@ fn find_surface_under_loc(
             {
                 return Some((
                     surface,
-                    out_loc + smithay::utils::Point::from((
-                        origin.x + sub_loc.x as f64,
-                        origin.y + sub_loc.y as f64,
-                    )),
+                    out_loc
+                        + smithay::utils::Point::from((
+                            origin.x + sub_loc.x as f64,
+                            origin.y + sub_loc.y as f64,
+                        )),
                 ));
             }
         }
@@ -612,15 +623,15 @@ fn find_surface_under_loc(
         let mut found = None;
         for layer in [Layer::Bottom, Layer::Background] {
             for layer_surface in layer_map.layers_on(layer).rev() {
-                if let Some(geo) = layer_map.layer_geometry(layer_surface) {
-                    if geo.to_f64().contains(out_rel_loc) {
-                        let rel_point = out_rel_loc - geo.loc.to_f64();
-                        if let Some((surface, sub_loc)) =
-                            layer_surface.surface_under(rel_point, WindowSurfaceType::all())
-                        {
-                            found = Some((surface, out_loc + (geo.loc + sub_loc).to_f64()));
-                            break;
-                        }
+                if let Some(geo) = layer_map.layer_geometry(layer_surface)
+                    && geo.to_f64().contains(out_rel_loc)
+                {
+                    let rel_point = out_rel_loc - geo.loc.to_f64();
+                    if let Some((surface, sub_loc)) =
+                        layer_surface.surface_under(rel_point, WindowSurfaceType::all())
+                    {
+                        found = Some((surface, out_loc + (geo.loc + sub_loc).to_f64()));
+                        break;
                     }
                 }
             }
@@ -676,25 +687,26 @@ impl DrmBackendState {
 
         let mut secondary_gpus = Vec::new();
         for node in &discovered_nodes {
-            if node != &primary_gpu && node.ty() == NodeType::Primary {
-                if let Some(path) = node.dev_path() {
-                    let has_render = node.has_render();
-                    let render_path = node.dev_path_with_type(NodeType::Render);
-                    info!(
-                        ?node,
-                        ?path,
-                        ?render_path,
-                        has_render,
-                        "Discovered secondary GPU device for PRIME render offloading"
-                    );
-                    secondary_gpus.push(MultiGpuDevice {
-                        node: *node,
-                        dev_path: path,
-                        render_path,
-                        is_primary: false,
-                        has_render_node: has_render,
-                    });
-                }
+            if node != &primary_gpu
+                && node.ty() == NodeType::Primary
+                && let Some(path) = node.dev_path()
+            {
+                let has_render = node.has_render();
+                let render_path = node.dev_path_with_type(NodeType::Render);
+                info!(
+                    ?node,
+                    ?path,
+                    ?render_path,
+                    has_render,
+                    "Discovered secondary GPU device for PRIME render offloading"
+                );
+                secondary_gpus.push(MultiGpuDevice {
+                    node: *node,
+                    dev_path: path,
+                    render_path,
+                    is_primary: false,
+                    has_render_node: has_render,
+                });
             }
         }
 
@@ -754,21 +766,21 @@ pub fn run_drm(
 
     let mut connected_monitors = Vec::new();
     for conn_handle in res_handles.connectors() {
-        if let Ok(info) = drm_device.get_connector(*conn_handle, false) {
-            if info.state() == connector::State::Connected {
-                let preferred = info
-                    .modes()
-                    .iter()
-                    .find(|m| {
-                        m.mode_type()
-                            .contains(smithay::reexports::drm::control::ModeTypeFlags::PREFERRED)
-                    })
-                    .cloned()
-                    .or_else(|| info.modes().first().cloned());
+        if let Ok(info) = drm_device.get_connector(*conn_handle, false)
+            && info.state() == connector::State::Connected
+        {
+            let preferred = info
+                .modes()
+                .iter()
+                .find(|m| {
+                    m.mode_type()
+                        .contains(smithay::reexports::drm::control::ModeTypeFlags::PREFERRED)
+                })
+                .cloned()
+                .or_else(|| info.modes().first().cloned());
 
-                if let Some(mode) = preferred {
-                    connected_monitors.push((info, *conn_handle, mode));
-                }
+            if let Some(mode) = preferred {
+                connected_monitors.push((info, *conn_handle, mode));
             }
         }
     }
@@ -916,9 +928,10 @@ pub fn run_drm(
         anyhow::anyhow!("Initialized DRM output did not yield a valid primary CRTC handle")
     })?;
     try_enable_vrr(output_manager.device(), conn_handle, primary_crtc);
-    let init_disp_config = ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default("displays")
-        .map(|c| c.get().clone())
-        .unwrap_or_default();
+    let init_disp_config =
+        ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default("displays")
+            .map(|c| c.get().clone())
+            .unwrap_or_default();
     apply_drm_hdr_and_color_management(output_manager.device(), conn_handle, &init_disp_config);
     let mut used_crtcs = vec![primary_crtc];
     let mut active_connectors = vec![conn_handle];
@@ -991,7 +1004,11 @@ pub fn run_drm(
         ) {
             Ok(secondary) => {
                 try_enable_vrr(output_manager.device(), *handle, crtc);
-                apply_drm_hdr_and_color_management(output_manager.device(), *handle, &init_disp_config);
+                apply_drm_hdr_and_color_management(
+                    output_manager.device(),
+                    *handle,
+                    &init_disp_config,
+                );
                 state.register_output(&mut display, output);
                 used_crtcs.push(crtc);
                 active_connectors.push(*handle);
@@ -1052,7 +1069,10 @@ pub fn run_drm(
         "Corten Compositor (DRM mode) listening on socket: {}",
         socket_name
     );
-    std::env::set_var("WAYLAND_DISPLAY", &socket_name);
+    // SAFETY: Called during single-threaded compositor startup before spawning worker threads.
+    unsafe {
+        std::env::set_var("WAYLAND_DISPLAY", &socket_name);
+    }
 
     // 8. Initialize Libinput Input Backend
     let mut libinput_ctx =
@@ -1134,7 +1154,9 @@ pub fn run_drm(
         }
     }
     let mut a11y_rx = None;
-    if let Ok(a11y_cfg) = ConfigManager::<corten_config::AccessibilityConfig>::load_or_default("accessibility") {
+    if let Ok(a11y_cfg) =
+        ConfigManager::<corten_config::AccessibilityConfig>::load_or_default("accessibility")
+    {
         state.accessibility = a11y_cfg.get().clone();
         if let Ok((_watcher, rx)) = a11y_cfg.spawn_watcher() {
             std::mem::forget(_watcher);
@@ -1145,10 +1167,13 @@ pub fn run_drm(
         Palette::high_contrast_dark()
     } else {
         Palette::for_mode(theme_mode).with_patina(active_patina)
-    }.with_color_filter(match state.accessibility.color_filter {
+    }
+    .with_color_filter(match state.accessibility.color_filter {
         corten_config::ColorFilterChoice::None => corten_theme::ColorFilterMode::None,
         corten_config::ColorFilterChoice::Protanopia => corten_theme::ColorFilterMode::Protanopia,
-        corten_config::ColorFilterChoice::Deuteranopia => corten_theme::ColorFilterMode::Deuteranopia,
+        corten_config::ColorFilterChoice::Deuteranopia => {
+            corten_theme::ColorFilterMode::Deuteranopia
+        }
         corten_config::ColorFilterChoice::Tritanopia => corten_theme::ColorFilterMode::Tritanopia,
         corten_config::ColorFilterChoice::Monochrome => corten_theme::ColorFilterMode::Monochrome,
     });
@@ -1197,7 +1222,11 @@ pub fn run_drm(
         if let Some(ref rx) = a11y_rx {
             while let Ok(new_a11y) = rx.try_recv() {
                 state.accessibility = new_a11y;
-                cursor_theme_manager.set_target_size(if state.accessibility.large_cursor { 48 } else { 24 });
+                cursor_theme_manager.set_target_size(if state.accessibility.large_cursor {
+                    48
+                } else {
+                    24
+                });
                 palette_dirty = true;
             }
         }
@@ -1206,12 +1235,21 @@ pub fn run_drm(
                 Palette::high_contrast_dark()
             } else {
                 Palette::for_mode(theme_mode).with_patina(active_patina)
-            }.with_color_filter(match state.accessibility.color_filter {
+            }
+            .with_color_filter(match state.accessibility.color_filter {
                 corten_config::ColorFilterChoice::None => corten_theme::ColorFilterMode::None,
-                corten_config::ColorFilterChoice::Protanopia => corten_theme::ColorFilterMode::Protanopia,
-                corten_config::ColorFilterChoice::Deuteranopia => corten_theme::ColorFilterMode::Deuteranopia,
-                corten_config::ColorFilterChoice::Tritanopia => corten_theme::ColorFilterMode::Tritanopia,
-                corten_config::ColorFilterChoice::Monochrome => corten_theme::ColorFilterMode::Monochrome,
+                corten_config::ColorFilterChoice::Protanopia => {
+                    corten_theme::ColorFilterMode::Protanopia
+                }
+                corten_config::ColorFilterChoice::Deuteranopia => {
+                    corten_theme::ColorFilterMode::Deuteranopia
+                }
+                corten_config::ColorFilterChoice::Tritanopia => {
+                    corten_theme::ColorFilterMode::Tritanopia
+                }
+                corten_config::ColorFilterChoice::Monochrome => {
+                    corten_theme::ColorFilterMode::Monochrome
+                }
             });
             bg_color = Color32F::new(
                 palette.background.r,
@@ -1225,134 +1263,137 @@ pub fn run_drm(
         let _ = event_loop.dispatch(Some(std::time::Duration::from_millis(0)), &mut state);
 
         // Process runtime DRM connector hotplug events (HDMI / DisplayPort plug & unplug)
-        if hotplug_pending.replace(false) {
-            if let Ok(handles) = output_manager.device().resource_handles() {
-                let mut current_connected = Vec::new();
-                for &ch in handles.connectors() {
-                    if let Ok(info) = output_manager.device().get_connector(ch, true) {
-                        if info.state() == connector::State::Connected {
-                            let preferred = info
-                                .modes()
-                                .iter()
-                                .find(|m| {
-                                    m.mode_type().contains(
-                                        smithay::reexports::drm::control::ModeTypeFlags::PREFERRED,
-                                    )
-                                })
-                                .cloned()
-                                .or_else(|| info.modes().first().cloned());
-                            if let Some(mode) = preferred {
-                                current_connected.push((info, ch, mode));
-                            }
-                        }
-                    }
-                }
-
-                // 1. Remove any secondary outputs whose connector was unplugged
-                let mut idx = 1;
-                while idx < active_connectors.len() {
-                    let conn = active_connectors[idx];
-                    let still_connected = current_connected.iter().any(|(_, ch, _)| *ch == conn);
-                    if !still_connected {
-                        info!(
-                            "DRM Hotplug: Secondary connector {:?} disconnected; releasing CRTC",
-                            conn
-                        );
-                        active_connectors.remove(idx);
-                        let removed_output = drm_outputs.remove(idx);
-                        let removed_crtc = removed_output.crtc();
-                        used_crtcs.retain(|&c| c != removed_crtc);
-                        pending_crtcs.retain(|&c| c != removed_crtc);
-                        if idx <= drm_mode_lists.len() {
-                            drm_mode_lists.remove(idx - 1);
-                        }
-                        if idx - 1 < state.additional_outputs.len() {
-                            let wayland_out = state.additional_outputs.get(idx - 1).cloned();
-                            if let Some(out) = wayland_out {
-                                state.rescue_orphan_windows(&out.name());
-                            }
-                        }
-                    } else {
-                        idx += 1;
-                    }
-                }
-
-                // 2. Initialize any newly plugged-in secondary connectors
-                let (secondary_scale_pct, arrangement, _, offset_y) = secondary_display_settings();
-                for (info, ch, mode) in current_connected {
-                    if active_connectors.contains(&ch) {
-                        continue;
-                    }
-                    let Some(crtc) = handles
-                        .crtcs()
+        if hotplug_pending.replace(false)
+            && let Ok(handles) = output_manager.device().resource_handles()
+        {
+            let mut current_connected = Vec::new();
+            for &ch in handles.connectors() {
+                if let Ok(info) = output_manager.device().get_connector(ch, true)
+                    && info.state() == connector::State::Connected
+                {
+                    let preferred = info
+                        .modes()
                         .iter()
-                        .copied()
-                        .find(|candidate| !used_crtcs.contains(candidate))
-                    else {
-                        tracing::warn!(
-                            "DRM Hotplug: No unused CRTC available for newly connected monitor"
-                        );
-                        break;
-                    };
-                    let (width, height) = mode.size();
-                    let output_name = info.to_string();
-                    let output_mode = OutputMode {
-                        size: Size::from((width as i32, height as i32)),
-                        refresh: (mode.vrefresh() * 1000) as i32,
-                    };
-                    let location = Point::from(secondary_output_location(
-                        &arrangement,
-                        screen_w,
-                        &mut next_left_x,
-                        &mut next_output_x,
-                        width as i32,
-                        offset_y,
-                    ));
-                    let output = state.create_output_with_physical_size(
-                        output_name.clone(),
-                        output_mode,
-                        location,
-                        smithay::output::Scale::Fractional(secondary_scale_pct as f64 / 100.0),
-                        info.size().unwrap_or((0, 0)),
-                    );
-                    if let Ok(secondary) = output_manager.initialize_output(
-                        crtc,
-                        mode,
-                        &[ch],
-                        OutputModeSource::Auto(output.clone()),
-                        None,
-                        &mut renderer,
-                        &drm_render_elements,
-                    ) {
-                        try_enable_vrr(output_manager.device(), ch, crtc);
-                        let disp_cfg = ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default("displays")
-                            .map(|c| c.get().clone())
-                            .unwrap_or_default();
-                        apply_drm_hdr_and_color_management(output_manager.device(), ch, &disp_cfg);
-                        state.register_output(&mut display, output);
-                        used_crtcs.push(crtc);
-                        active_connectors.push(ch);
-                        drm_outputs.push(secondary);
-                        drm_mode_lists.push(info.modes().to_vec());
-                        state.sync_ipc_snapshot();
-                        crate::send_osd_notification(
-                            "display",
-                            "Yeni Ekran Bağlandı",
-                            &format!("{} ({}x{}) aktif", output_name, width, height),
-                            100,
-                        );
-                        if let Some(ref tx) = state.event_broadcaster {
-                            let payload = format!(
-                                r#"{{"event":"output:connected","data":{{"output":"{}","width":{},"height":{}}}}}"#,
-                                output_name, width, height
-                            );
-                            let _ = tx.send(payload);
-                        }
-                        info!(
-                            "DRM Hotplug: Activated newly connected monitor {:?} ({width}x{height})",
-                            info.interface()
-                        );
+                        .find(|m| {
+                            m.mode_type().contains(
+                                smithay::reexports::drm::control::ModeTypeFlags::PREFERRED,
+                            )
+                        })
+                        .cloned()
+                        .or_else(|| info.modes().first().cloned());
+                    if let Some(mode) = preferred {
+                        current_connected.push((info, ch, mode));
                     }
+                }
+            }
+
+            // 1. Remove any secondary outputs whose connector was unplugged
+            let mut idx = 1;
+            while idx < active_connectors.len() {
+                let conn = active_connectors[idx];
+                let still_connected = current_connected.iter().any(|(_, ch, _)| *ch == conn);
+                if !still_connected {
+                    info!(
+                        "DRM Hotplug: Secondary connector {:?} disconnected; releasing CRTC",
+                        conn
+                    );
+                    active_connectors.remove(idx);
+                    let removed_output = drm_outputs.remove(idx);
+                    let removed_crtc = removed_output.crtc();
+                    used_crtcs.retain(|&c| c != removed_crtc);
+                    pending_crtcs.retain(|&c| c != removed_crtc);
+                    if idx <= drm_mode_lists.len() {
+                        drm_mode_lists.remove(idx - 1);
+                    }
+                    if idx - 1 < state.additional_outputs.len() {
+                        let wayland_out = state.additional_outputs.get(idx - 1).cloned();
+                        if let Some(out) = wayland_out {
+                            state.rescue_orphan_windows(&out.name());
+                        }
+                    }
+                } else {
+                    idx += 1;
+                }
+            }
+
+            // 2. Initialize any newly plugged-in secondary connectors
+            let (secondary_scale_pct, arrangement, _, offset_y) = secondary_display_settings();
+            for (info, ch, mode) in current_connected {
+                if active_connectors.contains(&ch) {
+                    continue;
+                }
+                let Some(crtc) = handles
+                    .crtcs()
+                    .iter()
+                    .copied()
+                    .find(|candidate| !used_crtcs.contains(candidate))
+                else {
+                    tracing::warn!(
+                        "DRM Hotplug: No unused CRTC available for newly connected monitor"
+                    );
+                    break;
+                };
+                let (width, height) = mode.size();
+                let output_name = info.to_string();
+                let output_mode = OutputMode {
+                    size: Size::from((width as i32, height as i32)),
+                    refresh: (mode.vrefresh() * 1000) as i32,
+                };
+                let location = Point::from(secondary_output_location(
+                    &arrangement,
+                    screen_w,
+                    &mut next_left_x,
+                    &mut next_output_x,
+                    width as i32,
+                    offset_y,
+                ));
+                let output = state.create_output_with_physical_size(
+                    output_name.clone(),
+                    output_mode,
+                    location,
+                    smithay::output::Scale::Fractional(secondary_scale_pct as f64 / 100.0),
+                    info.size().unwrap_or((0, 0)),
+                );
+                if let Ok(secondary) = output_manager.initialize_output(
+                    crtc,
+                    mode,
+                    &[ch],
+                    OutputModeSource::Auto(output.clone()),
+                    None,
+                    &mut renderer,
+                    &drm_render_elements,
+                ) {
+                    try_enable_vrr(output_manager.device(), ch, crtc);
+                    let disp_cfg =
+                        ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default(
+                            "displays",
+                        )
+                        .map(|c| c.get().clone())
+                        .unwrap_or_default();
+                    apply_drm_hdr_and_color_management(output_manager.device(), ch, &disp_cfg);
+                    state.register_output(&mut display, output);
+                    used_crtcs.push(crtc);
+                    active_connectors.push(ch);
+                    drm_outputs.push(secondary);
+                    drm_mode_lists.push(info.modes().to_vec());
+                    state.sync_ipc_snapshot();
+                    crate::send_osd_notification(
+                        "display",
+                        "Yeni Ekran Bağlandı",
+                        &format!("{} ({}x{}) aktif", output_name, width, height),
+                        100,
+                    );
+                    if let Some(ref tx) = state.event_broadcaster {
+                        let payload = format!(
+                            r#"{{"event":"output:connected","data":{{"output":"{}","width":{},"height":{}}}}}"#,
+                            output_name, width, height
+                        );
+                        let _ = tx.send(payload);
+                    }
+                    info!(
+                        "DRM Hotplug: Activated newly connected monitor {:?} ({width}x{height})",
+                        info.interface()
+                    );
                 }
             }
         }
@@ -1455,7 +1496,11 @@ pub fn run_drm(
                     }
                 }
                 for &ch in &active_connectors {
-                    apply_drm_hdr_and_color_management(output_manager.device(), ch, display_config.get());
+                    apply_drm_hdr_and_color_management(
+                        output_manager.device(),
+                        ch,
+                        display_config.get(),
+                    );
                 }
             }
         }
@@ -1561,14 +1606,13 @@ pub fn run_drm(
                             }
 
                             if state.lock_surface_active() {
-                                if let Some((lock_surface, _)) = state.lock_surfaces.first().cloned() {
-                                    if let Some(kb) = state.seat.get_keyboard() {
+                                if let Some((lock_surface, _)) = state.lock_surfaces.first().cloned()
+                                    && let Some(kb) = state.seat.get_keyboard() {
                                         let lock_wl = lock_surface.wl_surface().clone();
                                         if kb.current_focus().as_ref() != Some(&lock_wl) {
                                             kb.set_focus(state, Some(lock_wl), serial);
                                         }
                                     }
-                                }
                                 return FilterResult::Forward;
                             }
                             if state.focused_surface_inhibits_shortcuts() {
@@ -1852,11 +1896,10 @@ pub fn run_drm(
                                             if let Some(x11) = next.x11_surface() {
                                                 let _ = x11.set_activated(true);
                                             }
-                                            if let Some(surface) = crate::layout::window_wl_surface(&next) {
-                                                if let Some(kb) = state.seat.get_keyboard() {
+                                            if let Some(surface) = crate::layout::window_wl_surface(&next)
+                                                && let Some(kb) = state.seat.get_keyboard() {
                                                     kb.set_focus(state, Some(surface), serial);
                                                 }
-                                            }
                                         }
                                         return FilterResult::Intercept(());
                                     }
@@ -1866,11 +1909,10 @@ pub fn run_drm(
                                             if let Some(x11) = prev.x11_surface() {
                                                 let _ = x11.set_activated(true);
                                             }
-                                            if let Some(surface) = crate::layout::window_wl_surface(&prev) {
-                                                if let Some(kb) = state.seat.get_keyboard() {
+                                            if let Some(surface) = crate::layout::window_wl_surface(&prev)
+                                                && let Some(kb) = state.seat.get_keyboard() {
                                                     kb.set_focus(state, Some(surface), serial);
                                                 }
-                                            }
                                         }
                                         return FilterResult::Intercept(());
                                     }
@@ -1959,11 +2001,10 @@ pub fn run_drm(
                                         if let Some(x11) = target.x11_surface() {
                                             let _ = x11.set_activated(true);
                                         }
-                                        if let Some(surface) = crate::layout::window_wl_surface(&target) {
-                                            if let Some(kb) = state.seat.get_keyboard() {
+                                        if let Some(surface) = crate::layout::window_wl_surface(&target)
+                                            && let Some(kb) = state.seat.get_keyboard() {
                                                 kb.set_focus(state, Some(surface), serial);
                                             }
-                                        }
                                     }
                                      return FilterResult::Intercept(());
                                 }
@@ -2075,14 +2116,13 @@ pub fn run_drm(
                                 if state.session_locked {
                                     if let Some((lock_surface, _)) =
                                         state.lock_surfaces.first().cloned()
+                                        && let Some(kb) = state.seat.get_keyboard()
                                     {
-                                        if let Some(kb) = state.seat.get_keyboard() {
-                                            kb.set_focus(
-                                                &mut state,
-                                                Some(lock_surface.wl_surface().clone()),
-                                                serial,
-                                            );
-                                        }
+                                        kb.set_focus(
+                                            &mut state,
+                                            Some(lock_surface.wl_surface().clone()),
+                                            serial,
+                                        );
                                     }
                                     pointer.button(&mut state, &button_event);
                                     pointer.frame(&mut state);
@@ -2111,19 +2151,14 @@ pub fn run_drm(
                                     let rel_y = state.cursor_location.y - out_loc.y as f64;
                                     if let Some(sx) =
                                         state.layout_for_output(&target_output).split_x(usable_area)
+                                        && (rel_x as i32 - sx).abs() <= 6
+                                        && rel_y >= (usable_area.loc.y + 36) as f64
+                                        && rel_y <= (usable_area.loc.y + usable_area.size.h) as f64
                                     {
-                                        if (rel_x as i32 - sx).abs() <= 6
-                                            && rel_y >= (usable_area.loc.y + 36) as f64
-                                            && rel_y
-                                                <= (usable_area.loc.y + usable_area.size.h) as f64
-                                        {
-                                            state.split_drag = Some((
-                                                state.cursor_location,
-                                                state
-                                                    .layout_for_output(&target_output)
-                                                    .master_ratio(),
-                                            ));
-                                        }
+                                        state.split_drag = Some((
+                                            state.cursor_location,
+                                            state.layout_for_output(&target_output).master_ratio(),
+                                        ));
                                     }
                                 }
 
@@ -2135,18 +2170,17 @@ pub fn run_drm(
                                         for layer_surface in layer_map.layers_on(layer).rev() {
                                             if let Some(geo) =
                                                 layer_map.layer_geometry(layer_surface)
+                                                && geo.to_f64().contains(out_rel_loc)
                                             {
-                                                if geo.to_f64().contains(out_rel_loc) {
-                                                    let rel_point = out_rel_loc - geo.loc.to_f64();
-                                                    if let Some((surface, _)) = layer_surface
-                                                        .surface_under(
-                                                            rel_point,
-                                                            WindowSurfaceType::all(),
-                                                        )
-                                                    {
-                                                        found = Some(surface);
-                                                        break;
-                                                    }
+                                                let rel_point = out_rel_loc - geo.loc.to_f64();
+                                                if let Some((surface, _)) = layer_surface
+                                                    .surface_under(
+                                                        rel_point,
+                                                        WindowSurfaceType::all(),
+                                                    )
+                                                {
+                                                    found = Some(surface);
+                                                    break;
                                                 }
                                             }
                                         }
@@ -2198,10 +2232,9 @@ pub fn run_drm(
                                         }
                                         if let Some(surface) =
                                             crate::layout::window_wl_surface(&window)
+                                            && let Some(kb) = state.seat.get_keyboard()
                                         {
-                                            if let Some(kb) = state.seat.get_keyboard() {
-                                                kb.set_focus(&mut state, Some(surface), serial);
-                                            }
+                                            kb.set_focus(&mut state, Some(surface), serial);
                                         }
 
                                         let logo_held = state
@@ -2217,52 +2250,80 @@ pub fn run_drm(
 
                                         if b.button() == 272 {
                                             let win_id = crate::layout::window_stable_id(&window);
-                                            if state.snap_flyout_window == Some(win_id) {
-                                                if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, out_rel_loc) {
-                                                    let usable_area = {
-                                                        let mut map = layer_map_for_output(&target_output);
-                                                        map.arrange();
-                                                        map.non_exclusive_zone()
-                                                    };
-                                                    let gap = state.layout_for_output(&target_output).gap();
-                                                    let snap_target = crate::layout::compute_snap_zone_rect(
+                                            if state.snap_flyout_window == Some(win_id)
+                                                && let Some(zone) =
+                                                    crate::layout::hit_test_snap_flyout(
+                                                        rect,
+                                                        out_rel_loc,
+                                                    )
+                                            {
+                                                let usable_area = {
+                                                    let mut map =
+                                                        layer_map_for_output(&target_output);
+                                                    map.arrange();
+                                                    map.non_exclusive_zone()
+                                                };
+                                                let gap =
+                                                    state.layout_for_output(&target_output).gap();
+                                                let snap_target =
+                                                    crate::layout::compute_snap_zone_rect(
                                                         usable_area,
                                                         zone,
                                                         gap,
                                                     );
-                                                    let layout = state.layout_for_output_mut(&target_output);
-                                                    layout.set_fullscreen(&window, false);
-                                                    layout.set_maximized(&window, usable_area, false);
-                                                    layout.set_floating_geometry(&window, snap_target);
-                                                    crate::layout::configure_window_geometry_force(&window, snap_target, Some(false));
-                                                    state.snap_preview = None;
-                                                    state.snap_flyout_window = None;
-                                                    state.sync_ipc_snapshot();
-                                                    continue;
-                                                }
+                                                let layout =
+                                                    state.layout_for_output_mut(&target_output);
+                                                layout.set_fullscreen(&window, false);
+                                                layout.set_maximized(&window, usable_area, false);
+                                                layout.set_floating_geometry(&window, snap_target);
+                                                crate::layout::configure_window_geometry_force(
+                                                    &window,
+                                                    snap_target,
+                                                    Some(false),
+                                                );
+                                                state.snap_preview = None;
+                                                state.snap_flyout_window = None;
+                                                state.sync_ipc_snapshot();
+                                                continue;
                                             }
                                             let titlebar_h = crate::layout::window_titlebar_height(
                                                 &window,
-                                                state.layout_for_output(&target_output).is_fullscreen(&window),
-                                            ) as f64;
-                                            if titlebar_h > 0.0 && (0.0..=titlebar_h).contains(&rel_win_y) {
+                                                state
+                                                    .layout_for_output(&target_output)
+                                                    .is_fullscreen(&window),
+                                            )
+                                                as f64;
+                                            if titlebar_h > 0.0
+                                                && (0.0..=titlebar_h).contains(&rel_win_y)
+                                            {
                                                 // Clicked inside the Server-Side Window Titlebar!
-                                                let win_id = crate::layout::window_stable_id(&window);
-                                                let tabs = state.layout_for_output(&target_output).window_tabs_metadata(win_id);
-                                                if let Some(tab_idx) = crate::layout::hit_test_titlebar_tab(
-                                                    rect,
-                                                    tabs.len(),
-                                                    out_rel_loc,
-                                                ) {
+                                                let win_id =
+                                                    crate::layout::window_stable_id(&window);
+                                                let tabs = state
+                                                    .layout_for_output(&target_output)
+                                                    .window_tabs_metadata(win_id);
+                                                if let Some(tab_idx) =
+                                                    crate::layout::hit_test_titlebar_tab(
+                                                        rect,
+                                                        tabs.len(),
+                                                        out_rel_loc,
+                                                    )
+                                                {
                                                     let target_tab_id = tabs[tab_idx].0;
-                                                    if let Some((_, focused_win)) =
-                                                        state.layout_for_output_mut(&target_output).focus_window_by_id(target_tab_id)
+                                                    if let Some((_, focused_win)) = state
+                                                        .layout_for_output_mut(&target_output)
+                                                        .focus_window_by_id(target_tab_id)
+                                                        && let Some(surface) =
+                                                            crate::layout::window_wl_surface(
+                                                                &focused_win,
+                                                            )
+                                                        && let Some(kb) = state.seat.get_keyboard()
                                                     {
-                                                        if let Some(surface) = crate::layout::window_wl_surface(&focused_win) {
-                                                            if let Some(kb) = state.seat.get_keyboard() {
-                                                                kb.set_focus(&mut state, Some(surface), serial);
-                                                            }
-                                                        }
+                                                        kb.set_focus(
+                                                            &mut state,
+                                                            Some(surface),
+                                                            serial,
+                                                        );
                                                     }
                                                     state.sync_ipc_snapshot();
                                                     continue;
@@ -2281,11 +2342,15 @@ pub fn run_drm(
                                                 {
                                                     // Maximize / Restore toggle clicked
                                                     let usable_area = {
-                                                        let mut map = layer_map_for_output(&target_output);
+                                                        let mut map =
+                                                            layer_map_for_output(&target_output);
                                                         map.arrange();
                                                         map.non_exclusive_zone()
                                                     };
-                                                    info!("Window Titlebar: Maximize toggle clicked on {:?}", window);
+                                                    info!(
+                                                        "Window Titlebar: Maximize toggle clicked on {:?}",
+                                                        window
+                                                    );
                                                     state
                                                         .layout_for_output_mut(&target_output)
                                                         .toggle_maximize(&window, usable_area);
@@ -2306,37 +2371,74 @@ pub fn run_drm(
                                                     continue;
                                                 } else {
                                                     // Check double click to maximize / restore
-                                                    if let Some((prev_win, prev_instant)) = state.last_titlebar_click.take() {
-                                                        if prev_win == window && prev_instant.elapsed().as_millis() < 320 {
-                                                            let usable_area = {
-                                                                let mut map = layer_map_for_output(&target_output);
-                                                                map.arrange();
-                                                                map.non_exclusive_zone()
-                                                            };
-                                                            info!("Window Titlebar: Double-click maximize toggle on {:?}", window);
-                                                            state
-                                                                .layout_for_output_mut(&target_output)
-                                                                .toggle_maximize(&window, usable_area);
-                                                            state.sync_ipc_snapshot();
-                                                            continue;
-                                                        }
-                                                    }
-                                                    state.last_titlebar_click = Some((window.clone(), std::time::Instant::now()));
-
-                                                    // Dragging anywhere else on the titlebar moves the window
-                                                    let mut drag_rect = rect;
-                                                    if state.layout_for_output_mut(&target_output).is_maximized(&window) {
+                                                    if let Some((prev_win, prev_instant)) =
+                                                        state.last_titlebar_click.take()
+                                                        && prev_win == window
+                                                        && prev_instant.elapsed().as_millis() < 320
+                                                    {
                                                         let usable_area = {
-                                                            let mut map = layer_map_for_output(&target_output);
+                                                            let mut map = layer_map_for_output(
+                                                                &target_output,
+                                                            );
                                                             map.arrange();
                                                             map.non_exclusive_zone()
                                                         };
-                                                        let restored = state.layout_for_output_mut(&target_output).set_maximized(&window, usable_area, false);
-                                                        let new_x = (state.cursor_location.x - (restored.size.w as f64 * 0.5)).round() as i32;
-                                                        let new_y = state.cursor_location.y.round() as i32 - 12;
-                                                        drag_rect = smithay::utils::Rectangle::new(smithay::utils::Point::from((new_x, new_y)), restored.size);
-                                                        state.layout_for_output_mut(&target_output).set_floating_geometry(&window, drag_rect);
-                                                        crate::layout::configure_window_geometry(&window, drag_rect);
+                                                        info!(
+                                                            "Window Titlebar: Double-click maximize toggle on {:?}",
+                                                            window
+                                                        );
+                                                        state
+                                                            .layout_for_output_mut(&target_output)
+                                                            .toggle_maximize(&window, usable_area);
+                                                        state.sync_ipc_snapshot();
+                                                        continue;
+                                                    }
+                                                    state.last_titlebar_click = Some((
+                                                        window.clone(),
+                                                        std::time::Instant::now(),
+                                                    ));
+
+                                                    // Dragging anywhere else on the titlebar moves the window
+                                                    let mut drag_rect = rect;
+                                                    if state
+                                                        .layout_for_output_mut(&target_output)
+                                                        .is_maximized(&window)
+                                                    {
+                                                        let usable_area = {
+                                                            let mut map = layer_map_for_output(
+                                                                &target_output,
+                                                            );
+                                                            map.arrange();
+                                                            map.non_exclusive_zone()
+                                                        };
+                                                        let restored = state
+                                                            .layout_for_output_mut(&target_output)
+                                                            .set_maximized(
+                                                                &window,
+                                                                usable_area,
+                                                                false,
+                                                            );
+                                                        let new_x = (state.cursor_location.x
+                                                            - (restored.size.w as f64 * 0.5))
+                                                            .round()
+                                                            as i32;
+                                                        let new_y = state.cursor_location.y.round()
+                                                            as i32
+                                                            - 12;
+                                                        drag_rect = smithay::utils::Rectangle::new(
+                                                            smithay::utils::Point::from((
+                                                                new_x, new_y,
+                                                            )),
+                                                            restored.size,
+                                                        );
+                                                        state
+                                                            .layout_for_output_mut(&target_output)
+                                                            .set_floating_geometry(
+                                                                &window, drag_rect,
+                                                            );
+                                                        crate::layout::configure_window_geometry(
+                                                            &window, drag_rect,
+                                                        );
                                                     }
                                                     state.dragged_window = Some((
                                                         window.clone(),
@@ -2345,16 +2447,24 @@ pub fn run_drm(
                                                     ));
                                                     continue;
                                                 }
-                                            } else if titlebar_h > 0.0 {
-                                                if let Some(edge) = crate::layout::hit_test_resize_edge(rect, out_rel_loc, 8.0) {
-                                                    info!("Window Edge / Corner Click ({:?}): Initiating resize on {:?}", edge, window);
-                                                    state.resized_window = Some((
-                                                        window.clone(),
-                                                        state.cursor_location,
+                                            } else if titlebar_h > 0.0
+                                                && let Some(edge) =
+                                                    crate::layout::hit_test_resize_edge(
                                                         rect,
-                                                        edge,
-                                                    ));
-                                                }
+                                                        out_rel_loc,
+                                                        8.0,
+                                                    )
+                                            {
+                                                info!(
+                                                    "Window Edge / Corner Click ({:?}): Initiating resize on {:?}",
+                                                    edge, window
+                                                );
+                                                state.resized_window = Some((
+                                                    window.clone(),
+                                                    state.cursor_location,
+                                                    rect,
+                                                    edge,
+                                                ));
                                             }
                                         } else if logo_held && b.button() == 272 {
                                             // Super + Left button initiates window drag & move
@@ -2362,8 +2472,12 @@ pub fn run_drm(
                                                 Some((window.clone(), state.cursor_location, rect));
                                         } else if logo_held && b.button() == 273 {
                                             // Super + Right button initiates window resize
-                                            state.resized_window =
-                                                Some((window.clone(), state.cursor_location, rect, crate::layout::ResizeEdge::BottomRight));
+                                            state.resized_window = Some((
+                                                window.clone(),
+                                                state.cursor_location,
+                                                rect,
+                                                crate::layout::ResizeEdge::BottomRight,
+                                            ));
                                         }
                                     } else if !logo_held && b.button() == 272 {
                                         // Left click on empty desktop canvas: initiate rubberband selection marquee!
@@ -2371,10 +2485,14 @@ pub fn run_drm(
                                             Some((state.cursor_location, state.cursor_location));
                                     } else if !logo_held && b.button() == 273 {
                                         // Right click on empty desktop canvas: trigger Desktop Context Menu at cursor
-                                        info!("Desktop Canvas Right-Click: Spawning Corten Desktop Context Menu at cursor");
+                                        info!(
+                                            "Desktop Canvas Right-Click: Spawning Corten Desktop Context Menu at cursor"
+                                        );
                                         let cur_x = state.cursor_location.x.round() as i32;
                                         let cur_y = state.cursor_location.y.round() as i32;
-                                        crate::state::spawn_desktop_context_menu_async(cur_x, cur_y);
+                                        crate::state::spawn_desktop_context_menu_async(
+                                            cur_x, cur_y,
+                                        );
                                     }
                                 }
                             } else if button_state == ButtonState::Released {
@@ -2390,28 +2508,46 @@ pub fn run_drm(
                                         state.cursor_location.x - out_loc.x as f64,
                                         state.cursor_location.y - out_loc.y as f64,
                                     ));
-                                    let window_rects = state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
-                                    if let Some((target_win, target_rect)) = crate::layout::detect_drag_tab_target(
-                                        out_rel_loc,
-                                        &window_rects,
-                                        &window,
-                                    ) {
+                                    let window_rects = state
+                                        .layout_for_output_mut(&target_output)
+                                        .arrange_animated(usable_area);
+                                    if let Some((target_win, target_rect)) =
+                                        crate::layout::detect_drag_tab_target(
+                                            out_rel_loc,
+                                            &window_rects,
+                                            &window,
+                                        )
+                                    {
                                         let host_id = crate::layout::window_stable_id(&target_win);
                                         let guest_id = crate::layout::window_stable_id(&window);
                                         let layout = state.layout_for_output_mut(&target_output);
                                         layout.merge_windows_into_tab_group(host_id, guest_id);
                                         layout.set_fullscreen(&window, false);
                                         layout.set_floating_geometry(&window, target_rect);
-                                        crate::layout::configure_window_geometry(&window, target_rect);
+                                        crate::layout::configure_window_geometry(
+                                            &window,
+                                            target_rect,
+                                        );
                                         state.snap_preview = None;
-                                    } else if let Some((target_win, dir, new_on_first, _)) = state.drag_split_target.take() {
+                                    } else if let Some((target_win, dir, new_on_first, _)) =
+                                        state.drag_split_target.take()
+                                    {
                                         let layout = state.layout_for_output_mut(&target_output);
                                         layout.set_fullscreen(&window, false);
                                         layout.set_floating(&window, false);
                                         layout.set_mode(corten_config::LayoutMode::Bsp);
-                                        layout.drag_split_window(window.clone(), target_win, dir, new_on_first);
+                                        layout.drag_split_window(
+                                            window.clone(),
+                                            target_win,
+                                            dir,
+                                            new_on_first,
+                                        );
                                         for (w, r) in layout.arrange(usable_area) {
-                                            crate::layout::configure_window_geometry_force(&w, r, Some(false));
+                                            crate::layout::configure_window_geometry_force(
+                                                &w,
+                                                r,
+                                                Some(false),
+                                            );
                                         }
                                         state.snap_preview = None;
                                         state.sync_ipc_snapshot();
@@ -2440,7 +2576,11 @@ pub fn run_drm(
                                                 state.layout_for_output_mut(&target_output);
                                             layout.swap_windows(&window, &target_win);
                                             for (w, r) in layout.arrange(usable_area) {
-                                                crate::layout::configure_window_geometry_force(&w, r, Some(false));
+                                                crate::layout::configure_window_geometry_force(
+                                                    &w,
+                                                    r,
+                                                    Some(false),
+                                                );
                                             }
                                             state.sync_ipc_snapshot();
                                         } else {
@@ -2479,11 +2619,18 @@ pub fn run_drm(
                                                 state.layout_for_output_mut(&target_output);
                                             layout.swap_windows(&window, &target_win);
                                             for (w, r) in layout.arrange(usable_area) {
-                                                crate::layout::configure_window_geometry_force(&w, r, Some(false));
+                                                crate::layout::configure_window_geometry_force(
+                                                    &w,
+                                                    r,
+                                                    Some(false),
+                                                );
                                             }
                                             state.sync_ipc_snapshot();
                                         }
-                                    } else if let Some(geo) = state.layout_for_output(&target_output).floating_geometry(&window) {
+                                    } else if let Some(geo) = state
+                                        .layout_for_output(&target_output)
+                                        .floating_geometry(&window)
+                                    {
                                         crate::layout::configure_window_geometry(&window, geo);
                                     }
                                 }
@@ -2513,11 +2660,8 @@ pub fn run_drm(
                             let mod_state = state.seat.get_keyboard().map(|kb| kb.modifier_state());
                             let zoom_scroll = mod_state.as_ref().is_some_and(|m| m.logo && m.ctrl);
                             if zoom_scroll {
-                                let frame = libinput_scroll_frame(
-                                    &axis_event,
-                                    AxisSource::Wheel,
-                                    false,
-                                );
+                                let frame =
+                                    libinput_scroll_frame(&axis_event, AxisSource::Wheel, false);
                                 use smithay::reexports::input::event::pointer::Axis as LibinputAxis;
                                 use smithay::reexports::input::event::pointer::PointerScrollEvent;
                                 if axis_event.has_axis(LibinputAxis::Vertical) {
@@ -2563,11 +2707,11 @@ pub fn run_drm(
                         GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
                         GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
                     };
+                    use smithay::reexports::input::event::GestureEvent;
                     use smithay::reexports::input::event::gesture::{
                         GestureEndEvent, GestureEventCoordinates, GestureEventTrait,
                         GesturePinchEvent, GesturePinchEventTrait, GestureSwipeEvent,
                     };
-                    use smithay::reexports::input::event::GestureEvent;
                     match gesture_event {
                         GestureEvent::Swipe(swipe_event) => match swipe_event {
                             GestureSwipeEvent::Begin(begin) => {
@@ -2618,9 +2762,11 @@ pub fn run_drm(
                                         let dy = state.gesture_swipe_dy;
                                         let (vx, vy) = state.compute_gesture_velocity();
 
-                                        let is_horizontal_fling = vx.abs() >= 350.0 && dx.abs() >= 12.0;
+                                        let is_horizontal_fling =
+                                            vx.abs() >= 350.0 && dx.abs() >= 12.0;
                                         let is_horizontal_drag = dx.abs() >= 70.0;
-                                        let is_vertical_fling = vy.abs() >= 300.0 && dy.abs() >= 12.0;
+                                        let is_vertical_fling =
+                                            vy.abs() >= 300.0 && dy.abs() >= 12.0;
                                         let is_vertical_drag = dy.abs() >= 65.0;
 
                                         let configured_action = if end.finger_count() >= 4 {
@@ -2632,13 +2778,19 @@ pub fn run_drm(
                                         if (dx.abs() > dy.abs() || vx.abs() > vy.abs())
                                             && (is_horizontal_drag || is_horizontal_fling)
                                         {
-                                            let go_next = if is_horizontal_fling && vx.abs() > 350.0 {
+                                            let go_next = if is_horizontal_fling && vx.abs() > 350.0
+                                            {
                                                 vx < 0.0
                                             } else {
                                                 dx < 0.0
                                             };
-                                            if configured_action != "workspace" && !configured_action.is_empty() {
-                                                state.dispatch_configured_swipe_action(configured_action, go_next);
+                                            if configured_action != "workspace"
+                                                && !configured_action.is_empty()
+                                            {
+                                                state.dispatch_configured_swipe_action(
+                                                    configured_action,
+                                                    go_next,
+                                                );
                                                 state.start_gesture_kinetic(0.0);
                                             } else {
                                                 let target_ws = if go_next {
@@ -2649,14 +2801,23 @@ pub fn run_drm(
                                                 if target_ws != state.active_workspace {
                                                     info!(
                                                         "Touchpad {}-finger swipe fling: Switching workspace {} -> {} (dx: {:.1}, vx: {:.1} px/s)",
-                                                        end.finger_count(), state.active_workspace, target_ws, dx, vx
+                                                        end.finger_count(),
+                                                        state.active_workspace,
+                                                        target_ws,
+                                                        dx,
+                                                        vx
                                                     );
                                                     state.switch_workspace(target_ws);
-                                                    let entry_offset = if go_next { 130.0 } else { -130.0 };
+                                                    let entry_offset =
+                                                        if go_next { 130.0 } else { -130.0 };
                                                     state.gesture_swipe_dx = entry_offset;
-                                                    state.start_gesture_kinetic(-vx.clamp(-800.0, 800.0) * 0.3);
+                                                    state.start_gesture_kinetic(
+                                                        -vx.clamp(-800.0, 800.0) * 0.3,
+                                                    );
                                                 } else {
-                                                    state.start_gesture_kinetic(vx.clamp(-600.0, 600.0));
+                                                    state.start_gesture_kinetic(
+                                                        vx.clamp(-600.0, 600.0),
+                                                    );
                                                 }
                                             }
                                         } else if is_vertical_drag || is_vertical_fling {
@@ -2665,10 +2826,18 @@ pub fn run_drm(
                                             } else {
                                                 dy < 0.0
                                             };
-                                            if end.finger_count() >= 4 && configured_action != "overview" && !configured_action.is_empty() {
-                                                state.dispatch_configured_swipe_action(configured_action, go_up);
+                                            if end.finger_count() >= 4
+                                                && configured_action != "overview"
+                                                && !configured_action.is_empty()
+                                            {
+                                                state.dispatch_configured_swipe_action(
+                                                    configured_action,
+                                                    go_up,
+                                                );
                                             } else if go_up {
-                                                info!("Touchpad 3-finger swipe UP fling: Toggle Window Overview");
+                                                info!(
+                                                    "Touchpad 3-finger swipe UP fling: Toggle Window Overview"
+                                                );
                                                 state.overview_mode = !state.overview_mode;
                                                 if state.overview_mode {
                                                     crate::send_osd_notification(
@@ -2726,7 +2895,9 @@ pub fn run_drm(
                             GesturePinchEvent::Update(update) => {
                                 if update.finger_count() >= 3 {
                                     if update.scale() < 0.75 && !state.overview_mode {
-                                        info!("Touchpad 3+ finger Pinch IN: Activating Window Overview");
+                                        info!(
+                                            "Touchpad 3+ finger Pinch IN: Activating Window Overview"
+                                        );
                                         state.overview_mode = true;
                                         crate::send_osd_notification(
                                             "overview",
@@ -2735,7 +2906,9 @@ pub fn run_drm(
                                             100,
                                         );
                                     } else if update.scale() > 1.25 && state.overview_mode {
-                                        info!("Touchpad 3+ finger Pinch OUT: Exiting Window Overview");
+                                        info!(
+                                            "Touchpad 3+ finger Pinch OUT: Exiting Window Overview"
+                                        );
                                         state.overview_mode = false;
                                     }
                                 } else {
@@ -2769,10 +2942,10 @@ pub fn run_drm(
                     }
                 }
                 smithay::reexports::input::Event::Touch(touch_event) => {
+                    use smithay::reexports::input::event::TouchEvent;
                     use smithay::reexports::input::event::touch::{
                         TouchEventPosition, TouchEventTrait,
                     };
-                    use smithay::reexports::input::event::TouchEvent;
                     match touch_event {
                         TouchEvent::Down(down) => {
                             let tx = down.x_transformed(screen_w as u32);
@@ -2837,7 +3010,9 @@ pub fn run_drm(
                     }
                 }
                 smithay::reexports::input::Event::Tablet(tablet_tool_event) => {
-                    use smithay::reexports::input::event::tablet_tool::{TabletToolEvent, TabletToolEventTrait};
+                    use smithay::reexports::input::event::tablet_tool::{
+                        TabletToolEvent, TabletToolEventTrait,
+                    };
                     let serial = SERIAL_COUNTER.next_serial();
                     let (sw, sh) = (screen_w as u32, screen_h as u32);
 
@@ -2856,7 +3031,8 @@ pub fn run_drm(
                                 prox.y_transformed(sh),
                             ));
                             let focused = find_surface_under_loc(&mut state, loc);
-                            tablet_state.handle_proximity(&mut state, &prox, focused, sw, sh, serial);
+                            tablet_state
+                                .handle_proximity(&mut state, &prox, focused, sw, sh, serial);
                         }
                         TabletToolEvent::Tip(tip) => {
                             tablet_state.handle_tip(&mut state, &tip, serial);
@@ -2890,10 +3066,10 @@ pub fn run_drm(
         let vblank_got = !completed_crtcs.is_empty();
         if vblank_got {
             for crtc in completed_crtcs {
-                if let Some(drm_output) = drm_outputs.iter().find(|output| output.crtc() == crtc) {
-                    if let Err(err) = drm_output.frame_submitted() {
-                        tracing::warn!(?crtc, "DRM frame_submitted error: {:?}", err);
-                    }
+                if let Some(drm_output) = drm_outputs.iter().find(|output| output.crtc() == crtc)
+                    && let Err(err) = drm_output.frame_submitted()
+                {
+                    tracing::warn!(?crtc, "DRM frame_submitted error: {:?}", err);
                 }
                 pending_crtcs.retain(|pending| *pending != crtc);
             }
@@ -2933,7 +3109,8 @@ pub fn run_drm(
             let loc = state
                 .cursor_location
                 .to_i32_round::<i32>()
-                .to_physical_precise_round(fractional_scale) + zoom_pan;
+                .to_physical_precise_round(fractional_scale)
+                + zoom_pan;
             let dnd_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                 render_elements_from_surface_tree(
                     &mut renderer,
@@ -2953,7 +3130,8 @@ pub fn run_drm(
                     let loc = state
                         .cursor_location
                         .to_i32_round::<i32>()
-                        .to_physical_precise_round(fractional_scale) + zoom_pan;
+                        .to_physical_precise_round(fractional_scale)
+                        + zoom_pan;
                     let cursor_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                         render_elements_from_surface_tree(
                             &mut renderer,
@@ -3109,7 +3287,9 @@ pub fn run_drm(
                     } else {
                         [180, 185, 195]
                     };
-                    if let Some((buf, _tw, th)) = crate::render_title_text_to_buffer(label, fractional_scale, text_color) {
+                    if let Some((buf, _tw, th)) =
+                        crate::render_title_text_to_buffer(label, fractional_scale, text_color)
+                    {
                         let text_x = tile_x + 8;
                         let text_y = tile_y + (tile_h - th) / 2;
                         let text_pos = smithay::utils::Point::from((text_x as f64, text_y as f64));
@@ -3204,7 +3384,9 @@ pub fn run_drm(
                 || (std::env::var("CORTEN_FORCE_BLUR").ok().as_deref() != Some("1")
                     && is_virtual_software_gpu());
             if disable_blur {
-                tracing::info!("Compositor: Virtual/software GPU detected; disabling heavy multi-pass Dual-Kawase blur to keep CPU usage low.");
+                tracing::info!(
+                    "Compositor: Virtual/software GPU detected; disabling heavy multi-pass Dual-Kawase blur to keep CPU usage low."
+                );
             } else if let Ok(pipeline) = DualKawaseBlurPipeline::new(gles) {
                 blur_pipeline = Some(pipeline);
             }
@@ -3229,9 +3411,13 @@ pub fn run_drm(
         state.step_gesture_kinetic();
         let gesture_offset_x = (state.gesture_swipe_dx * 1.4).round() as i32;
         let active_window = state.layout.active_window().cloned();
-        let active_fullscreen = layouts.iter().find(|(w, _)| {
-            state.layout.is_fullscreen(w) && (active_window.as_ref() == Some(w) || layouts.len() == 1)
-        }).cloned();
+        let active_fullscreen = layouts
+            .iter()
+            .find(|(w, _)| {
+                state.layout.is_fullscreen(w)
+                    && (active_window.as_ref() == Some(w) || layouts.len() == 1)
+            })
+            .cloned();
         let has_fullscreen = active_fullscreen.is_some();
 
         for (window, rect) in layouts.iter().rev() {
@@ -3256,13 +3442,15 @@ pub fn run_drm(
             );
             let titlebar_h = crate::layout::window_titlebar_height(window, is_fs);
             let csd_offset = crate::layout::window_csd_offset(window);
-            let client_logical_loc = shifted_rect.loc - csd_offset + smithay::utils::Point::from((0, titlebar_h));
+            let client_logical_loc =
+                shifted_rect.loc - csd_offset + smithay::utils::Point::from((0, titlebar_h));
 
             // 1. Popups for surface (menus, dropdowns) - topmost window elements
             if let Some(surface) = crate::layout::window_wl_surface(window) {
                 for (popup, popup_offset) in PopupManager::popups_for_surface(&surface) {
                     let popup_loc = (client_logical_loc + popup_offset)
-                        .to_physical_precise_round(fractional_scale) + zoom_pan;
+                        .to_physical_precise_round(fractional_scale)
+                        + zoom_pan;
                     let popup_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                         render_elements_from_surface_tree(
                             &mut renderer,
@@ -3356,8 +3544,8 @@ pub fn run_drm(
 
             // 3. Render client window surface content
             if let Some(surface) = crate::layout::window_wl_surface(window) {
-                let client_loc = client_logical_loc
-                    .to_physical_precise_round(fractional_scale) + zoom_pan;
+                let client_loc =
+                    client_logical_loc.to_physical_precise_round(fractional_scale) + zoom_pan;
                 let win_alpha = state.layout.window_alpha(window);
                 let window_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                     render_elements_from_surface_tree(
@@ -3382,7 +3570,8 @@ pub fn run_drm(
 
             // 4. Clean Elevation Shadow & Subtle Glass Rim (Behind window content in front-to-back ordering)
             if is_active && !is_fs {
-                let is_high_vis = state.accessibility.high_vis_focus_ring || state.accessibility.high_contrast;
+                let is_high_vis =
+                    state.accessibility.high_vis_focus_ring || state.accessibility.high_contrast;
                 let (border_alpha, border_w, halo_radiance) = if is_high_vis {
                     (0.95_f32, 2.0_f32, 0.16_f32)
                 } else {
@@ -3393,9 +3582,25 @@ pub fn run_drm(
                     }
                 };
                 let (ring_width, ring_color) = if is_high_vis {
-                    (3, Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, 0.95))
+                    (
+                        3,
+                        Color32F::new(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.95,
+                        ),
+                    )
                 } else {
-                    (1, Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, border_alpha))
+                    (
+                        1,
+                        Color32F::new(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            border_alpha,
+                        ),
+                    )
                 };
                 if let Some(manager) = glow_shader.as_ref() {
                     let halo_color = [
@@ -3431,8 +3636,7 @@ pub fn run_drm(
                     );
                     elements.push(CustomRenderElement::from(shadow_elem));
                 } else {
-                    let inactive_color =
-                        Color32F::new(1.0, 1.0, 1.0, 0.12);
+                    let inactive_color = Color32F::new(1.0, 1.0, 1.0, 0.12);
                     draw_glow_ring(&mut elements, phys_rect, 0, 1, inactive_color, 2);
                 }
             }
@@ -3442,8 +3646,14 @@ pub fn run_drm(
             // Render silky translucent luminous mist preview when snapping/docking a window
             if let Some(snap_rect) = state.snap_preview {
                 let snap_margin = 10;
-                let inset_loc = smithay::utils::Point::from((snap_rect.loc.x + snap_margin, snap_rect.loc.y + snap_margin));
-                let inset_size = smithay::utils::Size::from(((snap_rect.size.w - snap_margin * 2).max(50), (snap_rect.size.h - snap_margin * 2).max(50)));
+                let inset_loc = smithay::utils::Point::from((
+                    snap_rect.loc.x + snap_margin,
+                    snap_rect.loc.y + snap_margin,
+                ));
+                let inset_size = smithay::utils::Size::from((
+                    (snap_rect.size.w - snap_margin * 2).max(50),
+                    (snap_rect.size.h - snap_margin * 2).max(50),
+                ));
                 let inset_log = Rectangle::new(inset_loc, inset_size);
                 if let Some(manager) = glow_shader.as_ref() {
                     let mist_elem = manager.create_snap_preview_element(
@@ -3600,8 +3810,9 @@ pub fn run_drm(
                     if is_fs {
                         continue;
                     }
-                    let is_blur = crate::layout::is_window_blur_eligible(window, &state.window_rules)
-                        || win_alpha < 0.99;
+                    let is_blur =
+                        crate::layout::is_window_blur_eligible(window, &state.window_rules)
+                            || win_alpha < 0.99;
                     if is_blur {
                         let titlebar_h = crate::layout::window_titlebar_height(window, is_fs);
                         let body_rect = Rectangle::new(
@@ -3620,22 +3831,22 @@ pub fn run_drm(
                             continue;
                         }
                         for layer_surface in layer_map.layers_on(layer) {
-                            if layer_surface.namespace() == "corten-panel" {
-                                if let Some(geo) = layer_map.layer_geometry(layer_surface) {
-                                    let capsule_w = (geo.size.w - 116).max(0);
-                                    if capsule_w > 60 && geo.size.h >= 68 {
-                                        let capsule_x = geo.loc.x + 96;
-                                        let capsule_y = if geo.loc.y <= 30 {
-                                            geo.loc.y + 12
-                                        } else {
-                                            geo.loc.y + geo.size.h - 62
-                                        };
-                                        let inset_geo = Rectangle::new(
-                                            Point::from((capsule_x, capsule_y)),
-                                            Size::from((capsule_w, 44)),
-                                        );
-                                        glass_regions.push(GlassRegion::panel(inset_geo));
-                                    }
+                            if layer_surface.namespace() == "corten-panel"
+                                && let Some(geo) = layer_map.layer_geometry(layer_surface)
+                            {
+                                let capsule_w = (geo.size.w - 116).max(0);
+                                if capsule_w > 60 && geo.size.h >= 68 {
+                                    let capsule_x = geo.loc.x + 96;
+                                    let capsule_y = if geo.loc.y <= 30 {
+                                        geo.loc.y + 12
+                                    } else {
+                                        geo.loc.y + geo.size.h - 62
+                                    };
+                                    let inset_geo = Rectangle::new(
+                                        Point::from((capsule_x, capsule_y)),
+                                        Size::from((capsule_w, 44)),
+                                    );
+                                    glass_regions.push(GlassRegion::panel(inset_geo));
                                 }
                             }
                         }
@@ -3700,31 +3911,31 @@ pub fn run_drm(
                         build_secondary_scene(&mut state, &output, &mut renderer, &palette)
                     })
             };
-            if state.night_light_enabled {
-                if let Some(scene) = secondary_scene.as_mut() {
-                    let sec_output = state.additional_outputs.get(output_index - 1);
-                    let size = sec_output
-                        .and_then(|output| output.current_mode())
-                        .map(|mode| mode.size)
-                        .unwrap_or_else(|| Size::from((1, 1)));
-                    let sec_scale = sec_output
-                        .map(|output| output.current_scale().fractional_scale())
-                        .unwrap_or(fractional_scale);
-                    let nl_elem = blur_pipeline.as_mut().and_then(|pipeline| {
-                        pipeline.generate_night_light_element(
-                            &mut renderer,
-                            scene,
-                            true,
-                            size,
-                            sec_scale,
-                            bg_color,
-                        )
-                    });
-                    if let Some(nl_elem) = nl_elem {
-                        scene.insert(0, CustomRenderElement::from(nl_elem));
-                    } else {
-                        scene.insert(0, crate::night_light_overlay(size));
-                    }
+            if state.night_light_enabled
+                && let Some(scene) = secondary_scene.as_mut()
+            {
+                let sec_output = state.additional_outputs.get(output_index - 1);
+                let size = sec_output
+                    .and_then(|output| output.current_mode())
+                    .map(|mode| mode.size)
+                    .unwrap_or_else(|| Size::from((1, 1)));
+                let sec_scale = sec_output
+                    .map(|output| output.current_scale().fractional_scale())
+                    .unwrap_or(fractional_scale);
+                let nl_elem = blur_pipeline.as_mut().and_then(|pipeline| {
+                    pipeline.generate_night_light_element(
+                        &mut renderer,
+                        scene,
+                        true,
+                        size,
+                        sec_scale,
+                        bg_color,
+                    )
+                });
+                if let Some(nl_elem) = nl_elem {
+                    scene.insert(0, CustomRenderElement::from(nl_elem));
+                } else {
+                    scene.insert(0, crate::night_light_overlay(size));
                 }
             }
             let scene = secondary_scene.as_deref().unwrap_or(&elements);
@@ -3743,18 +3954,18 @@ pub fn run_drm(
 
             match render_res {
                 Ok(ref frame_res) => {
-                    if let Some((ref fs_window, _)) = active_fullscreen {
-                        if let Some(surface) = crate::layout::window_wl_surface(fs_window) {
-                            smithay::wayland::compositor::with_states(&surface, |surface_data| {
-                                smithay::desktop::utils::update_surface_primary_scanout_output(
+                    if let Some((ref fs_window, _)) = active_fullscreen
+                        && let Some(surface) = crate::layout::window_wl_surface(fs_window)
+                    {
+                        smithay::wayland::compositor::with_states(&surface, |surface_data| {
+                            smithay::desktop::utils::update_surface_primary_scanout_output(
                                     &surface,
                                     &state.output,
                                     surface_data,
                                     &frame_res.states,
                                     smithay::backend::renderer::element::default_primary_scanout_output_compare,
                                 );
-                            });
-                        }
+                        });
                     }
                     match drm_output.queue_frame(()) {
                         Ok(()) => {
@@ -3857,13 +4068,11 @@ fn handle_pointer_motion_interactions(
             map.non_exclusive_zone()
         };
         let delta_x = (loc.x - drag_start.x) as f32;
-        let new_ratio =
-            initial_ratio + delta_x / (usable_area.size.w.max(1) as f32);
+        let new_ratio = initial_ratio + delta_x / (usable_area.size.w.max(1) as f32);
         state
             .layout_for_output_mut(&target_output)
             .set_master_ratio(new_ratio);
-    } else if let Some((ref window, drag_start_cursor, initial_rect)) =
-        state.dragged_window.clone()
+    } else if let Some((ref window, drag_start_cursor, initial_rect)) = state.dragged_window.clone()
     {
         // If currently dragging a window, update its floating position smoothly across displays
         let delta_x = (loc.x - drag_start_cursor.x).round() as i32;
@@ -3882,7 +4091,10 @@ fn handle_pointer_motion_interactions(
         new_rect.loc.x = global_x - target_output_loc.x;
         new_rect.loc.y = global_y - target_output_loc.y;
 
-        if !state.layout_for_output(&target_output).contains_window(window) {
+        if !state
+            .layout_for_output(&target_output)
+            .contains_window(window)
+        {
             state.remove_window_from_all_outputs(window);
             state
                 .layout_for_output_mut(&target_output)
@@ -3898,7 +4110,12 @@ fn handle_pointer_motion_interactions(
             let scale = target_output.current_scale().fractional_scale();
             let size = target_output
                 .current_mode()
-                .map(|m| smithay::utils::Size::from(((m.size.w as f64 / scale).round() as i32, (m.size.h as f64 / scale).round() as i32)))
+                .map(|m| {
+                    smithay::utils::Size::from((
+                        (m.size.w as f64 / scale).round() as i32,
+                        (m.size.h as f64 / scale).round() as i32,
+                    ))
+                })
                 .unwrap_or(usable_area.size);
             Rectangle::new(smithay::utils::Point::from((0, 0)), size)
         };
@@ -3926,11 +4143,9 @@ fn handle_pointer_motion_interactions(
         let rel_x = loc.x - out_loc.x as f64;
         let rel_y = loc.y - out_loc.y as f64;
         let is_near_left = rel_x <= (usable_area.loc.x + 35) as f64;
-        let is_near_right =
-            rel_x >= (usable_area.loc.x + usable_area.size.w - 35) as f64;
+        let is_near_right = rel_x >= (usable_area.loc.x + usable_area.size.w - 35) as f64;
         let is_near_top = rel_y <= (usable_area.loc.y + 35) as f64;
-        let is_near_bottom =
-            rel_y >= (usable_area.loc.y + usable_area.size.h - 35) as f64;
+        let is_near_bottom = rel_y >= (usable_area.loc.y + usable_area.size.h - 35) as f64;
 
         let half_w = usable_area.size.w / 2;
         let half_h = usable_area.size.h / 2;
@@ -3945,30 +4160,21 @@ fn handle_pointer_motion_interactions(
         } else if is_near_right && is_near_top {
             // Top-right quarter tile
             state.snap_preview = Some(Rectangle::new(
-                Point::from((
-                    usable_area.loc.x + half_w,
-                    usable_area.loc.y,
-                )),
+                Point::from((usable_area.loc.x + half_w, usable_area.loc.y)),
                 Size::from((half_w, half_h)),
             ));
             state.drag_split_target = None;
         } else if is_near_left && is_near_bottom {
             // Bottom-left quarter tile
             state.snap_preview = Some(Rectangle::new(
-                Point::from((
-                    usable_area.loc.x,
-                    usable_area.loc.y + half_h,
-                )),
+                Point::from((usable_area.loc.x, usable_area.loc.y + half_h)),
                 Size::from((half_w, half_h)),
             ));
             state.drag_split_target = None;
         } else if is_near_right && is_near_bottom {
             // Bottom-right quarter tile
             state.snap_preview = Some(Rectangle::new(
-                Point::from((
-                    usable_area.loc.x + half_w,
-                    usable_area.loc.y + half_h,
-                )),
+                Point::from((usable_area.loc.x + half_w, usable_area.loc.y + half_h)),
                 Size::from((half_w, half_h)),
             ));
             state.drag_split_target = None;
@@ -3982,10 +4188,7 @@ fn handle_pointer_motion_interactions(
         } else if is_near_right {
             // Right half
             state.snap_preview = Some(Rectangle::new(
-                Point::from((
-                    usable_area.loc.x + half_w,
-                    usable_area.loc.y,
-                )),
+                Point::from((usable_area.loc.x + half_w, usable_area.loc.y)),
                 Size::from((half_w, usable_area.size.h)),
             ));
             state.drag_split_target = None;
@@ -3994,7 +4197,9 @@ fn handle_pointer_motion_interactions(
             state.snap_preview = Some(usable_area);
             state.drag_split_target = None;
         } else {
-            let window_rects = state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
+            let window_rects = state
+                .layout_for_output_mut(&target_output)
+                .arrange_animated(usable_area);
             let out_rel_loc = Point::from((rel_x, rel_y));
             if let Some((_tab_win, tab_rect)) =
                 crate::layout::detect_drag_tab_target(out_rel_loc, &window_rects, window)
@@ -4022,7 +4227,9 @@ fn handle_pointer_motion_interactions(
         let min_size = crate::layout::window_min_size(window);
         let max_size = crate::layout::window_max_size(window);
         let target_output = state.output_at(loc);
-        let is_fs = state.layout_for_output(&target_output).is_fullscreen(window);
+        let is_fs = state
+            .layout_for_output(&target_output)
+            .is_fullscreen(window);
         let titlebar_h = crate::layout::window_titlebar_height(window, is_fs);
         let new_rect = crate::layout::compute_resized_rect(
             initial_rect,
@@ -4041,7 +4248,12 @@ fn handle_pointer_motion_interactions(
             let scale = target_output.current_scale().fractional_scale();
             let size = target_output
                 .current_mode()
-                .map(|m| smithay::utils::Size::from(((m.size.w as f64 / scale).round() as i32, (m.size.h as f64 / scale).round() as i32)))
+                .map(|m| {
+                    smithay::utils::Size::from((
+                        (m.size.w as f64 / scale).round() as i32,
+                        (m.size.h as f64 / scale).round() as i32,
+                    ))
+                })
                 .unwrap_or(usable_area.size);
             Rectangle::new(smithay::utils::Point::from((0, 0)), size)
         };
@@ -4083,8 +4295,9 @@ fn handle_pointer_motion_interactions(
 
         // Hover detection for window borders / corner resizing or Snap Layouts Flyout
         let gap = state.layout_for_output(&target_output).gap();
-        let window_rects =
-            state.layout_for_output_mut(&target_output).arrange_animated(usable_area);
+        let window_rects = state
+            .layout_for_output_mut(&target_output)
+            .arrange_animated(usable_area);
         if let Some((win, rect)) = window_rects
             .into_iter()
             .rev()
@@ -4115,38 +4328,30 @@ fn handle_pointer_motion_interactions(
             let w_f = rect.size.w as f64;
             let h_f = rect.size.h as f64;
             if rw_x >= (w_f - 16.0) && rw_y >= (h_f - 16.0) {
-                state.cursor_status =
-                    smithay::input::pointer::CursorImageStatus::Named(
-                        smithay::input::pointer::CursorIcon::NwseResize,
-                    );
+                state.cursor_status = smithay::input::pointer::CursorImageStatus::Named(
+                    smithay::input::pointer::CursorIcon::NwseResize,
+                );
             } else if rw_x <= 16.0 && rw_y >= (h_f - 16.0) {
-                state.cursor_status =
-                    smithay::input::pointer::CursorImageStatus::Named(
-                        smithay::input::pointer::CursorIcon::NeswResize,
-                    );
+                state.cursor_status = smithay::input::pointer::CursorImageStatus::Named(
+                    smithay::input::pointer::CursorIcon::NeswResize,
+                );
             } else if rw_x >= (w_f - 8.0) || rw_x <= 8.0 {
-                state.cursor_status =
-                    smithay::input::pointer::CursorImageStatus::Named(
-                        smithay::input::pointer::CursorIcon::EwResize,
-                    );
+                state.cursor_status = smithay::input::pointer::CursorImageStatus::Named(
+                    smithay::input::pointer::CursorIcon::EwResize,
+                );
             } else if rw_y >= (h_f - 8.0) || rw_y <= 8.0 {
-                state.cursor_status =
-                    smithay::input::pointer::CursorImageStatus::Named(
-                        smithay::input::pointer::CursorIcon::NsResize,
-                    );
+                state.cursor_status = smithay::input::pointer::CursorImageStatus::Named(
+                    smithay::input::pointer::CursorIcon::NsResize,
+                );
             }
-        } else if let Some(sx) =
-            state.layout_for_output(&target_output).split_x(usable_area)
+        } else if let Some(sx) = state.layout_for_output(&target_output).split_x(usable_area)
+            && (rel_x as i32 - sx).abs() <= 8
+            && rel_y >= usable_area.loc.y as f64
+            && rel_y <= (usable_area.loc.y + usable_area.size.h) as f64
         {
-            if (rel_x as i32 - sx).abs() <= 8
-                && rel_y >= usable_area.loc.y as f64
-                && rel_y <= (usable_area.loc.y + usable_area.size.h) as f64
-            {
-                state.cursor_status =
-                    smithay::input::pointer::CursorImageStatus::Named(
-                        smithay::input::pointer::CursorIcon::EwResize,
-                    );
-            }
+            state.cursor_status = smithay::input::pointer::CursorImageStatus::Named(
+                smithay::input::pointer::CursorIcon::EwResize,
+            );
         }
     }
 }
@@ -4226,7 +4431,12 @@ mod tests {
             .read(true)
             .write(true)
             .open("/dev/dri/renderD128")
-            .or_else(|_| std::fs::File::options().read(true).write(true).open("/dev/dri/card0"))
+            .or_else(|_| {
+                std::fs::File::options()
+                    .read(true)
+                    .write(true)
+                    .open("/dev/dri/card0")
+            })
         {
             use std::os::fd::OwnedFd;
             let owned_fd: OwnedFd = file.into();

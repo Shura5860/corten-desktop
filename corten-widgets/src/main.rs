@@ -4,18 +4,18 @@ use tracing::info;
 use corten_config::{AppearanceConfig, ConfigManager};
 use corten_i18n::Language;
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, ThemeMode, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS,
-    NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, ThemeMode,
 };
 use iced::widget::{
     button, container, horizontal_space, mouse_area, progress_bar, row, scrollable, text,
     text_input,
 };
 use iced::{Alignment, Element, Length, Subscription};
+use iced_layershell::Application;
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use iced_runtime::Task;
 
 mod clock;
@@ -218,17 +218,24 @@ impl Application for CortenWidgetsApp {
 
         let note_content = ScratchpadService::load_note();
         let weather = WeatherService::load_cached_or_default();
-        let (active_patina, theme_mode, language) = ConfigManager::<AppearanceConfig>::load_or_default("appearance")
-            .map(|c| {
-                let p = PatinaVariant::from_code(&c.get().patina);
-                let m = match c.get().theme_mode {
-                    corten_config::ThemeModeChoice::Light => ThemeMode::Light,
-                    corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
-                };
-                let l = Language::from_code(&c.get().language);
-                (p, m, l)
-            })
-            .unwrap_or_else(|_| (PatinaVariant::Rust, ThemeMode::Dark, Language::detect_system()));
+        let (active_patina, theme_mode, language) =
+            ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                .map(|c| {
+                    let p = PatinaVariant::from_code(&c.get().patina);
+                    let m = match c.get().theme_mode {
+                        corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                        corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
+                    };
+                    let l = Language::from_code(&c.get().language);
+                    (p, m, l)
+                })
+                .unwrap_or_else(|_| {
+                    (
+                        PatinaVariant::Rust,
+                        ThemeMode::Dark,
+                        Language::detect_system(),
+                    )
+                });
 
         let load_font_task = iced::font::load(LUCIDE_FONT_BYTES).map(|_| Message::SlowTick);
         let init_track_task = Task::perform(
@@ -310,7 +317,9 @@ impl Application for CortenWidgetsApp {
                 self.clock_data = ClockData::now();
                 self.pomodoro.tick();
 
-                if let Ok(app_cfg) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
+                if let Ok(app_cfg) =
+                    ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                {
                     self.active_patina = PatinaVariant::from_code(&app_cfg.get().patina);
                     self.theme_mode = match app_cfg.get().theme_mode {
                         corten_config::ThemeModeChoice::Light => ThemeMode::Light,
@@ -426,7 +435,9 @@ impl Application for CortenWidgetsApp {
         let palette = Palette::for_mode(self.theme_mode).with_patina(self.active_patina);
         let (_, secondary_patina) = self.active_patina.colors();
 
-        let mut cards = iced::widget::column![].spacing(10).width(Length::Fixed(320.0));
+        let mut cards = iced::widget::column![]
+            .spacing(10)
+            .width(Length::Fixed(320.0));
 
         // 1. Clock & Dual Chrono Widget
         if self.config.clock_enabled {
@@ -481,7 +492,10 @@ impl Application for CortenWidgetsApp {
         // Drawer shortcut pill at bottom of column
         let drawer_btn = button(
             row![
-                text(Icon::APP_WINDOW).font(LUCIDE_FONT).size(13.0).color(palette.primary.to_iced()),
+                text(Icon::APP_WINDOW)
+                    .font(LUCIDE_FONT)
+                    .size(13.0)
+                    .color(palette.primary.to_iced()),
                 text("Bileşenleri Özelleştir...")
                     .size(11.0)
                     .color(palette.text_muted.to_iced()),
@@ -515,36 +529,36 @@ impl Application for CortenWidgetsApp {
             bottom: 0.0,
             left: 0.0,
         }))
-            .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new()
-                    .width(4.0)
-                    .scroller_width(4.0)
-                    .margin(2.0),
-            ))
-            .style(move |_, _| scrollable::Style {
-                container: container::Style::default(),
-                vertical_rail: scrollable::Rail {
-                    background: None,
-                    border: iced::Border::default(),
-                    scroller: scrollable::Scroller {
-                        color: palette.border.to_iced(),
-                        border: iced::Border {
-                            radius: iced::border::Radius::from(Radius::FULL),
-                            ..Default::default()
-                        },
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(4.0)
+                .scroller_width(4.0)
+                .margin(2.0),
+        ))
+        .style(move |_, _| scrollable::Style {
+            container: container::Style::default(),
+            vertical_rail: scrollable::Rail {
+                background: None,
+                border: iced::Border::default(),
+                scroller: scrollable::Scroller {
+                    color: palette.border.to_iced(),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(Radius::FULL),
+                        ..Default::default()
                     },
                 },
-                horizontal_rail: scrollable::Rail {
-                    background: None,
+            },
+            horizontal_rail: scrollable::Rail {
+                background: None,
+                border: iced::Border::default(),
+                scroller: scrollable::Scroller {
+                    color: iced::Color::TRANSPARENT,
                     border: iced::Border::default(),
-                    scroller: scrollable::Scroller {
-                        color: iced::Color::TRANSPARENT,
-                        border: iced::Border::default(),
-                    },
                 },
-                gap: None,
-            })
-            .height(Length::Fill);
+            },
+            gap: None,
+        })
+        .height(Length::Fill);
 
         container(scroll_container)
             .width(Length::Fill)
@@ -558,23 +572,28 @@ impl Application for CortenWidgetsApp {
     fn subscription(&self) -> Subscription<Self::Message> {
         let sigusr1_sub = Subscription::run_with_id(
             "sigusr1-stream",
-            futures::stream::unfold(None, |mut sig_opt: Option<tokio::signal::unix::Signal>| async move {
-                loop {
-                    if sig_opt.is_none() {
-                        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()) {
-                            Ok(s) => sig_opt = Some(s),
-                            Err(_) => {
-                                tokio::time::sleep(Duration::from_secs(1)).await;
-                                continue;
+            futures::stream::unfold(
+                None,
+                |mut sig_opt: Option<tokio::signal::unix::Signal>| async move {
+                    loop {
+                        if sig_opt.is_none() {
+                            match tokio::signal::unix::signal(
+                                tokio::signal::unix::SignalKind::user_defined1(),
+                            ) {
+                                Ok(s) => sig_opt = Some(s),
+                                Err(_) => {
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                    continue;
+                                }
                             }
                         }
+                        if let Some(ref mut sig) = sig_opt {
+                            sig.recv().await;
+                            return Some((Message::ToggleVisibility, sig_opt));
+                        }
                     }
-                    if let Some(ref mut sig) = sig_opt {
-                        sig.recv().await;
-                        return Some((Message::ToggleVisibility, sig_opt));
-                    }
-                }
-            }),
+                },
+            ),
         );
 
         let slow_sub = if self.is_visible {
@@ -594,7 +613,11 @@ impl Application for CortenWidgetsApp {
 
 // Card View Implementations for all 10 Modular Widgets
 impl CortenWidgetsApp {
-    fn forged_card<'a>(&self, content: Element<'a, Message>, palette: Palette) -> Element<'a, Message> {
+    fn forged_card<'a>(
+        &self,
+        content: Element<'a, Message>,
+        palette: Palette,
+    ) -> Element<'a, Message> {
         container(content)
             .padding(12)
             .width(Length::Fixed(320.0))
@@ -603,7 +626,12 @@ impl CortenWidgetsApp {
                     0.09, 0.10, 0.12, 0.90,
                 ))),
                 border: iced::Border {
-                    color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.32),
+                    color: iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.32,
+                    ),
                     width: 1.0,
                     radius: iced::border::Radius::from(14.0),
                 },
@@ -675,7 +703,9 @@ impl CortenWidgetsApp {
             )
             .padding([2, 6])
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.30))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.0, 0.0, 0.0, 0.30
+                ))),
                 border: iced::Border {
                     color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
                     width: 1.0,
@@ -694,11 +724,18 @@ impl CortenWidgetsApp {
     }
 
     // 2. Sysinfo Gauges (CPU & RAM)
-    fn view_sysinfo_card(&self, palette: Palette, secondary_patina: corten_theme::Color) -> Element<'_, Message> {
+    fn view_sysinfo_card(
+        &self,
+        palette: Palette,
+        secondary_patina: corten_theme::Color,
+    ) -> Element<'_, Message> {
         let header = self.card_header(
             Icon::CPU,
             "SİSTEM VİTALLERİ",
-            format!("CPU %{} · RAM %{}", self.sys_metrics.cpu_usage, self.sys_metrics.ram_pct),
+            format!(
+                "CPU %{} · RAM %{}",
+                self.sys_metrics.cpu_usage, self.sys_metrics.ram_pct
+            ),
             palette,
         );
 
@@ -716,13 +753,9 @@ impl CortenWidgetsApp {
             secondary_patina.to_iced(),
         );
 
-        let gauges_row = row![
-            cpu_gauge.view(),
-            horizontal_space(),
-            ram_gauge.view(),
-        ]
-        .align_y(Alignment::Center)
-        .padding([4, 16]);
+        let gauges_row = row![cpu_gauge.view(), horizontal_space(), ram_gauge.view(),]
+            .align_y(Alignment::Center)
+            .padding([4, 16]);
 
         self.forged_card(
             iced::widget::column![header, gauges_row].spacing(8).into(),
@@ -741,9 +774,16 @@ impl CortenWidgetsApp {
         let rx_box = container(
             iced::widget::column![
                 row![
-                    text(Icon::ARROW_DOWN).font(LUCIDE_FONT).size(10.0).color(palette.primary.to_iced()),
-                    text("İNDİRME").size(9.5).color(palette.text_muted.to_iced()),
-                ].spacing(4).align_y(Alignment::Center),
+                    text(Icon::ARROW_DOWN)
+                        .font(LUCIDE_FONT)
+                        .size(10.0)
+                        .color(palette.primary.to_iced()),
+                    text("İNDİRME")
+                        .size(9.5)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center),
                 text(rx_formatted)
                     .size(13.0)
                     .font(corten_theme::NOTO_SANS_BOLD)
@@ -754,7 +794,9 @@ impl CortenWidgetsApp {
         .padding([6, 12])
         .width(Length::FillPortion(1))
         .style(|_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25))),
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                0.0, 0.0, 0.0, 0.25,
+            ))),
             border: iced::Border {
                 color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                 width: 1.0,
@@ -766,9 +808,16 @@ impl CortenWidgetsApp {
         let tx_box = container(
             iced::widget::column![
                 row![
-                    text(Icon::ARROW_UP).font(LUCIDE_FONT).size(10.0).color(palette.text_muted.to_iced()),
-                    text("YÜKLEME").size(9.5).color(palette.text_muted.to_iced()),
-                ].spacing(4).align_y(Alignment::Center),
+                    text(Icon::ARROW_UP)
+                        .font(LUCIDE_FONT)
+                        .size(10.0)
+                        .color(palette.text_muted.to_iced()),
+                    text("YÜKLEME")
+                        .size(9.5)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center),
                 text(tx_formatted)
                     .size(13.0)
                     .font(corten_theme::NOTO_SANS_BOLD)
@@ -779,7 +828,9 @@ impl CortenWidgetsApp {
         .padding([6, 12])
         .width(Length::FillPortion(1))
         .style(|_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25))),
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                0.0, 0.0, 0.0, 0.25,
+            ))),
             border: iced::Border {
                 color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                 width: 1.0,
@@ -794,7 +845,11 @@ impl CortenWidgetsApp {
     }
 
     // 4. GPU & Thermal Telemetry Card
-    fn view_gpu_card(&self, palette: Palette, secondary_patina: corten_theme::Color) -> Element<'_, Message> {
+    fn view_gpu_card(
+        &self,
+        palette: Palette,
+        secondary_patina: corten_theme::Color,
+    ) -> Element<'_, Message> {
         let header = self.card_header(
             Icon::GAUGE,
             "GPU & TERMAL",
@@ -803,7 +858,9 @@ impl CortenWidgetsApp {
         );
 
         let gpu_row = row![
-            text("GPU Yükü").size(11.0).color(palette.text_muted.to_iced()),
+            text("GPU Yükü")
+                .size(11.0)
+                .color(palette.text_muted.to_iced()),
             horizontal_space(),
             text(format!("%{}", self.gpu_metrics.gpu_util))
                 .size(11.5)
@@ -820,7 +877,9 @@ impl CortenWidgetsApp {
             });
 
         let temp_row = row![
-            text("Sıcaklık").size(11.0).color(palette.text_muted.to_iced()),
+            text("Sıcaklık")
+                .size(11.0)
+                .color(palette.text_muted.to_iced()),
             horizontal_space(),
             text(format!("{} °C", self.gpu_metrics.temp_c))
                 .size(11.5)
@@ -901,7 +960,9 @@ impl CortenWidgetsApp {
         for day in self.weather.forecast.iter().take(3) {
             let day_cell = container(
                 iced::widget::column![
-                    text(&day.day_name).size(9.0).color(palette.text_muted.to_iced()),
+                    text(&day.day_name)
+                        .size(9.0)
+                        .color(palette.text_muted.to_iced()),
                     text(format!("{}° / {}°", day.max_temp, day.min_temp))
                         .size(10.0)
                         .font(corten_theme::NOTO_SANS_MEDIUM)
@@ -913,7 +974,9 @@ impl CortenWidgetsApp {
             .padding([4, 6])
             .width(Length::FillPortion(1))
             .style(|_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.20))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.0, 0.0, 0.0, 0.20,
+                ))),
                 border: iced::Border {
                     color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05),
                     width: 1.0,
@@ -931,7 +994,12 @@ impl CortenWidgetsApp {
 
     // 6. Quick Actions Card
     fn view_quick_actions_card(&self, palette: Palette) -> Element<'_, Message> {
-        let header = self.card_header(Icon::TERMINAL, "HIZLI EYLEMLER", "Kısayollar".into(), palette);
+        let header = self.card_header(
+            Icon::TERMINAL,
+            "HIZLI EYLEMLER",
+            "Kısayollar".into(),
+            palette,
+        );
 
         let mut row1 = row![].spacing(6).width(Length::Fill);
         let mut row2 = row![].spacing(6).width(Length::Fill);
@@ -982,22 +1050,36 @@ impl CortenWidgetsApp {
 
     // 7. Disk Health Card
     fn view_disk_card(&self, palette: Palette) -> Element<'_, Message> {
-        let header = self.card_header(Icon::FOLDER, "DEPOLAMA SAĞLIĞI", "NVMe / SSD".into(), palette);
+        let header = self.card_header(
+            Icon::FOLDER,
+            "DEPOLAMA SAĞLIĞI",
+            "NVMe / SSD".into(),
+            palette,
+        );
 
         let root_info = self.disk_metrics.root.as_ref().map(|d| {
             let pct = d.used_pct;
-            let bar = progress_bar(0.0..=100.0, pct as f32).height(4.0).style(move |_| progress_bar::Style {
-                background: iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35)),
-                bar: iced::Background::Color(palette.primary.to_iced()),
-                border: iced::Border::default(),
-            });
+            let bar = progress_bar(0.0..=100.0, pct as f32)
+                .height(4.0)
+                .style(move |_| progress_bar::Style {
+                    background: iced::Background::Color(iced::Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.35,
+                    )),
+                    bar: iced::Background::Color(palette.primary.to_iced()),
+                    border: iced::Border::default(),
+                });
             iced::widget::column![
                 row![
-                    text("Kök (/)").size(10.5).color(palette.text_muted.to_iced()),
-                    horizontal_space(),
-                    text(format!("{:.1} / {:.0} GB (%{})", d.used_gb, d.total_gb, pct))
+                    text("Kök (/)")
                         .size(10.5)
-                        .color(palette.text_primary.to_iced()),
+                        .color(palette.text_muted.to_iced()),
+                    horizontal_space(),
+                    text(format!(
+                        "{:.1} / {:.0} GB (%{})",
+                        d.used_gb, d.total_gb, pct
+                    ))
+                    .size(10.5)
+                    .color(palette.text_primary.to_iced()),
                 ],
                 bar,
             ]
@@ -1006,18 +1088,27 @@ impl CortenWidgetsApp {
 
         let home_info = self.disk_metrics.home.as_ref().map(|d| {
             let pct = d.used_pct;
-            let bar = progress_bar(0.0..=100.0, pct as f32).height(4.0).style(move |_| progress_bar::Style {
-                background: iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35)),
-                bar: iced::Background::Color(iced::Color::from_rgba(0.3, 0.8, 0.5, 0.8)),
-                border: iced::Border::default(),
-            });
+            let bar = progress_bar(0.0..=100.0, pct as f32)
+                .height(4.0)
+                .style(move |_| progress_bar::Style {
+                    background: iced::Background::Color(iced::Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.35,
+                    )),
+                    bar: iced::Background::Color(iced::Color::from_rgba(0.3, 0.8, 0.5, 0.8)),
+                    border: iced::Border::default(),
+                });
             iced::widget::column![
                 row![
-                    text("Ev (/home)").size(10.5).color(palette.text_muted.to_iced()),
-                    horizontal_space(),
-                    text(format!("{:.1} / {:.0} GB (%{})", d.used_gb, d.total_gb, pct))
+                    text("Ev (/home)")
                         .size(10.5)
-                        .color(palette.text_primary.to_iced()),
+                        .color(palette.text_muted.to_iced()),
+                    horizontal_space(),
+                    text(format!(
+                        "{:.1} / {:.0} GB (%{})",
+                        d.used_gb, d.total_gb, pct
+                    ))
+                    .size(10.5)
+                    .color(palette.text_primary.to_iced()),
                 ],
                 bar,
             ]
@@ -1059,9 +1150,13 @@ impl CortenWidgetsApp {
             });
 
         let play_btn = button(
-            text(if self.pomodoro.is_running { "⏸ Durdur" } else { "▶ Başlat" })
-                .size(10.5)
-                .color(palette.primary.to_iced()),
+            text(if self.pomodoro.is_running {
+                "⏸ Durdur"
+            } else {
+                "▶ Başlat"
+            })
+            .size(10.5)
+            .color(palette.primary.to_iced()),
         )
         .padding([4, 10])
         .style(|_, _| button::Style::default())
@@ -1091,7 +1186,12 @@ impl CortenWidgetsApp {
 
         let content = iced::widget::column![
             header,
-            row![time_text, horizontal_space(), text(mode_title).size(11.0).color(palette.primary.to_iced())].align_y(Alignment::Center),
+            row![
+                time_text,
+                horizontal_space(),
+                text(mode_title).size(11.0).color(palette.primary.to_iced())
+            ]
+            .align_y(Alignment::Center),
             p_bar,
             controls,
         ]
@@ -1110,7 +1210,10 @@ impl CortenWidgetsApp {
             text(if self.current_track.artist.is_empty() {
                 self.current_track.title.clone()
             } else {
-                format!("{} - {}", self.current_track.title, self.current_track.artist)
+                format!(
+                    "{} - {}",
+                    self.current_track.title, self.current_track.artist
+                )
             })
             .size(11.0)
             .color(palette.text_primary.to_iced()),
@@ -1172,14 +1275,24 @@ impl CortenWidgetsApp {
                 .style(move |_, _| text_input::Style {
                     background: iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.3)),
                     border: iced::Border {
-                        color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.5),
+                        color: iced::Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.5,
+                        ),
                         width: 1.0,
                         radius: iced::border::Radius::from(Radius::SM),
                     },
                     icon: iced::Color::TRANSPARENT,
                     placeholder: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.4),
                     value: palette.text_primary.to_iced(),
-                    selection: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.3),
+                    selection: iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.3,
+                    ),
                 })
                 .into()
         } else {
@@ -1188,15 +1301,13 @@ impl CortenWidgetsApp {
             } else {
                 self.note_content.as_str()
             };
-            mouse_area(
-                text(display_text)
-                    .size(11.0)
-                    .color(if self.note_content.trim().is_empty() {
-                        palette.text_muted.to_iced()
-                    } else {
-                        palette.text_primary.to_iced()
-                    }),
-            )
+            mouse_area(text(display_text).size(11.0).color(
+                if self.note_content.trim().is_empty() {
+                    palette.text_muted.to_iced()
+                } else {
+                    palette.text_primary.to_iced()
+                },
+            ))
             .on_press(Message::ToggleNotesEdit)
             .into()
         };

@@ -41,10 +41,10 @@ impl GpuMonitor {
         // 1. AMD / Intel sysfs gpu_busy_percent
         for card_idx in 0..3 {
             let path = format!("/sys/class/drm/card{}/device/gpu_busy_percent", card_idx);
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(val) = content.trim().parse::<u8>() {
-                    return (val.min(100), "D-GPU".to_string());
-                }
+            if let Ok(content) = fs::read_to_string(&path)
+                && let Ok(val) = content.trim().parse::<u8>()
+            {
+                return (val.min(100), "D-GPU".to_string());
             }
         }
 
@@ -56,14 +56,13 @@ impl GpuMonitor {
         // 1. Check thermal zones
         for zone in 0..4 {
             let path = format!("/sys/class/thermal/thermal_zone{}/temp", zone);
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(val) = content.trim().parse::<u32>() {
-                    if val > 0 {
-                        let c = (val / 1000).min(110) as u8;
-                        if c > 20 {
-                            return c;
-                        }
-                    }
+            if let Ok(content) = fs::read_to_string(&path)
+                && let Ok(val) = content.trim().parse::<u32>()
+                && val > 0
+            {
+                let c = (val / 1000).min(110) as u8;
+                if c > 20 {
+                    return c;
                 }
             }
         }
@@ -71,14 +70,13 @@ impl GpuMonitor {
         // 2. Check hwmon
         for h in 0..4 {
             let path = format!("/sys/class/hwmon/hwmon{}/temp1_input", h);
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(val) = content.trim().parse::<u32>() {
-                    if val > 0 {
-                        let c = (val / 1000).min(110) as u8;
-                        if c > 20 {
-                            return c;
-                        }
-                    }
+            if let Ok(content) = fs::read_to_string(&path)
+                && let Ok(val) = content.trim().parse::<u32>()
+                && val > 0
+            {
+                let c = (val / 1000).min(110) as u8;
+                if c > 20 {
+                    return c;
                 }
             }
         }

@@ -5,7 +5,7 @@
 //! sensitive credential lifecycle and UI state.
 
 use std::ops::Deref;
-use std::sync::atomic::{compiler_fence, Ordering};
+use std::sync::atomic::{Ordering, compiler_fence};
 
 /// Overwrites all bytes of `buf` (including spare capacity up to `len`) with zeros
 /// using volatile writes and a compiler fence so the optimizer cannot elide erasure.
@@ -149,7 +149,12 @@ impl AuthController {
         while self.secret.chars().last().is_some_and(char::is_whitespace) {
             changed |= self.pop_char();
         }
-        while self.secret.chars().last().is_some_and(|c| !c.is_whitespace()) {
+        while self
+            .secret
+            .chars()
+            .last()
+            .is_some_and(|c| !c.is_whitespace())
+        {
             changed |= self.pop_char();
         }
         changed

@@ -48,7 +48,8 @@ fn get_or_init_vector_index() -> &'static VectorIndex {
                                 .and_then(|e| e.to_str())
                                 .unwrap_or("")
                                 .to_lowercase();
-                            if matches!(ext.as_str(), "md" | "txt" | "rs" | "toml" | "py" | "json") {
+                            if matches!(ext.as_str(), "md" | "txt" | "rs" | "toml" | "py" | "json")
+                            {
                                 std::fs::read_to_string(&path)
                                     .ok()
                                     .map(|s| s.chars().take(300).collect::<String>())
@@ -64,7 +65,10 @@ fn get_or_init_vector_index() -> &'static VectorIndex {
                         let mut meta = HashMap::new();
                         meta.insert("name".into(), file_name);
                         meta.insert("path".into(), path.to_string_lossy().to_string());
-                        meta.insert("is_dir".into(), if is_dir { "1".into() } else { "0".into() });
+                        meta.insert(
+                            "is_dir".into(),
+                            if is_dir { "1".into() } else { "0".into() },
+                        );
 
                         index.add_document_text(doc_id, &combined, meta);
                         doc_id += 1;
@@ -136,10 +140,16 @@ pub fn find_matching_files(query: &str, limit: usize) -> Vec<LauncherFileEntry> 
             if hit.similarity < 0.15 {
                 continue;
             }
-            if let (Some(name), Some(path_str)) = (hit.metadata.get("name"), hit.metadata.get("path")) {
+            if let (Some(name), Some(path_str)) =
+                (hit.metadata.get("name"), hit.metadata.get("path"))
+            {
                 let path = PathBuf::from(path_str);
                 if seen_paths.insert(path.clone()) {
-                    let is_dir = hit.metadata.get("is_dir").map(|v| v == "1").unwrap_or(false);
+                    let is_dir = hit
+                        .metadata
+                        .get("is_dir")
+                        .map(|v| v == "1")
+                        .unwrap_or(false);
                     results.push(LauncherFileEntry {
                         name: name.clone(),
                         path,

@@ -30,10 +30,7 @@ impl<Message> Program<Message> for AnalogClockCanvas {
 
         // 1. Dial Outer Ring (Forged Steel Bezel)
         let outer_circle = Path::circle(center, radius);
-        frame.fill(
-            &outer_circle,
-            Color::from_rgba(0.06, 0.07, 0.09, 0.95),
-        );
+        frame.fill(&outer_circle, Color::from_rgba(0.06, 0.07, 0.09, 0.95));
         frame.stroke(
             &outer_circle,
             Stroke::default()
@@ -62,7 +59,11 @@ impl<Message> Program<Message> for AnalogClockCanvas {
             let sin = angle.sin();
 
             let is_hour = i % 5 == 0;
-            let tick_len = if is_hour { radius * 0.18 } else { radius * 0.08 };
+            let tick_len = if is_hour {
+                radius * 0.18
+            } else {
+                radius * 0.08
+            };
             let width = if is_hour { 2.0 } else { 0.8 };
 
             let start_r = radius * 0.88;

@@ -1,10 +1,10 @@
 use corten_config::{LayoutMode, WindowRuleConfig};
-use smithay::desktop::{layer_map_for_output, PopupManager, Window};
+use smithay::desktop::{PopupManager, Window, layer_map_for_output};
 use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
-use smithay::utils::{Point, Rectangle, Size, Transform, SERIAL_COUNTER};
-use smithay::wayland::compositor::CompositorState;
+use smithay::utils::{Point, Rectangle, SERIAL_COUNTER, Size, Transform};
 use smithay::wayland::alpha_modifier::AlphaModifierState;
+use smithay::wayland::compositor::CompositorState;
 use smithay::wayland::content_type::ContentTypeState;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufState};
@@ -15,7 +15,7 @@ use smithay::wayland::keyboard_shortcuts_inhibit::{
 };
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::{
-    with_pointer_constraint, PointerConstraint, PointerConstraintsState,
+    PointerConstraint, PointerConstraintsState, with_pointer_constraint,
 };
 use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::presentation::PresentationState;
@@ -25,15 +25,15 @@ use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState;
 use smithay::wayland::session_lock::{LockSurface, SessionLockManagerState, SessionLocker};
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
-use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::XdgShellState;
+use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xwayland_shell::XWaylandShellState;
-use smithay::xwayland::xwm::X11Wm;
 use smithay::xwayland::X11Surface;
+use smithay::xwayland::xwm::X11Wm;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -41,7 +41,7 @@ use wayland_server::protocol::wl_output::WlOutput;
 use wayland_server::protocol::wl_surface::WlSurface;
 use wayland_server::{Client, Display, Resource};
 
-use crate::layout::{window_wl_surface, LayoutManager, WindowSnapshot};
+use crate::layout::{LayoutManager, WindowSnapshot, window_wl_surface};
 use crate::screencopy::{PendingScreencopy, PendingScreenshot, ScreencopyManagerState};
 
 /// Thread-safe snapshot of the compositor state exposed to D-Bus/IPC consumers (such as `corten-panel`).
@@ -105,12 +105,22 @@ pub struct CortenCompositor {
     #[allow(dead_code)]
     pub text_input_state: smithay::wayland::text_input::TextInputManagerState,
     pub idle_notifier_state: smithay::wayland::idle_notify::IdleNotifierState<Self>,
-    pub idle_event_loop: Option<std::sync::Mutex<smithay::reexports::calloop::EventLoop<'static, Self>>>,
+    pub idle_event_loop:
+        Option<std::sync::Mutex<smithay::reexports::calloop::EventLoop<'static, Self>>>,
     pub xdg_foreign_state: smithay::wayland::xdg_foreign::XdgForeignState,
-    pub foreign_toplevel_list_state: smithay::wayland::foreign_toplevel_list::ForeignToplevelListState,
-    pub foreign_toplevel_handles: HashMap<u64, (smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle, String, String)>,
+    pub foreign_toplevel_list_state:
+        smithay::wayland::foreign_toplevel_list::ForeignToplevelListState,
+    pub foreign_toplevel_handles: HashMap<
+        u64,
+        (
+            smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle,
+            String,
+            String,
+        ),
+    >,
     #[allow(dead_code)]
-    pub virtual_keyboard_manager_state: smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState,
+    pub virtual_keyboard_manager_state:
+        smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState,
     #[allow(dead_code)]
     pub input_method_manager_state: smithay::wayland::input_method::InputMethodManagerState,
     pub tearing_state: crate::tearing::TearingControlState,
@@ -170,7 +180,10 @@ pub struct CortenCompositor {
         bool,
         Rectangle<i32, smithay::utils::Logical>,
     )>,
-    pub selection_box: Option<(Point<f64, smithay::utils::Logical>, Point<f64, smithay::utils::Logical>)>,
+    pub selection_box: Option<(
+        Point<f64, smithay::utils::Logical>,
+        Point<f64, smithay::utils::Logical>,
+    )>,
     pub alt_tab_active: bool,
     pub alt_tab_instant: Option<std::time::Instant>,
     pub lock_surfaces: Vec<(LockSurface, WlOutput)>,
@@ -189,7 +202,14 @@ pub struct CortenCompositor {
     pub color_space: String,
     pub event_broadcaster: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     pub last_broadcast_event: std::sync::Mutex<Option<String>>,
-    pub title_cache: HashMap<String, (smithay::backend::renderer::element::memory::MemoryRenderBuffer, i32, i32)>,
+    pub title_cache: HashMap<
+        String,
+        (
+            smithay::backend::renderer::element::memory::MemoryRenderBuffer,
+            i32,
+            i32,
+        ),
+    >,
     pub last_titlebar_click: Option<(smithay::desktop::Window, Instant)>,
     pub accessibility: corten_config::AccessibilityConfig,
     pub a11y_bridge: corten_services::a11y::AtspiBridge,
@@ -213,10 +233,10 @@ impl CortenCompositor {
             return true;
         }
         let layer_map = layer_map_for_output(&self.output);
-        let active = layer_map
+
+        layer_map
             .layers()
-            .any(|layer_surface| layer_surface.namespace() == "corten-lock");
-        active
+            .any(|layer_surface| layer_surface.namespace() == "corten-lock")
     }
 
     pub fn lock_surface_for_output(&self, lock_output: &WlOutput, output: &Output) -> bool {
@@ -295,9 +315,7 @@ impl CortenCompositor {
                         .layout
                         .floating_windows()
                         .iter()
-                        .find(|w| {
-                            crate::layout::window_wl_surface(w).as_ref() == Some(&surface)
-                        })
+                        .find(|w| crate::layout::window_wl_surface(w).as_ref() == Some(&surface))
                         .and_then(|w| self.layout.floating_geometry(w))
                         .unwrap_or_else(|| {
                             let arranged = self.layout.arrange(usable);
@@ -315,15 +333,15 @@ impl CortenCompositor {
                     let mut max_x = (win_rect.loc.x + win_rect.size.w.max(1) - 1) as f64;
                     let mut max_y = (win_rect.loc.y + win_rect.size.h.max(1) - 1) as f64;
 
-                    if let Some(region) = confined.region() {
-                        if let Some((_, ext)) = region.rects.first() {
-                            if ext.size.w > 0 && ext.size.h > 0 {
-                                min_x = (win_rect.loc.x + ext.loc.x) as f64;
-                                min_y = (win_rect.loc.y + ext.loc.y) as f64;
-                                max_x = (win_rect.loc.x + ext.loc.x + ext.size.w - 1) as f64;
-                                max_y = (win_rect.loc.y + ext.loc.y + ext.size.h - 1) as f64;
-                            }
-                        }
+                    if let Some(region) = confined.region()
+                        && let Some((_, ext)) = region.rects.first()
+                        && ext.size.w > 0
+                        && ext.size.h > 0
+                    {
+                        min_x = (win_rect.loc.x + ext.loc.x) as f64;
+                        min_y = (win_rect.loc.y + ext.loc.y) as f64;
+                        max_x = (win_rect.loc.x + ext.loc.x + ext.size.w - 1) as f64;
+                        max_y = (win_rect.loc.y + ext.loc.y + ext.size.h - 1) as f64;
                     }
 
                     let clamped_x = target_loc.x.clamp(min_x, max_x.max(min_x));
@@ -351,12 +369,11 @@ impl CortenCompositor {
         };
         let mut locked = false;
         with_pointer_constraint(&surface, &pointer, |constraint| {
-            if let Some(constraint) = constraint {
-                if constraint.is_active() {
-                    if let PointerConstraint::Locked(_) = &*constraint {
-                        locked = true;
-                    }
-                }
+            if let Some(constraint) = constraint
+                && constraint.is_active()
+                && let PointerConstraint::Locked(_) = &*constraint
+            {
+                locked = true;
             }
         });
         locked
@@ -396,11 +413,11 @@ impl CortenCompositor {
     }
 
     pub fn update_idle_state(&mut self) -> bool {
-        if let Some(loop_mutex) = self.idle_event_loop.take() {
-            if let Ok(mut el) = loop_mutex.into_inner() {
-                let _ = el.dispatch(Some(Duration::ZERO), self);
-                self.idle_event_loop = Some(std::sync::Mutex::new(el));
-            }
+        if let Some(loop_mutex) = self.idle_event_loop.take()
+            && let Ok(mut el) = loop_mutex.into_inner()
+        {
+            let _ = el.dispatch(Some(Duration::ZERO), self);
+            self.idle_event_loop = Some(std::sync::Mutex::new(el));
         }
         if self.session_locked {
             // While locked, still power off displays (DPMS-off) after inactivity
@@ -513,24 +530,25 @@ impl CortenCompositor {
         if focused_output.name() == self.output.name() {
             self.active_workspace = workspace;
             self.layout.switch_workspace(workspace);
-            if let Some(active) = self.layout.active_window().cloned() {
-                if let Some(surface) = crate::layout::window_wl_surface(&active) {
-                    let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                    if let Some(kb) = self.seat.get_keyboard() {
-                        kb.set_focus(self, Some(surface), serial);
-                    }
+            if let Some(active) = self.layout.active_window().cloned()
+                && let Some(surface) = crate::layout::window_wl_surface(&active)
+            {
+                let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+                if let Some(kb) = self.seat.get_keyboard() {
+                    kb.set_focus(self, Some(surface), serial);
                 }
             }
         } else {
-            self.output_workspaces.insert(focused_output.name(), workspace);
+            self.output_workspaces
+                .insert(focused_output.name(), workspace);
             if let Some(layout) = self.output_layouts.get_mut(&focused_output.name()) {
                 layout.switch_workspace(workspace);
-                if let Some(active) = layout.active_window().cloned() {
-                    if let Some(surface) = crate::layout::window_wl_surface(&active) {
-                        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                        if let Some(kb) = self.seat.get_keyboard() {
-                            kb.set_focus(self, Some(surface), serial);
-                        }
+                if let Some(active) = layout.active_window().cloned()
+                    && let Some(surface) = crate::layout::window_wl_surface(&active)
+                {
+                    let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+                    if let Some(kb) = self.seat.get_keyboard() {
+                        kb.set_focus(self, Some(surface), serial);
                     }
                 }
             }
@@ -543,24 +561,25 @@ impl CortenCompositor {
         if output_name == self.output.name() {
             self.active_workspace = workspace;
             self.layout.switch_workspace(workspace);
-            if let Some(active) = self.layout.active_window().cloned() {
-                if let Some(surface) = crate::layout::window_wl_surface(&active) {
-                    let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                    if let Some(kb) = self.seat.get_keyboard() {
-                        kb.set_focus(self, Some(surface), serial);
-                    }
+            if let Some(active) = self.layout.active_window().cloned()
+                && let Some(surface) = crate::layout::window_wl_surface(&active)
+            {
+                let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+                if let Some(kb) = self.seat.get_keyboard() {
+                    kb.set_focus(self, Some(surface), serial);
                 }
             }
         } else {
-            self.output_workspaces.insert(output_name.to_string(), workspace);
+            self.output_workspaces
+                .insert(output_name.to_string(), workspace);
             if let Some(layout) = self.output_layouts.get_mut(output_name) {
                 layout.switch_workspace(workspace);
-                if let Some(active) = layout.active_window().cloned() {
-                    if let Some(surface) = crate::layout::window_wl_surface(&active) {
-                        let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                        if let Some(kb) = self.seat.get_keyboard() {
-                            kb.set_focus(self, Some(surface), serial);
-                        }
+                if let Some(active) = layout.active_window().cloned()
+                    && let Some(surface) = crate::layout::window_wl_surface(&active)
+                {
+                    let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+                    if let Some(kb) = self.seat.get_keyboard() {
+                        kb.set_focus(self, Some(surface), serial);
                     }
                 }
             }
@@ -585,13 +604,15 @@ impl CortenCompositor {
 
     pub fn toggle_show_desktop(&mut self) {
         if let Some(prev_ws) = self.pre_show_desktop_workspace.take() {
-            if self.accessibility.screen_reader || corten_services::a11y::is_screen_reader_enabled() {
+            if self.accessibility.screen_reader || corten_services::a11y::is_screen_reader_enabled()
+            {
                 corten_services::a11y::announce_screen_reader("Pencereler Geri Yüklendi");
             }
             self.switch_workspace(prev_ws);
         } else {
             let current = self.active_workspace;
-            if self.accessibility.screen_reader || corten_services::a11y::is_screen_reader_enabled() {
+            if self.accessibility.screen_reader || corten_services::a11y::is_screen_reader_enabled()
+            {
                 corten_services::a11y::announce_screen_reader("Masaüstü Gösteriliyor");
             }
             // Find an empty workspace (prefer 9)
@@ -635,22 +656,24 @@ impl CortenCompositor {
     /// Resolves the output that currently owns `window`, falling back to the primary output.
     pub fn output_for_window(&self, window: &Window) -> Output {
         for out in &self.additional_outputs {
-            if let Some(layout) = self.output_layouts.get(&out.name()) {
-                if layout
+            if let Some(layout) = self.output_layouts.get(&out.name())
+                && layout
                     .windows()
                     .iter()
                     .chain(layout.floating_windows().iter())
                     .any(|w| w == window)
-                {
-                    return out.clone();
-                }
+            {
+                return out.clone();
             }
         }
         self.output.clone()
     }
 
     /// Computes the non-exclusive usable work area for a specific output.
-    pub fn usable_area_for_output(&self, output: &Output) -> Rectangle<i32, smithay::utils::Logical> {
+    pub fn usable_area_for_output(
+        &self,
+        output: &Output,
+    ) -> Rectangle<i32, smithay::utils::Logical> {
         let mut map = smithay::desktop::layer_map_for_output(output);
         map.arrange();
         let zone = map.non_exclusive_zone();
@@ -675,19 +698,30 @@ impl CortenCompositor {
     }
 
     /// Computes the usable work area on the output where `window` currently lives.
-    pub fn usable_area_for_window(&self, window: &Window) -> Rectangle<i32, smithay::utils::Logical> {
+    pub fn usable_area_for_window(
+        &self,
+        window: &Window,
+    ) -> Rectangle<i32, smithay::utils::Logical> {
         let out = self.output_for_window(window);
         self.usable_area_for_output(&out)
     }
 
     /// Clears any active interactive drag/resize grab referencing `window` (e.g. on destroy).
     pub fn clear_window_grabs(&mut self, window: &Window) {
-        if self.dragged_window.as_ref().is_some_and(|(w, _, _)| w == window) {
+        if self
+            .dragged_window
+            .as_ref()
+            .is_some_and(|(w, _, _)| w == window)
+        {
             self.dragged_window = None;
             self.snap_preview = None;
             self.drag_split_target = None;
         }
-        if self.resized_window.as_ref().is_some_and(|(w, _, _, _)| w == window) {
+        if self
+            .resized_window
+            .as_ref()
+            .is_some_and(|(w, _, _, _)| w == window)
+        {
             self.resized_window = None;
         }
     }
@@ -717,7 +751,10 @@ impl CortenCompositor {
 
     /// Resolves the fractional scale of the output a surface lives on (windows and layer
     /// surfaces on secondary outputs); falls back to the primary output.
-    pub fn scale_for_surface(&self, surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface) -> f64 {
+    pub fn scale_for_surface(
+        &self,
+        surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+    ) -> f64 {
         for out in &self.additional_outputs {
             let on_window = self.output_layouts.get(&out.name()).is_some_and(|layout| {
                 layout
@@ -766,16 +803,21 @@ impl CortenCompositor {
             }
         }
         for (out_name, layout) in &self.output_layouts {
-            let scale = self.additional_outputs.iter()
+            let scale = self
+                .additional_outputs
+                .iter()
                 .find(|o| o.name() == *out_name)
                 .map(|o| o.current_scale().fractional_scale())
                 .unwrap_or(primary_scale);
             for window in layout.windows() {
                 if let Some(surface) = crate::layout::window_wl_surface(window) {
                     smithay::wayland::compositor::with_states(&surface, |states| {
-                        smithay::wayland::fractional_scale::with_fractional_scale(states, |fscale| {
-                            fscale.set_preferred_scale(scale);
-                        });
+                        smithay::wayland::fractional_scale::with_fractional_scale(
+                            states,
+                            |fscale| {
+                                fscale.set_preferred_scale(scale);
+                            },
+                        );
                     });
                 }
             }
@@ -828,23 +870,28 @@ impl CortenCompositor {
                     is_floating: w.is_floating,
                 })
                 .collect();
-            self.a11y_bridge.sync_windows(&a11y_snaps, self.active_workspace as u32);
+            self.a11y_bridge
+                .sync_windows(&a11y_snaps, self.active_workspace as u32);
             guard.active_workspace = self.active_workspace as u32;
             guard.occupied_workspaces = occupied;
             guard.windows = windows;
             guard.output_active_workspaces = output_active_workspaces;
             guard.output_occupied_workspaces = output_occupied_workspaces;
             if let Some(ref tx) = self.event_broadcaster {
-                let active_id = self.layout.active_window().map(crate::layout::window_stable_id).unwrap_or(0);
+                let active_id = self
+                    .layout
+                    .active_window()
+                    .map(crate::layout::window_stable_id)
+                    .unwrap_or(0);
                 let payload = format!(
                     r#"{{"event":"workspace:changed","data":{{"workspace":{},"active_window":{},"total_windows":{}}}}}"#,
                     self.active_workspace, active_id, total_windows
                 );
-                if let Ok(mut last) = self.last_broadcast_event.lock() {
-                    if last.as_deref() != Some(&payload) {
-                        let _ = tx.send(payload.clone());
-                        *last = Some(payload);
-                    }
+                if let Ok(mut last) = self.last_broadcast_event.lock()
+                    && last.as_deref() != Some(&payload)
+                {
+                    let _ = tx.send(payload.clone());
+                    *last = Some(payload);
                 }
             }
         }
@@ -880,9 +927,19 @@ impl CortenCompositor {
             if snap.app_id.is_empty() && snap.title.is_empty() {
                 continue;
             }
-            let eff_title = if snap.title.is_empty() { "Corten Window" } else { &snap.title };
-            let eff_app = if snap.app_id.is_empty() { "corten" } else { &snap.app_id };
-            if let Some((handle, last_app, last_title)) = self.foreign_toplevel_handles.get_mut(&snap.id) {
+            let eff_title = if snap.title.is_empty() {
+                "Corten Window"
+            } else {
+                &snap.title
+            };
+            let eff_app = if snap.app_id.is_empty() {
+                "corten"
+            } else {
+                &snap.app_id
+            };
+            if let Some((handle, last_app, last_title)) =
+                self.foreign_toplevel_handles.get_mut(&snap.id)
+            {
                 let mut changed = false;
                 if last_title != eff_title {
                     handle.send_title(eff_title);
@@ -920,11 +977,15 @@ impl CortenCompositor {
     /// Rescues all windows from a disconnected or removed output and migrates them
     /// to the primary output so windows are never orphaned or lost when unplugging displays.
     pub fn rescue_orphan_windows(&mut self, removed_output_name: &str) {
-        tracing::warn!("Rescuing orphaned windows from disconnected display '{}'...", removed_output_name);
+        tracing::warn!(
+            "Rescuing orphaned windows from disconnected display '{}'...",
+            removed_output_name
+        );
 
         let mut removed_layout = self.output_layouts.remove(removed_output_name);
         self.output_workspaces.remove(removed_output_name);
-        self.additional_outputs.retain(|o| o.name() != removed_output_name);
+        self.additional_outputs
+            .retain(|o| o.name() != removed_output_name);
 
         let primary_usable_area = {
             let mut map = layer_map_for_output(&self.output);
@@ -943,12 +1004,14 @@ impl CortenCompositor {
                     removed_output_name,
                     ws
                 );
-                self.layout.rescue_window(ws, window.clone(), is_floating, geo);
+                self.layout
+                    .rescue_window(ws, window.clone(), is_floating, geo);
             }
         }
 
         // Clamp rescued floating windows to the visible bounds of the primary display
-        self.layout.clamp_floating_geometries_to_area(primary_usable_area);
+        self.layout
+            .clamp_floating_geometries_to_area(primary_usable_area);
 
         // Notify client surfaces of updated geometries
         for window in self.layout.floating_windows().iter() {
@@ -961,7 +1024,10 @@ impl CortenCompositor {
         crate::send_osd_notification(
             "display",
             "Ekran Ayrıldı",
-            &format!("Pencereler ana ekrana güvenle taşındı ({})", removed_output_name),
+            &format!(
+                "Pencereler ana ekrana güvenle taşındı ({})",
+                removed_output_name
+            ),
             100,
         );
         if let Some(ref tx) = self.event_broadcaster {
@@ -1078,10 +1144,10 @@ impl CortenCompositor {
     /// Checks if the given output has an active fullscreen window that requested asynchronous presentation (tearing).
     pub fn is_tearing_allowed_for_output(&self, output: &Output) -> bool {
         let layout = self.layout_for_output(output);
-        if let Some(fs_window) = layout.active_fullscreen_window() {
-            if let Some(surface) = crate::layout::window_wl_surface(&fs_window) {
-                return self.tearing_state.is_tearing_requested(&surface);
-            }
+        if let Some(fs_window) = layout.active_fullscreen_window()
+            && let Some(surface) = crate::layout::window_wl_surface(&fs_window)
+        {
+            return self.tearing_state.is_tearing_requested(&surface);
         }
         false
     }
@@ -1136,7 +1202,8 @@ impl CortenCompositor {
         let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
         let screencopy_state = ScreencopyManagerState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
-        let text_input_state = smithay::wayland::text_input::TextInputManagerState::new::<Self>(&dh);
+        let text_input_state =
+            smithay::wayland::text_input::TextInputManagerState::new::<Self>(&dh);
         let idle_event_loop = smithay::reexports::calloop::EventLoop::<Self>::try_new()
             .expect("calloop EventLoop for IdleNotifierState");
         let idle_notifier_state =
@@ -1145,7 +1212,10 @@ impl CortenCompositor {
         let foreign_toplevel_list_state =
             smithay::wayland::foreign_toplevel_list::ForeignToplevelListState::new::<Self>(&dh);
         let virtual_keyboard_manager_state =
-            smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState::new::<Self, _>(&dh, |_| true);
+            smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState::new::<Self, _>(
+                &dh,
+                |_| true,
+            );
         let input_method_manager_state =
             smithay::wayland::input_method::InputMethodManagerState::new::<Self, _>(&dh, |_| true);
         let tablet_state = smithay::wayland::tablet_manager::TabletManagerState::new::<Self>(&dh);
@@ -1286,20 +1356,31 @@ impl CortenCompositor {
             last_broadcast_event: std::sync::Mutex::new(None),
             title_cache: HashMap::new(),
             last_titlebar_click: None,
-            accessibility: corten_config::ConfigManager::<corten_config::AccessibilityConfig>::load_or_default("accessibility")
+            accessibility:
+                corten_config::ConfigManager::<corten_config::AccessibilityConfig>::load_or_default(
+                    "accessibility",
+                )
                 .map(|m| m.get().clone())
                 .unwrap_or_default(),
             a11y_bridge: corten_services::a11y::AtspiBridge::new("Corten Desktop"),
             game_mode: false,
             zoom_level: 1.0,
             target_zoom_level: 1.0,
-            xwayland_force_zero_scaling: corten_config::ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default("displays")
-                .map(|m| m.get().xwayland_force_zero_scaling)
-                .unwrap_or(true),
-            tablet_pressure_curve: corten_config::ConfigManager::<corten_config::InputSettingsConfig>::load_or_default("input")
+            xwayland_force_zero_scaling: corten_config::ConfigManager::<
+                corten_config::DisplaySettingsConfig,
+            >::load_or_default("displays")
+            .map(|m| m.get().xwayland_force_zero_scaling)
+            .unwrap_or(true),
+            tablet_pressure_curve:
+                corten_config::ConfigManager::<corten_config::InputSettingsConfig>::load_or_default(
+                    "input",
+                )
                 .map(|m| m.get().tablet_pressure_curve.clone())
                 .unwrap_or_else(|_| "linear".to_string()),
-            tablet_left_handed: corten_config::ConfigManager::<corten_config::InputSettingsConfig>::load_or_default("input")
+            tablet_left_handed:
+                corten_config::ConfigManager::<corten_config::InputSettingsConfig>::load_or_default(
+                    "input",
+                )
                 .map(|m| m.get().tablet_left_handed)
                 .unwrap_or(false),
         }
@@ -1379,7 +1460,8 @@ impl CortenCompositor {
             }
             "scrollable-strip" => {
                 let usable = self.usable_area();
-                self.layout.scroll_column_step(if go_next_or_up { 1 } else { -1 }, usable);
+                self.layout
+                    .scroll_column_step(if go_next_or_up { 1 } else { -1 }, usable);
             }
             _ => {
                 let target_ws = if go_next_or_up {
@@ -1420,7 +1502,11 @@ impl CortenCompositor {
 
     /// Computes physical-pixel viewport pan offset `(pan_x, pan_y)` for cursor-following GPU magnification.
     /// Returns `(0, 0)` when `zoom_level <= 1.001` so standard desktop rendering incurs zero shift.
-    pub fn zoom_pan_offset(&self, output_phys_size: Size<i32, smithay::utils::Physical>, base_scale: f64) -> Point<i32, smithay::utils::Physical> {
+    pub fn zoom_pan_offset(
+        &self,
+        output_phys_size: Size<i32, smithay::utils::Physical>,
+        base_scale: f64,
+    ) -> Point<i32, smithay::utils::Physical> {
         compute_zoom_pan_offset(
             self.cursor_location,
             output_phys_size,
@@ -1434,12 +1520,12 @@ impl CortenCompositor {
         let usable = self.usable_area();
         match action {
             "toggle-scratchpad" => {
-                if let Some(win) = self.layout.toggle_scratchpad(usable) {
-                    if let Some(surface) = crate::layout::window_wl_surface(&win) {
-                        let serial = SERIAL_COUNTER.next_serial();
-                        if let Some(kb) = self.seat.get_keyboard() {
-                            kb.set_focus(self, Some(surface), serial);
-                        }
+                if let Some(win) = self.layout.toggle_scratchpad(usable)
+                    && let Some(surface) = crate::layout::window_wl_surface(&win)
+                {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    if let Some(kb) = self.seat.get_keyboard() {
+                        kb.set_focus(self, Some(surface), serial);
                     }
                 }
             }
@@ -1571,14 +1657,18 @@ impl CortenCompositor {
     /// locks session prior to suspend and recovers DRM/output scales & input timers upon resume.
     pub fn handle_prepare_for_sleep(&mut self, going_to_sleep: bool) {
         if going_to_sleep {
-            tracing::info!("Compositor: PrepareForSleep(true) — locking session and saving window layout before suspend");
+            tracing::info!(
+                "Compositor: PrepareForSleep(true) — locking session and saving window layout before suspend"
+            );
             let _ = self.save_window_session_to_disk();
             if !self.session_locked {
                 let lock_bin = resolve_corten_bin("corten-lock");
                 let _ = std::process::Command::new(lock_bin).spawn();
             }
         } else {
-            tracing::info!("Compositor: PrepareForSleep(false) — system resumed; waking outputs and refreshing surface scales");
+            tracing::info!(
+                "Compositor: PrepareForSleep(false) — system resumed; waking outputs and refreshing surface scales"
+            );
             self.note_input();
             self.refresh_all_surface_scales();
             let usable = self.usable_area();
@@ -1604,9 +1694,7 @@ impl CortenCompositor {
                 .find(|w| crate::layout::window_stable_id(w) == snap.id);
             let rect = win_opt
                 .and_then(|w| self.layout.floating_geometry(w))
-                .unwrap_or_else(|| {
-                    Rectangle::new(Point::from((120, 90)), Size::from((960, 640)))
-                });
+                .unwrap_or_else(|| Rectangle::new(Point::from((120, 90)), Size::from((960, 640))));
             entries.push(SavedWindowEntry {
                 app_id: snap.app_id,
                 title: snap.title,
@@ -1685,9 +1773,7 @@ pub struct SavedWindowEntry {
 pub fn window_session_file_path() -> std::path::PathBuf {
     let base = std::env::var("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|_| {
-            std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
-        })
+        .or_else(|_| std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
     base.join("corten").join("window_session.tsv")
 }
@@ -1716,26 +1802,26 @@ pub fn parse_window_session(content: &str) -> Vec<SavedWindowEntry> {
     let mut list = Vec::new();
     for line in content.lines() {
         let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() == 8 {
-            if let (Ok(ws), Ok(fl), Ok(x), Ok(y), Ok(w), Ok(h)) = (
+        if parts.len() == 8
+            && let (Ok(ws), Ok(fl), Ok(x), Ok(y), Ok(w), Ok(h)) = (
                 parts[2].parse::<usize>(),
                 parts[3].parse::<u8>(),
                 parts[4].parse::<i32>(),
                 parts[5].parse::<i32>(),
                 parts[6].parse::<i32>(),
                 parts[7].parse::<i32>(),
-            ) {
-                list.push(SavedWindowEntry {
-                    app_id: parts[0].to_string(),
-                    title: parts[1].to_string(),
-                    workspace: ws,
-                    is_floating: fl != 0,
-                    x,
-                    y,
-                    width: w,
-                    height: h,
-                });
-            }
+            )
+        {
+            list.push(SavedWindowEntry {
+                app_id: parts[0].to_string(),
+                title: parts[1].to_string(),
+                workspace: ws,
+                is_floating: fl != 0,
+                x,
+                y,
+                width: w,
+                height: h,
+            });
         }
     }
     list
@@ -1832,12 +1918,10 @@ pub fn sample_screen_pixel_at(x: i32, y: i32) -> (u8, u8, u8) {
     if let Ok(out) = std::process::Command::new("grim")
         .args(["-g", &geom, "-t", "ppm", "-"])
         .output()
+        && out.status.success()
+        && let Some(rgb) = parse_ppm_pixel(&out.stdout)
     {
-        if out.status.success() {
-            if let Some(rgb) = parse_ppm_pixel(&out.stdout) {
-                return rgb;
-            }
-        }
+        return rgb;
     }
     // Fallback Corten Copper accent if grim is not active
     (217, 107, 67)
@@ -1848,12 +1932,12 @@ pub fn resolve_corten_bin(name: &str) -> std::path::PathBuf {
     if p.is_file() {
         return p.to_path_buf();
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return candidate;
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return candidate;
         }
     }
     if let Ok(cur) = std::env::current_dir() {
@@ -1870,7 +1954,9 @@ pub fn resolve_corten_bin(name: &str) -> std::path::PathBuf {
             return target_cand;
         }
     }
-    let ws_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new("."));
+    let ws_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     let ws_rel = ws_root.join("target/release").join(name);
     if ws_rel.is_file() {
         return ws_rel;
@@ -1898,10 +1984,9 @@ pub fn toggle_corten_launcher_async(args: &[&str]) {
         if let Ok(status) = std::process::Command::new("pkill")
             .args(["-x", "corten-launcher"])
             .status()
+            && status.success()
         {
-            if status.success() {
-                return;
-            }
+            return;
         }
         let launcher_path = resolve_corten_bin("corten-launcher");
         let _ = std::process::Command::new(launcher_path)
@@ -1983,7 +2068,10 @@ mod tests {
     fn test_gesture_velocity_calculation() {
         // Test empty & single sample
         assert_eq!(calculate_gesture_velocity(&[]), (0.0, 0.0));
-        assert_eq!(calculate_gesture_velocity(&[(100_000, 0.0, 0.0)]), (0.0, 0.0));
+        assert_eq!(
+            calculate_gesture_velocity(&[(100_000, 0.0, 0.0)]),
+            (0.0, 0.0)
+        );
 
         // Test sample sequence: 3 updates in 30ms (30,000 usec)
         // t=100,000: start

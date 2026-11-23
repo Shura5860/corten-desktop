@@ -93,7 +93,9 @@ impl DevProject {
                 return Ok(());
             }
         }
-        let _ = std::process::Command::new("xdg-open").arg(&*path_str).spawn();
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&*path_str)
+            .spawn();
         Ok(())
     }
 }

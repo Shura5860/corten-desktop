@@ -79,7 +79,8 @@ impl SettingsPortal {
 fn encode_file_uri(path: &str) -> String {
     let mut out = String::from("file://");
     for &b in path.as_bytes() {
-        let is_unreserved = b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'.' | b'_' | b'~');
+        let is_unreserved =
+            b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'.' | b'_' | b'~');
         if is_unreserved {
             out.push(b as char);
         } else {
@@ -103,7 +104,10 @@ impl FileChooserPortal {
         title: String,
         options: HashMap<String, OwnedValue>,
     ) -> (u32, HashMap<String, OwnedValue>) {
-        info!("Portal OpenFile requested: title='{}', options={:?}", title, options);
+        info!(
+            "Portal OpenFile requested: title='{}', options={:?}",
+            title, options
+        );
 
         let multiple = options
             .get("multiple")
@@ -118,7 +122,11 @@ impl FileChooserPortal {
         let initial_folder = options
             .get("current_folder")
             .and_then(|v| Vec::<u8>::try_from(v.clone()).ok())
-            .map(|bytes| String::from_utf8_lossy(&bytes).trim_matches('\0').to_string())
+            .map(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .trim_matches('\0')
+                    .to_string()
+            })
             .or_else(|| {
                 options
                     .get("current_folder")
@@ -188,15 +196,16 @@ impl FileChooserPortal {
                     .args([kdialog_mode, &initial_folder])
                     .output()
                     .await
+                    && out.status.success()
                 {
-                    if out.status.success() {
-                        let chosen = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                        if !chosen.is_empty() {
-                            if let Ok(owned) = OwnedValue::try_from(Value::from(vec![encode_file_uri(&chosen)])) {
-                                results.insert("uris".to_string(), owned);
-                            }
-                            return (0, results);
+                    let chosen = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !chosen.is_empty() {
+                        if let Ok(owned) =
+                            OwnedValue::try_from(Value::from(vec![encode_file_uri(&chosen)]))
+                        {
+                            results.insert("uris".to_string(), owned);
                         }
+                        return (0, results);
                     }
                 }
                 (1, results)
@@ -213,12 +222,19 @@ impl FileChooserPortal {
         title: String,
         options: HashMap<String, OwnedValue>,
     ) -> (u32, HashMap<String, OwnedValue>) {
-        info!("Portal SaveFile requested: title='{}', options={:?}", title, options);
+        info!(
+            "Portal SaveFile requested: title='{}', options={:?}",
+            title, options
+        );
 
         let initial_folder = options
             .get("current_folder")
             .and_then(|v| Vec::<u8>::try_from(v.clone()).ok())
-            .map(|bytes| String::from_utf8_lossy(&bytes).trim_matches('\0').to_string())
+            .map(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .trim_matches('\0')
+                    .to_string()
+            })
             .or_else(|| {
                 options
                     .get("current_folder")
@@ -306,44 +322,50 @@ impl ScreenshotPortal {
         let before_time = std::time::SystemTime::now();
 
         // Connect to Corten Compositor via D-Bus session bus
-        if let Ok(conn) = zbus::Connection::session().await {
-            if let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await {
-                if proxy.take_screenshot(interactive).await.is_ok() {
-                    let pictures_dir = directories::UserDirs::new()
-                        .and_then(|u| u.picture_dir().map(|p| p.to_path_buf()))
-                        .unwrap_or_else(|| {
-                            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-                            PathBuf::from(home).join("Pictures")
-                        });
+        if let Ok(conn) = zbus::Connection::session().await
+            && let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await
+            && proxy.take_screenshot(interactive).await.is_ok()
+        {
+            let pictures_dir = directories::UserDirs::new()
+                .and_then(|u| u.picture_dir().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                    PathBuf::from(home).join("Pictures")
+                });
 
-                    // Poll up to 3 seconds for the newly generated screenshot file to be written to disk
-                    for _ in 0..30 {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        if let Ok(entries) = std::fs::read_dir(&pictures_dir) {
-                            let mut latest_file: Option<(PathBuf, std::time::SystemTime)> = None;
-                            for entry in entries.flatten() {
-                                let path = entry.path();
-                                if path.extension().and_then(|s| s.to_str()) == Some("png") {
-                                    if let Ok(meta) = entry.metadata() {
-                                        if let Ok(mtime) = meta.modified() {
-                                            if mtime >= before_time.checked_sub(std::time::Duration::from_secs(1)).unwrap_or(before_time)
-                                                && latest_file.as_ref().map(|(_, t)| mtime > *t).unwrap_or(true) {
-                                                    latest_file = Some((path, mtime));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if let Some((path, _)) = latest_file {
-                                let uri = encode_file_uri(&path.to_string_lossy());
-                                let mut results = HashMap::new();
-                                if let Ok(owned) = OwnedValue::try_from(Value::from(uri)) {
-                                    results.insert("uri".to_string(), owned);
-                                }
-                                info!("Portal Screenshot successfully captured: {}", path.display());
-                                return (0, results);
-                            }
+            // Poll up to 3 seconds for the newly generated screenshot file to be written to disk
+            for _ in 0..30 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                if let Ok(entries) = std::fs::read_dir(&pictures_dir) {
+                    let mut latest_file: Option<(PathBuf, std::time::SystemTime)> = None;
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("png")
+                            && let Ok(meta) = entry.metadata()
+                            && let Ok(mtime) = meta.modified()
+                            && mtime
+                                >= before_time
+                                    .checked_sub(std::time::Duration::from_secs(1))
+                                    .unwrap_or(before_time)
+                            && latest_file
+                                .as_ref()
+                                .map(|(_, t)| mtime > *t)
+                                .unwrap_or(true)
+                        {
+                            latest_file = Some((path, mtime));
                         }
+                    }
+                    if let Some((path, _)) = latest_file {
+                        let uri = encode_file_uri(&path.to_string_lossy());
+                        let mut results = HashMap::new();
+                        if let Ok(owned) = OwnedValue::try_from(Value::from(uri)) {
+                            results.insert("uri".to_string(), owned);
+                        }
+                        info!(
+                            "Portal Screenshot successfully captured: {}",
+                            path.display()
+                        );
+                        return (0, results);
                     }
                 }
             }
@@ -354,7 +376,10 @@ impl ScreenshotPortal {
             let mut cmd = tokio::process::Command::new("corten-snipper");
             match cmd.output().await {
                 Ok(out) if out.status.success() => {
-                    info!("Snipper exited with geometry: {}", String::from_utf8_lossy(&out.stdout));
+                    info!(
+                        "Snipper exited with geometry: {}",
+                        String::from_utf8_lossy(&out.stdout)
+                    );
                 }
                 _ => {
                     return (1, HashMap::new()); // Cancelled
@@ -406,37 +431,37 @@ impl ScreenCastPortal {
     async fn discover_targets(&self) -> Vec<CastTarget> {
         let mut targets = Vec::new();
 
-        if let Ok(conn) = zbus::Connection::session().await {
-            if let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await {
-                // 1. Monitors
-                if let Ok(outputs) = proxy.get_output_workspaces().await {
-                    for (output_name, ws) in outputs {
-                        targets.push(CastTarget {
-                            source_type: CastSourceType::Monitor,
-                            id_str: format!("monitor:{}", output_name),
-                            display_label: format!("Tüm Ekran: {} (Çalışma Alanı {})", output_name, ws),
-                            width: 1920,
-                            height: 1080,
-                        });
-                    }
+        if let Ok(conn) = zbus::Connection::session().await
+            && let Ok(proxy) = corten_ipc::CompositorControlProxy::new(&conn).await
+        {
+            // 1. Monitors
+            if let Ok(outputs) = proxy.get_output_workspaces().await {
+                for (output_name, ws) in outputs {
+                    targets.push(CastTarget {
+                        source_type: CastSourceType::Monitor,
+                        id_str: format!("monitor:{}", output_name),
+                        display_label: format!("Tüm Ekran: {} (Çalışma Alanı {})", output_name, ws),
+                        width: 1920,
+                        height: 1080,
+                    });
                 }
+            }
 
-                // 2. Windows
-                if let Ok(windows) = proxy.get_windows().await {
-                    for (win_id, app_id, title, ws, _is_active, _is_float) in windows {
-                        let label = if title.is_empty() {
-                            app_id.clone()
-                        } else {
-                            format!("{} ({})", title, app_id)
-                        };
-                        targets.push(CastTarget {
-                            source_type: CastSourceType::Window,
-                            id_str: format!("window:{}", win_id),
-                            display_label: format!("Pencere: {} [Alan {}]", label, ws),
-                            width: 1280,
-                            height: 720,
-                        });
-                    }
+            // 2. Windows
+            if let Ok(windows) = proxy.get_windows().await {
+                for (win_id, app_id, title, ws, _is_active, _is_float) in windows {
+                    let label = if title.is_empty() {
+                        app_id.clone()
+                    } else {
+                        format!("{} ({})", title, app_id)
+                    };
+                    targets.push(CastTarget {
+                        source_type: CastSourceType::Window,
+                        id_str: format!("window:{}", win_id),
+                        display_label: format!("Pencere: {} [Alan {}]", label, ws),
+                        width: 1280,
+                        height: 720,
+                    });
                 }
             }
         }
@@ -526,7 +551,10 @@ impl ScreenCastPortal {
     ) -> (u32, HashMap<String, OwnedValue>) {
         info!("Portal ScreenCast CreateSession: {:?}", session_handle);
         let mut sessions = self.sessions.lock().await;
-        sessions.insert(session_handle.as_str().to_string(), ScreenCastSessionState::default());
+        sessions.insert(
+            session_handle.as_str().to_string(),
+            ScreenCastSessionState::default(),
+        );
         (0, HashMap::new())
     }
 
@@ -537,7 +565,10 @@ impl ScreenCastPortal {
         _app_id: String,
         options: HashMap<String, OwnedValue>,
     ) -> (u32, HashMap<String, OwnedValue>) {
-        info!("Portal ScreenCast SelectSources with options: {:?}", options);
+        info!(
+            "Portal ScreenCast SelectSources with options: {:?}",
+            options
+        );
 
         let types = options
             .get("types")
@@ -584,7 +615,10 @@ impl ScreenCastPortal {
         _parent_window: String,
         _options: HashMap<String, OwnedValue>,
     ) -> (u32, HashMap<String, OwnedValue>) {
-        info!("Portal ScreenCast Start requested for session {:?}", session_handle);
+        info!(
+            "Portal ScreenCast Start requested for session {:?}",
+            session_handle
+        );
 
         let sessions = self.sessions.lock().await;
         let session_state = match sessions.get(session_handle.as_str()) {
@@ -602,7 +636,9 @@ impl ScreenCastPortal {
             .unwrap_or_else(|| 42 + (session_state.cursor_mode % 50));
 
         let mut stream_props: HashMap<String, OwnedValue> = HashMap::new();
-        if let Ok(size_val) = OwnedValue::try_from(Value::from((target.width as i32, target.height as i32))) {
+        if let Ok(size_val) =
+            OwnedValue::try_from(Value::from((target.width as i32, target.height as i32)))
+        {
             stream_props.insert("size".to_string(), size_val);
         }
         if let Ok(pos_val) = OwnedValue::try_from(Value::from((0i32, 0i32))) {
@@ -622,12 +658,11 @@ impl ScreenCastPortal {
             stream_props.insert("mapping_id".to_string(), id_val);
         }
         // Per-window audio stream association when casting a specific application window
-        if target.source_type == CastSourceType::Window {
-            if let Some(audio_node) = Self::discover_window_audio_node(&target.display_label) {
-                if let Ok(audio_val) = OwnedValue::try_from(Value::from(audio_node)) {
-                    stream_props.insert("audio_node_id".to_string(), audio_val);
-                }
-            }
+        if target.source_type == CastSourceType::Window
+            && let Some(audio_node) = Self::discover_window_audio_node(&target.display_label)
+            && let Ok(audio_val) = OwnedValue::try_from(Value::from(audio_node))
+        {
+            stream_props.insert("audio_node_id".to_string(), audio_val);
         }
 
         let streams = vec![(node_id, stream_props)];
@@ -684,10 +719,10 @@ impl ScreenCastPortal {
             }
             if in_video {
                 let cleaned = line.replace(['│', '*', '├', '└', '─'], "");
-                if let Some((id_str, _)) = cleaned.trim().split_once('.') {
-                    if let Ok(id) = id_str.trim().parse::<u32>() {
-                        return Some(id);
-                    }
+                if let Some((id_str, _)) = cleaned.trim().split_once('.')
+                    && let Ok(id) = id_str.trim().parse::<u32>()
+                {
+                    return Some(id);
                 }
             }
         }
@@ -718,17 +753,17 @@ impl ScreenCastPortal {
                 break;
             }
             let cleaned = line.replace(['│', '*'], "");
-            if let Some((id_str, rest)) = cleaned.trim().split_once('.') {
-                if let Ok(id) = id_str.trim().parse::<u32>() {
-                    let stream_name = rest
-                        .split_once('[')
-                        .map(|(n, _)| n)
-                        .unwrap_or(rest)
-                        .trim()
-                        .to_lowercase();
-                    if !stream_name.is_empty() && lower_label.contains(&stream_name) {
-                        return Some(id);
-                    }
+            if let Some((id_str, rest)) = cleaned.trim().split_once('.')
+                && let Ok(id) = id_str.trim().parse::<u32>()
+            {
+                let stream_name = rest
+                    .split_once('[')
+                    .map(|(n, _)| n)
+                    .unwrap_or(rest)
+                    .trim()
+                    .to_lowercase();
+                if !stream_name.is_empty() && lower_label.contains(&stream_name) {
+                    return Some(id);
                 }
             }
         }
@@ -923,7 +958,10 @@ impl RemoteDesktopPortal {
         dx: f64,
         dy: f64,
     ) {
-        info!("RemoteDesktop NotifyPointerMotion dx={:.1}, dy={:.1}", dx, dy);
+        info!(
+            "RemoteDesktop NotifyPointerMotion dx={:.1}, dy={:.1}",
+            dx, dy
+        );
     }
 
     async fn notify_pointer_button(
@@ -933,7 +971,10 @@ impl RemoteDesktopPortal {
         button: i32,
         state: u32,
     ) {
-        info!("RemoteDesktop NotifyPointerButton button={}, state={}", button, state);
+        info!(
+            "RemoteDesktop NotifyPointerButton button={}, state={}",
+            button, state
+        );
     }
 
     async fn notify_keyboard_keysym(
@@ -943,7 +984,10 @@ impl RemoteDesktopPortal {
         keysym: i32,
         state: u32,
     ) {
-        info!("RemoteDesktop NotifyKeyboardKeysym keysym={}, state={}", keysym, state);
+        info!(
+            "RemoteDesktop NotifyKeyboardKeysym keysym={}, state={}",
+            keysym, state
+        );
     }
 
     #[zbus(property)]
@@ -1065,7 +1109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await?;
 
-    info!("corten-portal successfully registered on D-Bus session bus at /org/freedesktop/portal/desktop");
+    info!(
+        "corten-portal successfully registered on D-Bus session bus at /org/freedesktop/portal/desktop"
+    );
 
     // Spawn live watcher for appearance config to emit SettingChanged signals for color-scheme and accent-color
     let conn_clone = connection.clone();
@@ -1191,7 +1237,8 @@ mod tests {
     #[tokio::test]
     async fn test_screencast_session_lifecycle() {
         let sc = ScreenCastPortal::new();
-        let session_path = OwnedObjectPath::try_from("/org/freedesktop/portal/desktop/session/1").unwrap();
+        let session_path =
+            OwnedObjectPath::try_from("/org/freedesktop/portal/desktop/session/1").unwrap();
 
         let (code, _) = sc
             .create_session(

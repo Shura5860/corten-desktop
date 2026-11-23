@@ -110,11 +110,9 @@ pub fn gamut_matrix(from: ColorSpace, to: ColorSpace) -> Mat3 {
     match (from, to) {
         (ColorSpace::Srgb, ColorSpace::Srgb)
         | (ColorSpace::DciP3, ColorSpace::DciP3)
-        | (ColorSpace::Bt2020, ColorSpace::Bt2020) => [
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ],
+        | (ColorSpace::Bt2020, ColorSpace::Bt2020) => {
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+        }
         // sRGB -> DCI-P3 (Display P3)
         (ColorSpace::Srgb, ColorSpace::DciP3) => [
             [0.82246, 0.17754, 0.00000],
@@ -388,12 +386,9 @@ pub fn parse_icc_profile(data: &[u8]) -> Result<IccProfileInfo, ColorManagementE
 
                 if type_sig == b"desc" && tag_size >= 12 {
                     // textDescriptionType: 4 bytes type, 4 bytes reserved, 4 bytes ASCII count
-                    let ascii_len = u32::from_be_bytes([
-                        tag_data[8],
-                        tag_data[9],
-                        tag_data[10],
-                        tag_data[11],
-                    ]) as usize;
+                    let ascii_len =
+                        u32::from_be_bytes([tag_data[8], tag_data[9], tag_data[10], tag_data[11]])
+                            as usize;
                     if ascii_len > 1 && 12 + ascii_len <= tag_size {
                         let text_slice = &tag_data[12..12 + ascii_len - 1]; // omit trailing null
                         if let Ok(desc) = std::str::from_utf8(text_slice) {
@@ -439,16 +434,21 @@ pub fn parse_icc_profile(data: &[u8]) -> Result<IccProfileInfo, ColorManagementE
         device_class,
         version_major,
         version_minor,
-        size: if declared_size > 0 { declared_size } else { data.len() },
+        size: if declared_size > 0 {
+            declared_size
+        } else {
+            data.len()
+        },
     })
 }
 
 /// Reads and validates an ICC profile file from disk.
-pub fn load_icc_profile_file<P: AsRef<Path>>(path: P) -> Result<IccProfileInfo, ColorManagementError> {
+pub fn load_icc_profile_file<P: AsRef<Path>>(
+    path: P,
+) -> Result<IccProfileInfo, ColorManagementError> {
     let path_ref = path.as_ref();
-    let data = std::fs::read(path_ref).map_err(|e| {
-        ColorManagementError::IoError(format!("{}: {}", path_ref.display(), e))
-    })?;
+    let data = std::fs::read(path_ref)
+        .map_err(|e| ColorManagementError::IoError(format!("{}: {}", path_ref.display(), e)))?;
     parse_icc_profile(&data)
 }
 

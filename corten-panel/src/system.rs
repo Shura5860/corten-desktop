@@ -16,11 +16,7 @@ fn get_or_init_dbus() -> Option<(&'static tokio::runtime::Runtime, &'static zbus
         .as_ref()?;
 
     let conn = COMPOSITOR_CONN
-        .get_or_init(|| {
-            rt.block_on(async {
-                zbus::Connection::session().await.ok()
-            })
-        })
+        .get_or_init(|| rt.block_on(async { zbus::Connection::session().await.ok() }))
         .as_ref()?;
 
     Some((rt, conn))
@@ -111,29 +107,27 @@ impl SystemInfo {
                     continue;
                 }
                 let operstate_path = entry.path().join("operstate");
-                if let Ok(state) = std::fs::read_to_string(operstate_path) {
-                    if state.trim() == "up" {
-                        connected = true;
-                        iface_name = if name_str.starts_with('w') {
-                            "Wi-Fi Online".to_string()
-                        } else {
-                            "Ethernet Online".to_string()
-                        };
-                        break;
-                    }
+                if let Ok(state) = std::fs::read_to_string(operstate_path)
+                    && state.trim() == "up"
+                {
+                    connected = true;
+                    iface_name = if name_str.starts_with('w') {
+                        "Wi-Fi Online".to_string()
+                    } else {
+                        "Ethernet Online".to_string()
+                    };
+                    break;
                 }
             }
         }
 
         // Get local IP address instantly without forking processes
-        if connected {
-            if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
-                if socket.connect("1.1.1.1:80").is_ok() {
-                    if let Ok(addr) = socket.local_addr() {
-                        ip_addr = addr.ip().to_string();
-                    }
-                }
-            }
+        if connected
+            && let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0")
+            && socket.connect("1.1.1.1:80").is_ok()
+            && let Ok(addr) = socket.local_addr()
+        {
+            ip_addr = addr.ip().to_string();
         }
 
         (connected, iface_name, ip_addr)
@@ -150,13 +144,13 @@ impl SystemInfo {
                     let cap_path = entry.path().join("capacity");
                     let status_path = entry.path().join("status");
 
-                    if let Ok(cap_str) = std::fs::read_to_string(cap_path) {
-                        if let Ok(pct) = cap_str.trim().parse::<u8>() {
-                            let is_charging = std::fs::read_to_string(status_path)
-                                .map(|s| s.trim().to_lowercase().contains("charging"))
-                                .unwrap_or(false);
-                            return Some((pct, is_charging));
-                        }
+                    if let Ok(cap_str) = std::fs::read_to_string(cap_path)
+                        && let Ok(pct) = cap_str.trim().parse::<u8>()
+                    {
+                        let is_charging = std::fs::read_to_string(status_path)
+                            .map(|s| s.trim().to_lowercase().contains("charging"))
+                            .unwrap_or(false);
+                        return Some((pct, is_charging));
                     }
                 }
             }
@@ -181,32 +175,36 @@ impl SystemInfo {
     /// Queries the live Corten Compositor D-Bus service for `(active_workspace, occupied_workspaces, windows)`.
     /// Each window entry is `(id, app_id, title, workspace, is_active, is_floating)`.
     #[allow(clippy::type_complexity)]
-    pub fn get_compositor_state() -> (
-        usize,
-        Vec<u32>,
-        Vec<(u64, String, String, u32, bool, bool)>,
-    ) {
+    pub fn get_compositor_state() -> (usize, Vec<u32>, Vec<(u64, String, String, u32, bool, bool)>)
+    {
         Self::get_compositor_state_for_output(None)
     }
 
     /// Queries the live Corten Compositor D-Bus service for a specific display output.
     #[allow(clippy::type_complexity)]
-    pub fn try_get_compositor_state_for_output(output_name: Option<&str>) -> Option<(
-        usize,
-        Vec<u32>,
-        Vec<(u64, String, String, u32, bool, bool)>,
-    )> {
+    pub fn try_get_compositor_state_for_output(
+        output_name: Option<&str>,
+    ) -> Option<(usize, Vec<u32>, Vec<(u64, String, String, u32, bool, bool)>)> {
         let (runtime, connection) = get_or_init_dbus()?;
         runtime.block_on(async {
-            let proxy = corten_ipc::CompositorControlProxy::new(connection).await.ok()?;
+            let proxy = corten_ipc::CompositorControlProxy::new(connection)
+                .await
+                .ok()?;
             let out_str = output_name.unwrap_or("");
             if let Ok((ws, occ, windows)) = proxy.get_full_state(out_str).await {
                 return Some((ws.max(1) as usize, occ, windows));
             }
             // Fallback for older interface versions
             let (active_ws, occupied) = if let Some(out) = output_name {
-                let ws = proxy.get_active_workspace_for_output(out).await.ok()?.max(1) as usize;
-                let occ = proxy.get_occupied_workspaces_for_output(out).await.unwrap_or_default();
+                let ws = proxy
+                    .get_active_workspace_for_output(out)
+                    .await
+                    .ok()?
+                    .max(1) as usize;
+                let occ = proxy
+                    .get_occupied_workspaces_for_output(out)
+                    .await
+                    .unwrap_or_default();
                 (ws, occ)
             } else {
                 let ws = proxy.get_active_workspace().await.ok()?.max(1) as usize;
@@ -219,11 +217,9 @@ impl SystemInfo {
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn get_compositor_state_for_output(output_name: Option<&str>) -> (
-        usize,
-        Vec<u32>,
-        Vec<(u64, String, String, u32, bool, bool)>,
-    ) {
+    pub fn get_compositor_state_for_output(
+        output_name: Option<&str>,
+    ) -> (usize, Vec<u32>, Vec<(u64, String, String, u32, bool, bool)>) {
         Self::try_get_compositor_state_for_output(output_name)
             .unwrap_or_else(|| (1, Vec::new(), Vec::new()))
     }
@@ -243,7 +239,10 @@ impl SystemInfo {
                 return false;
             };
             if let Some(out) = output_name {
-                proxy.switch_workspace_on_output(out, ws as u32).await.is_ok()
+                proxy
+                    .switch_workspace_on_output(out, ws as u32)
+                    .await
+                    .is_ok()
             } else {
                 proxy.switch_workspace(ws as u32).await.is_ok()
             }
@@ -486,16 +485,14 @@ impl SystemInfo {
                     if parts.len() >= 4 {
                         let state = parts[3];
                         // "0A" is TCP_LISTEN in Linux kernel
-                        if state == "0A" {
-                            if let Some(local_addr) = parts.get(1) {
-                                if let Some((_, port_hex)) = local_addr.split_once(':') {
-                                    if let Ok(port) = u16::from_str_radix(port_hex, 16) {
-                                        // Include developer-friendly listening ports (ignore OS ephemeral/low system daemons if preferred, or include all user dev ports)
-                                        if !ports.contains(&port) {
-                                            ports.push(port);
-                                        }
-                                    }
-                                }
+                        if state == "0A"
+                            && let Some(local_addr) = parts.get(1)
+                            && let Some((_, port_hex)) = local_addr.split_once(':')
+                            && let Ok(port) = u16::from_str_radix(port_hex, 16)
+                        {
+                            // Include developer-friendly listening ports (ignore OS ephemeral/low system daemons if preferred, or include all user dev ports)
+                            if !ports.contains(&port) {
+                                ports.push(port);
                             }
                         }
                     }
@@ -531,25 +528,25 @@ impl SystemInfo {
             grim.args(["-g", geometry]);
         }
         grim.arg(&target_file);
-        if let Ok(status) = grim.status() {
-            if status.success() {
-                if let Ok(bytes) = std::fs::read(&target_file) {
-                    if let Ok(mut wl_copy) = Command::new("wl-copy").stdin(Stdio::piped()).spawn() {
-                        if let Some(stdin) = wl_copy.stdin.as_mut() {
-                            let _ = std::io::Write::write_all(stdin, &bytes);
-                        }
-                        let _ = wl_copy.wait();
-                    }
+        if let Ok(status) = grim.status()
+            && status.success()
+        {
+            if let Ok(bytes) = std::fs::read(&target_file)
+                && let Ok(mut wl_copy) = Command::new("wl-copy").stdin(Stdio::piped()).spawn()
+            {
+                if let Some(stdin) = wl_copy.stdin.as_mut() {
+                    let _ = std::io::Write::write_all(stdin, &bytes);
                 }
-                let message = if region {
-                    "Region saved and copied to clipboard"
-                } else {
-                    "Full screen saved and copied to clipboard"
-                };
-                let _ = Command::new("notify-send")
-                    .args(["Corten Screenshot", message, "-i", &target_file])
-                    .spawn();
+                let _ = wl_copy.wait();
             }
+            let message = if region {
+                "Region saved and copied to clipboard"
+            } else {
+                "Full screen saved and copied to clipboard"
+            };
+            let _ = Command::new("notify-send")
+                .args(["Corten Screenshot", message, "-i", &target_file])
+                .spawn();
         }
     }
 
@@ -588,7 +585,7 @@ impl SystemInfo {
                         .split_once('/')
                         .map(|(b, p)| (b, format!("/{p}")))
                         .unwrap_or((service_spec.as_str(), "/StatusNotifierItem".to_string()));
-                    let title = if let Ok(item_proxy) = zbus::Proxy::new(
+                    let title = match zbus::Proxy::new(
                         &connection,
                         bus_name,
                         obj_path.as_str(),
@@ -596,15 +593,14 @@ impl SystemInfo {
                     )
                     .await
                     {
-                        match item_proxy.get_property::<String>("Title").await {
+                        Ok(item_proxy) => match item_proxy.get_property::<String>("Title").await {
                             Ok(s) if !s.is_empty() => s,
                             _ => item_proxy
                                 .get_property::<String>("Id")
                                 .await
                                 .unwrap_or_else(|_| bus_name.to_string()),
-                        }
-                    } else {
-                        bus_name.to_string()
+                        },
+                        _ => bus_name.to_string(),
                     };
                     let lower = title.to_lowercase();
                     let (id, icon) = if lower.contains("steam") {
@@ -618,7 +614,10 @@ impl SystemInfo {
                     } else {
                         (service_spec.clone(), "•".to_string())
                     };
-                    if !discovered.iter().any(|existing: &TrayItem| existing.id == id) {
+                    if !discovered
+                        .iter()
+                        .any(|existing: &TrayItem| existing.id == id)
+                    {
                         discovered.push(TrayItem { id, title, icon });
                     }
                 }
@@ -702,41 +701,36 @@ impl SystemInfo {
     /// Reads plain text or image entry from Wayland clipboard via wl-paste,
     /// automatically excluding password manager secrets.
     pub fn read_clipboard_text() -> Option<String> {
-        let types_out = Command::new("wl-paste")
-            .arg("--list-types")
-            .output()
-            .ok();
-        if let Some(ref out) = types_out {
-            if out.status.success() {
-                let mime_list = String::from_utf8_lossy(&out.stdout);
-                if Self::is_clipboard_secret_mime(&mime_list) {
-                    return None;
-                }
-                let has_text = mime_list.lines().any(|l| {
-                    let t = l.trim();
-                    t.starts_with("text/plain") || t == "UTF8_STRING" || t == "STRING"
-                });
-                let has_png = mime_list.lines().any(|l| l.trim() == "image/png");
-                if has_png && !has_text {
-                    if let Ok(img_out) = Command::new("wl-paste")
-                        .args(["-t", "image/png"])
-                        .output()
-                    {
-                        if img_out.status.success() && !img_out.stdout.is_empty() {
-                            use std::collections::hash_map::DefaultHasher;
-                            use std::hash::{Hash, Hasher};
-                            let mut hasher = DefaultHasher::new();
-                            img_out.stdout.hash(&mut hasher);
-                            let hash = hasher.finish();
-                            let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-                                .unwrap_or_else(|_| "/tmp".to_string());
-                            let img_path = format!("{}/corten_clip_{:016x}.png", runtime_dir, hash);
-                            if std::fs::write(&img_path, &img_out.stdout).is_ok() {
-                                let kb = (img_out.stdout.len() / 1024).max(1);
-                                return Some(format!("🖼️ [Görsel: PNG {} KB] {}", kb, img_path));
-                            }
-                        }
-                    }
+        let types_out = Command::new("wl-paste").arg("--list-types").output().ok();
+        if let Some(ref out) = types_out
+            && out.status.success()
+        {
+            let mime_list = String::from_utf8_lossy(&out.stdout);
+            if Self::is_clipboard_secret_mime(&mime_list) {
+                return None;
+            }
+            let has_text = mime_list.lines().any(|l| {
+                let t = l.trim();
+                t.starts_with("text/plain") || t == "UTF8_STRING" || t == "STRING"
+            });
+            let has_png = mime_list.lines().any(|l| l.trim() == "image/png");
+            if has_png
+                && !has_text
+                && let Ok(img_out) = Command::new("wl-paste").args(["-t", "image/png"]).output()
+                && img_out.status.success()
+                && !img_out.stdout.is_empty()
+            {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = DefaultHasher::new();
+                img_out.stdout.hash(&mut hasher);
+                let hash = hasher.finish();
+                let runtime_dir =
+                    std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+                let img_path = format!("{}/corten_clip_{:016x}.png", runtime_dir, hash);
+                if std::fs::write(&img_path, &img_out.stdout).is_ok() {
+                    let kb = (img_out.stdout.len() / 1024).max(1);
+                    return Some(format!("🖼️ [Görsel: PNG {} KB] {}", kb, img_path));
                 }
             }
         }
@@ -756,23 +750,22 @@ impl SystemInfo {
 
     /// Copies text or a cached PNG image entry back to the Wayland clipboard via wl-copy
     pub fn copy_to_clipboard(text: &str) {
-        if let Some(rest) = text.strip_prefix("🖼️ [Görsel: PNG ") {
-            if let Some((_, path_part)) = rest.split_once("] ") {
-                let path = path_part.trim();
-                if let Ok(bytes) = std::fs::read(path) {
-                    if let Ok(mut child) = Command::new("wl-copy")
-                        .args(["--type", "image/png"])
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                    {
-                        if let Some(mut stdin) = child.stdin.take() {
-                            use std::io::Write;
-                            let _ = stdin.write_all(&bytes);
-                        }
-                        let _ = child.wait();
-                        return;
-                    }
+        if let Some(rest) = text.strip_prefix("🖼️ [Görsel: PNG ")
+            && let Some((_, path_part)) = rest.split_once("] ")
+        {
+            let path = path_part.trim();
+            if let Ok(bytes) = std::fs::read(path)
+                && let Ok(mut child) = Command::new("wl-copy")
+                    .args(["--type", "image/png"])
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(&bytes);
                 }
+                let _ = child.wait();
+                return;
             }
         }
         if let Ok(mut child) = Command::new("wl-copy")
@@ -794,22 +787,30 @@ impl SystemInfo {
                 let path = entry.path();
                 let cur_path = path.join("brightness");
                 let max_path = path.join("max_brightness");
-                if let (Ok(cur_str), Ok(max_str)) = (std::fs::read_to_string(&cur_path), std::fs::read_to_string(&max_path)) {
-                    if let (Ok(cur), Ok(max)) = (cur_str.trim().parse::<f32>(), max_str.trim().parse::<f32>()) {
-                        if max > 0.0 {
-                            return ((cur / max) * 100.0).round().clamp(0.0, 100.0) as u8;
-                        }
-                    }
+                if let (Ok(cur_str), Ok(max_str)) = (
+                    std::fs::read_to_string(&cur_path),
+                    std::fs::read_to_string(&max_path),
+                ) && let (Ok(cur), Ok(max)) =
+                    (cur_str.trim().parse::<f32>(), max_str.trim().parse::<f32>())
+                    && max > 0.0
+                {
+                    return ((cur / max) * 100.0).round().clamp(0.0, 100.0) as u8;
                 }
             }
         }
-        if let Ok(output) = Command::new("brightnessctl").args(["g"]).output() {
-            if let Ok(max_out) = Command::new("brightnessctl").args(["m"]).output() {
-                let cur: f32 = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0.0);
-                let max: f32 = String::from_utf8_lossy(&max_out.stdout).trim().parse().unwrap_or(1.0);
-                if max > 0.0 {
-                    return ((cur / max) * 100.0).round().clamp(0.0, 100.0) as u8;
-                }
+        if let Ok(output) = Command::new("brightnessctl").args(["g"]).output()
+            && let Ok(max_out) = Command::new("brightnessctl").args(["m"]).output()
+        {
+            let cur: f32 = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0.0);
+            let max: f32 = String::from_utf8_lossy(&max_out.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(1.0);
+            if max > 0.0 {
+                return ((cur / max) * 100.0).round().clamp(0.0, 100.0) as u8;
             }
         }
         100
@@ -824,13 +825,13 @@ impl SystemInfo {
                 let path = entry.path();
                 let max_path = path.join("max_brightness");
                 let cur_path = path.join("brightness");
-                if let Ok(max_str) = std::fs::read_to_string(&max_path) {
-                    if let Ok(max) = max_str.trim().parse::<f32>() {
-                        let target = ((max * (p as f32) / 100.0).round() as u64).max(1);
-                        if std::fs::write(&cur_path, target.to_string()).is_ok() {
-                            written = true;
-                            break;
-                        }
+                if let Ok(max_str) = std::fs::read_to_string(&max_path)
+                    && let Ok(max) = max_str.trim().parse::<f32>()
+                {
+                    let target = ((max * (p as f32) / 100.0).round() as u64).max(1);
+                    if std::fs::write(&cur_path, target.to_string()).is_ok() {
+                        written = true;
+                        break;
                     }
                 }
             }
@@ -861,10 +862,10 @@ impl SystemInfo {
                             let pcm_name = pcm.file_name().to_string_lossy().to_string();
                             if pcm_name.starts_with("pcm") && pcm_name.ends_with('c') {
                                 let sub_status = pcm.path().join("sub0").join("status");
-                                if let Ok(status) = std::fs::read_to_string(&sub_status) {
-                                    if status.trim().eq_ignore_ascii_case("RUNNING") {
-                                        return true;
-                                    }
+                                if let Ok(status) = std::fs::read_to_string(&sub_status)
+                                    && status.trim().eq_ignore_ascii_case("RUNNING")
+                                {
+                                    return true;
                                 }
                             }
                         }
@@ -874,15 +875,13 @@ impl SystemInfo {
         }
 
         // 2. Only fallback to pactl if procfs was inaccessible or has no ALSA card directories
-        if !checked_procfs {
-            if let Ok(output) = Command::new("pactl")
+        if !checked_procfs
+            && let Ok(output) = Command::new("pactl")
                 .args(["list", "short", "source-outputs"])
                 .output()
-            {
-                if !output.stdout.is_empty() {
-                    return true;
-                }
-            }
+            && !output.stdout.is_empty()
+        {
+            return true;
         }
 
         false
@@ -899,10 +898,10 @@ impl SystemInfo {
                 if let Some(val) = line.split_whitespace().nth(1) {
                     total_kb = val.parse().unwrap_or(0);
                 }
-            } else if line.starts_with("MemAvailable:") {
-                if let Some(val) = line.split_whitespace().nth(1) {
-                    avail_kb = val.parse().unwrap_or(0);
-                }
+            } else if line.starts_with("MemAvailable:")
+                && let Some(val) = line.split_whitespace().nth(1)
+            {
+                avail_kb = val.parse().unwrap_or(0);
             }
         }
         let total_mb = total_kb / 1024;
@@ -923,14 +922,22 @@ impl SystemInfo {
         let mut procs = Vec::new();
         for entry in entries.flatten() {
             let name_os = entry.file_name();
-            let Some(name_str) = name_os.to_str() else { continue };
-            let Ok(pid) = name_str.parse::<u32>() else { continue };
+            let Some(name_str) = name_os.to_str() else {
+                continue;
+            };
+            let Ok(pid) = name_str.parse::<u32>() else {
+                continue;
+            };
 
             let statm_path = entry.path().join("statm");
             let comm_path = entry.path().join("comm");
 
-            let Ok(statm) = std::fs::read_to_string(statm_path) else { continue };
-            let Ok(comm) = std::fs::read_to_string(comm_path) else { continue };
+            let Ok(statm) = std::fs::read_to_string(statm_path) else {
+                continue;
+            };
+            let Ok(comm) = std::fs::read_to_string(comm_path) else {
+                continue;
+            };
 
             let resident_pages: u64 = statm
                 .split_whitespace()
@@ -1008,7 +1015,12 @@ impl NetworkSpeedTracker {
         self.prev_tx = tx;
         self.last_sample = Some(now);
 
-        (rx_speed, tx_speed, format_speed(rx_speed), format_speed(tx_speed))
+        (
+            rx_speed,
+            tx_speed,
+            format_speed(rx_speed),
+            format_speed(tx_speed),
+        )
     }
 }
 
@@ -1077,10 +1089,17 @@ mod tests {
 
     #[test]
     fn test_clipboard_secret_mime_filtering() {
-        assert!(SystemInfo::is_clipboard_secret_mime("text/plain\nx-kde-passwordManagerHint\n"));
-        assert!(SystemInfo::is_clipboard_secret_mime("UTF8_STRING\napplication/x-keepassxc\n"));
-        assert!(SystemInfo::is_clipboard_secret_mime("org.nspasteboard.ConcealedType"));
-        assert!(!SystemInfo::is_clipboard_secret_mime("text/plain;charset=utf-8\nUTF8_STRING\n"));
+        assert!(SystemInfo::is_clipboard_secret_mime(
+            "text/plain\nx-kde-passwordManagerHint\n"
+        ));
+        assert!(SystemInfo::is_clipboard_secret_mime(
+            "UTF8_STRING\napplication/x-keepassxc\n"
+        ));
+        assert!(SystemInfo::is_clipboard_secret_mime(
+            "org.nspasteboard.ConcealedType"
+        ));
+        assert!(!SystemInfo::is_clipboard_secret_mime(
+            "text/plain;charset=utf-8\nUTF8_STRING\n"
+        ));
     }
 }
-

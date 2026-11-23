@@ -29,7 +29,12 @@ pub fn compute_titlebar_colors(
     is_sticky: bool,
 ) -> (Color32F, [u8; 3], Option<Color32F>) {
     let bg = if is_active {
-        Color32F::new(palette.surface.r, palette.surface.g, palette.surface.b, 0.96)
+        Color32F::new(
+            palette.surface.r,
+            palette.surface.g,
+            palette.surface.b,
+            0.96,
+        )
     } else {
         Color32F::new(
             palette.background.r * 0.92,
@@ -108,7 +113,8 @@ mod tests {
     fn test_titlebar_colors_dim_inactive_and_highlight_sticky() {
         let palette = Palette::for_mode(ThemeMode::Dark);
         let (active_bg, active_txt, no_sticky) = compute_titlebar_colors(&palette, true, false);
-        let (inactive_bg, inactive_txt, sticky_badge) = compute_titlebar_colors(&palette, false, true);
+        let (inactive_bg, inactive_txt, sticky_badge) =
+            compute_titlebar_colors(&palette, false, true);
         assert!(active_bg.a() > inactive_bg.a());
         assert!(active_txt[0] > inactive_txt[0]);
         assert!(no_sticky.is_none());

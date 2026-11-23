@@ -347,19 +347,19 @@ impl Palette {
     /// for Material You / custom wallpaper accent color theming.
     pub fn with_custom_accent(mut self, hex: &str) -> Self {
         let clean = hex.trim().trim_start_matches('#');
-        if clean.len() == 6 {
-            if let Ok(rgb) = u32::from_str_radix(clean, 16) {
-                let prim = Color::from_hex(rgb);
-                let delta = if self.is_light() { -0.08 } else { 0.08 };
-                let hover = Color::from_rgba(
-                    (prim.r + delta).clamp(0.0, 1.0),
-                    (prim.g + delta).clamp(0.0, 1.0),
-                    (prim.b + delta).clamp(0.0, 1.0),
-                    1.0,
-                );
-                self.primary = prim;
-                self.primary_hover = hover;
-            }
+        if clean.len() == 6
+            && let Ok(rgb) = u32::from_str_radix(clean, 16)
+        {
+            let prim = Color::from_hex(rgb);
+            let delta = if self.is_light() { -0.08 } else { 0.08 };
+            let hover = Color::from_rgba(
+                (prim.r + delta).clamp(0.0, 1.0),
+                (prim.g + delta).clamp(0.0, 1.0),
+                (prim.b + delta).clamp(0.0, 1.0),
+                1.0,
+            );
+            self.primary = prim;
+            self.primary_hover = hover;
         }
         self
     }
@@ -399,11 +399,26 @@ mod tests {
         }
 
         // Test RGB hue matching
-        assert_eq!(PatinaVariant::match_from_rgb(220, 100, 50), PatinaVariant::Rust);
-        assert_eq!(PatinaVariant::match_from_rgb(50, 180, 140), PatinaVariant::Verdigris);
-        assert_eq!(PatinaVariant::match_from_rgb(80, 120, 180), PatinaVariant::Titanium);
-        assert_eq!(PatinaVariant::match_from_rgb(240, 170, 40), PatinaVariant::Molten);
-        assert_eq!(PatinaVariant::match_from_rgb(100, 100, 100), PatinaVariant::Titanium);
+        assert_eq!(
+            PatinaVariant::match_from_rgb(220, 100, 50),
+            PatinaVariant::Rust
+        );
+        assert_eq!(
+            PatinaVariant::match_from_rgb(50, 180, 140),
+            PatinaVariant::Verdigris
+        );
+        assert_eq!(
+            PatinaVariant::match_from_rgb(80, 120, 180),
+            PatinaVariant::Titanium
+        );
+        assert_eq!(
+            PatinaVariant::match_from_rgb(240, 170, 40),
+            PatinaVariant::Molten
+        );
+        assert_eq!(
+            PatinaVariant::match_from_rgb(100, 100, 100),
+            PatinaVariant::Titanium
+        );
     }
 
     #[test]
@@ -414,7 +429,13 @@ mod tests {
             palettes.extend(PatinaVariant::ALL.iter().map(|p| base.with_patina(*p)));
             for pal in palettes {
                 let ratio = pal.on_primary().contrast_ratio(&pal.primary);
-                assert!(ratio >= 4.5, "{:?} primary {:?} on_primary contrast {:.2}", mode, pal.primary, ratio);
+                assert!(
+                    ratio >= 4.5,
+                    "{:?} primary {:?} on_primary contrast {:.2}",
+                    mode,
+                    pal.primary,
+                    ratio
+                );
             }
         }
     }
@@ -470,15 +491,24 @@ mod tests {
         // High contrast dark mode: text_primary against background must exceed WCAG AAA (7.0:1)
         let hc_dark = Palette::high_contrast_dark();
         let dark_ratio = hc_dark.text_primary.contrast_ratio(&hc_dark.background);
-        assert!(dark_ratio >= 15.0, "HC dark contrast ratio {dark_ratio:.1} must exceed 15.0");
+        assert!(
+            dark_ratio >= 15.0,
+            "HC dark contrast ratio {dark_ratio:.1} must exceed 15.0"
+        );
 
         let dark_muted = hc_dark.text_muted.contrast_ratio(&hc_dark.background);
-        assert!(dark_muted >= 7.0, "HC dark muted contrast {dark_muted:.1} must exceed WCAG AAA 7.0");
+        assert!(
+            dark_muted >= 7.0,
+            "HC dark muted contrast {dark_muted:.1} must exceed WCAG AAA 7.0"
+        );
 
         // High contrast light mode: text_primary against background
         let hc_light = Palette::high_contrast_light();
         let light_ratio = hc_light.text_primary.contrast_ratio(&hc_light.background);
-        assert!(light_ratio >= 15.0, "HC light contrast ratio {light_ratio:.1} must exceed 15.0");
+        assert!(
+            light_ratio >= 15.0,
+            "HC light contrast ratio {light_ratio:.1} must exceed 15.0"
+        );
     }
 
     #[test]

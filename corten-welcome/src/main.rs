@@ -7,19 +7,17 @@ use std::time::Duration;
 use corten_config::{AppearanceConfig, ConfigManager, DisplaySettingsConfig, ThemeModeChoice};
 use corten_i18n::Language;
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, Spacing, ThemeMode, Typography,
 };
-use iced::widget::{
-    button, column, container, horizontal_space, image, row, text, vertical_space,
-};
+use iced::widget::{button, column, container, horizontal_space, image, row, text, vertical_space};
 use iced::{
-    border, event, keyboard, Alignment, Border, Color, Element, Event, Length, Subscription,
+    Alignment, Border, Color, Element, Event, Length, Subscription, border, event, keyboard,
 };
+use iced_layershell::Application;
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use iced_runtime::Task;
 
 const LOGO_PNG: &[u8] = include_bytes!("../../assets/logo.png");
@@ -263,14 +261,14 @@ impl Application for CortenWelcomeApp {
                 self.dont_show_again = val;
             }
             Message::CompleteWelcome => {
-                if self.dont_show_again {
-                    if let Some(dirs) = directories::BaseDirs::new() {
-                        let flag_path = dirs.config_dir().join("corten").join(".welcome_completed");
-                        if let Some(parent) = flag_path.parent() {
-                            let _ = fs::create_dir_all(parent);
-                        }
-                        let _ = fs::write(flag_path, b"completed\n");
+                if self.dont_show_again
+                    && let Some(dirs) = directories::BaseDirs::new()
+                {
+                    let flag_path = dirs.config_dir().join("corten").join(".welcome_completed");
+                    if let Some(parent) = flag_path.parent() {
+                        let _ = fs::create_dir_all(parent);
                     }
+                    let _ = fs::write(flag_path, b"completed\n");
                 }
                 self.save_appearance();
                 // Direct exit immediately unblocks corten-session into Stage 2!
@@ -280,8 +278,7 @@ impl Application for CortenWelcomeApp {
                 std::process::exit(0);
             }
             Message::KeyboardEvent(Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                ..
+                key, ..
             })) => {
                 // Only use Left/Right arrow keys for slide stepping; never auto-exit on ArrowRight
                 // and never bind Space/Enter globally so focused Iced buttons don't double-fire.
@@ -381,7 +378,12 @@ impl Application for CortenWelcomeApp {
             button::Style {
                 background: Some(bg.into()),
                 border: Border {
-                    color: Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
+                    color: Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.35,
+                    ),
                     width: 1.0,
                     radius: border::Radius::from(Radius::MD),
                 },
@@ -564,9 +566,15 @@ impl Application for CortenWelcomeApp {
             .into()
         };
 
-        let action_bar = row![prev_btn, horizontal_space(), dont_show_box, horizontal_space(), next_btn]
-            .width(Length::Fill)
-            .align_y(Alignment::Center);
+        let action_bar = row![
+            prev_btn,
+            horizontal_space(),
+            dont_show_box,
+            horizontal_space(),
+            next_btn
+        ]
+        .width(Length::Fill)
+        .align_y(Alignment::Center);
 
         // Keynote Presentation Theater Stage
         let is_dark_mode = self.theme_mode == ThemeMode::Dark;
@@ -676,9 +684,7 @@ impl CortenWelcomeApp {
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),
-                    text(desc)
-                        .size(11)
-                        .color(palette.text_muted.to_iced()),
+                    text(desc).size(11).color(palette.text_muted.to_iced()),
                 ]
                 .spacing(4),
             )
@@ -697,9 +703,7 @@ impl CortenWelcomeApp {
 
         let hw_badge = |label: &'static str, val: &str| {
             row![
-                text(label)
-                    .size(11)
-                    .color(palette.text_muted.to_iced()),
+                text(label).size(11).color(palette.text_muted.to_iced()),
                 text(val.to_string())
                     .size(11)
                     .font(corten_theme::NOTO_SANS_SEMIBOLD)
@@ -804,9 +808,7 @@ impl CortenWelcomeApp {
                     .font(corten_theme::NOTO_SANS_BOLD)
                     .color(prim_c.to_iced())
             } else {
-                text("Seç")
-                    .size(11)
-                    .color(palette.text_muted.to_iced())
+                text("Seç").size(11).color(palette.text_muted.to_iced())
             };
 
             let swatch = container(row![])
@@ -862,17 +864,26 @@ impl CortenWelcomeApp {
             let is_sel = self.theme_mode == mode;
             button(
                 row![
-                    text(icon_c)
-                        .font(LUCIDE_FONT)
-                        .size(16)
-                        .color(if is_sel { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
+                    text(icon_c).font(LUCIDE_FONT).size(16).color(if is_sel {
+                        palette.primary.to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    }),
                     text(label)
                         .size(13)
                         .font(iced::Font {
-                            weight: if is_sel { iced::font::Weight::Bold } else { iced::font::Weight::Normal },
+                            weight: if is_sel {
+                                iced::font::Weight::Bold
+                            } else {
+                                iced::font::Weight::Normal
+                            },
                             ..Default::default()
                         })
-                        .color(if is_sel { palette.primary.to_iced() } else { palette.text_primary.to_iced() }),
+                        .color(if is_sel {
+                            palette.primary.to_iced()
+                        } else {
+                            palette.text_primary.to_iced()
+                        }),
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),
@@ -881,7 +892,12 @@ impl CortenWelcomeApp {
             .on_press(Message::SelectThemeMode(mode))
             .style(move |_, status| {
                 let bg = if is_sel {
-                    Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15)
+                    Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.15,
+                    )
                 } else {
                     match status {
                         button::Status::Hovered => palette.surface_hover.to_iced(),
@@ -891,7 +907,11 @@ impl CortenWelcomeApp {
                 button::Style {
                     background: Some(bg.into()),
                     border: Border {
-                        color: if is_sel { palette.primary.to_iced() } else { Color::from_rgba(1.0, 1.0, 1.0, 0.1) },
+                        color: if is_sel {
+                            palette.primary.to_iced()
+                        } else {
+                            Color::from_rgba(1.0, 1.0, 1.0, 0.1)
+                        },
                         width: 1.0,
                         radius: border::Radius::from(Radius::MD),
                     },
@@ -1031,9 +1051,22 @@ impl CortenWelcomeApp {
                     )
                     .padding(Spacing::MD)
                     .style(move |_| container::Style {
-                        background: Some(Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.12).into()),
+                        background: Some(
+                            Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.12
+                            )
+                            .into()
+                        ),
                         border: Border {
-                            color: Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
+                            color: Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.35
+                            ),
                             width: 1.0,
                             radius: border::Radius::from(Radius::MD),
                         },
@@ -1044,9 +1077,7 @@ impl CortenWelcomeApp {
                             .size(Typography::TITLE_SM)
                             .font(corten_theme::NOTO_SANS_SEMIBOLD)
                             .color(palette.text_primary.to_iced()),
-                        text(desc)
-                            .size(12)
-                            .color(palette.text_muted.to_iced()),
+                        text(desc).size(12).color(palette.text_muted.to_iced()),
                     ]
                     .spacing(3),
                 ]
@@ -1110,7 +1141,15 @@ impl CortenWelcomeApp {
                     )
                     .padding([4, 10])
                     .style(move |_| container::Style {
-                        background: Some(Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.14).into()),
+                        background: Some(
+                            Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.14
+                            )
+                            .into()
+                        ),
                         border: Border {
                             color: palette.primary.to_iced(),
                             width: 1.0,
@@ -1118,9 +1157,7 @@ impl CortenWelcomeApp {
                         },
                         ..Default::default()
                     }),
-                    text(desc)
-                        .size(13)
-                        .color(palette.text_primary.to_iced()),
+                    text(desc).size(13).color(palette.text_primary.to_iced()),
                 ]
                 .spacing(Spacing::MD)
                 .align_y(Alignment::Center),
@@ -1143,9 +1180,11 @@ impl CortenWelcomeApp {
                 .size(26)
                 .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
-            text("Elinizi klavyeden kaldırmadan tüm sistemi yönetmenizi sağlayan temel kısayollar:")
-                .size(Typography::BODY)
-                .color(palette.text_muted.to_iced()),
+            text(
+                "Elinizi klavyeden kaldırmadan tüm sistemi yönetmenizi sağlayan temel kısayollar:"
+            )
+            .size(Typography::BODY)
+            .color(palette.text_muted.to_iced()),
             vertical_space().height(Spacing::SM),
             row![
                 shortcut_tile("Super + Space", "Spotlight Başlatıcı & Arama"),

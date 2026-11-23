@@ -53,13 +53,16 @@ pub fn dot_product_simd(a: &[f32], b: &[f32]) -> f32 {
 
 #[inline]
 pub fn mat_vec_mul_into(out: &mut [f32], matrix: &[f32], vector: &[f32], rows: usize, cols: usize) {
-    out[..rows].par_iter_mut().enumerate().for_each(|(r, res_val)| {
-        let row_offset = r * cols;
-        if row_offset + cols <= matrix.len() {
-            let row_slice = &matrix[row_offset..row_offset + cols];
-            *res_val = dot_product_simd(row_slice, vector);
-        }
-    });
+    out[..rows]
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(r, res_val)| {
+            let row_offset = r * cols;
+            if row_offset + cols <= matrix.len() {
+                let row_slice = &matrix[row_offset..row_offset + cols];
+                *res_val = dot_product_simd(row_slice, vector);
+            }
+        });
 }
 
 pub fn mat_vec_mul_parallel(matrix: &[f32], vector: &[f32], rows: usize, cols: usize) -> Vec<f32> {

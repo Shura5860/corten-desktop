@@ -120,7 +120,9 @@ pub fn eval_math_expression(input: &str) -> Option<f64> {
     }
 
     // Must have at least one digit and at least one operator
-    let has_operator = s.chars().any(|c| matches!(c, '+' | '-' | '*' | '/' | '%' | '^'));
+    let has_operator = s
+        .chars()
+        .any(|c| matches!(c, '+' | '-' | '*' | '/' | '%' | '^'));
     let has_digit = s.chars().any(|c| c.is_ascii_digit());
     if !has_operator || !has_digit {
         return None;
@@ -202,7 +204,10 @@ pub fn parse_color_query(q: &str) -> Option<(String, String)> {
             let (h, sat, l) = rgb_to_hsl(r, g, b);
             return Some((
                 format!("Renk: #{}", hex.to_uppercase()),
-                format!("RGB: ({}, {}, {}) | HSL: ({}°, {}%, {}%)", r, g, b, h, sat, l),
+                format!(
+                    "RGB: ({}, {}, {}) | HSL: ({}°, {}%, {}%)",
+                    r, g, b, h, sat, l
+                ),
             ));
         } else if hex.len() == 3 {
             let r_ch = hex.chars().next()?;
@@ -215,7 +220,10 @@ pub fn parse_color_query(q: &str) -> Option<(String, String)> {
             let (h, sat, l) = rgb_to_hsl(r, g, b);
             return Some((
                 format!("Renk: #{}", full_hex.to_uppercase()),
-                format!("RGB: ({}, {}, {}) | HSL: ({}°, {}%, {}%)", r, g, b, h, sat, l),
+                format!(
+                    "RGB: ({}, {}, {}) | HSL: ({}°, {}%, {}%)",
+                    r, g, b, h, sat, l
+                ),
             ));
         }
     } else if s.starts_with("rgb(") && s.ends_with(')') {
@@ -228,7 +236,10 @@ pub fn parse_color_query(q: &str) -> Option<(String, String)> {
             let (h, sat, l) = rgb_to_hsl(r, g, b);
             return Some((
                 format!("Renk: #{:02X}{:02X}{:02X}", r, g, b),
-                format!("RGB: ({}, {}, {}) | HSL: ({}°, {}%, {}%)", r, g, b, h, sat, l),
+                format!(
+                    "RGB: ({}, {}, {}) | HSL: ({}°, {}%, {}%)",
+                    r, g, b, h, sat, l
+                ),
             ));
         }
     }
@@ -300,4 +311,3 @@ mod tests {
         assert_eq!(format_calc_result(100.125), "100.125");
     }
 }
-

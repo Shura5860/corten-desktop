@@ -1,23 +1,23 @@
 use std::borrow::Cow;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tracing::{info, warn};
 use zbus::connection::Builder;
 
 use corten_config::{AppearanceConfig, ConfigManager};
 use corten_theme::iced_styles::acrylic_glass_style;
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Spacing, ThemeMode, Transition, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Spacing, ThemeMode, Transition, Typography,
 };
 use iced::widget::{button, column, container, image, mouse_area, row, text, text_input};
 use iced::{Alignment, Element, Length, Subscription};
+use iced_layershell::Application;
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use iced_runtime::Task;
 
 mod config;
@@ -98,42 +98,42 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 let fallback_server = dbus::NotificationServer::new(dbus_tx, Arc::new(AtomicBool::new(false)));
-                if let Ok(fb) = Builder::session() {
-                    if let Ok(fb) = fb.serve_at("/org/corten/Notification", fallback_server) {
-                        if let Ok(conn) = fb.build().await {
+                if let Ok(fb) = Builder::session()
+                    && let Ok(fb) = fb.serve_at("/org/corten/Notification", fallback_server)
+                        && let Ok(conn) = fb.build().await {
                             dbus::set_dbus_connection(conn);
                         }
-                    }
-                }
                 std::future::pending::<()>().await;
             }
         });
     });
 
-    let config_watcher = if let Ok((w, config_rx)) = config_manager.spawn_watcher() {
-        let watcher_tx = event_tx.clone();
-        std::thread::spawn(move || {
-            while config_rx.recv().is_ok() {
-                let _ = watcher_tx.send(NotifyEvent::ReloadConfig);
-            }
-        });
-        Some(w)
-    } else {
-        None
+    let config_watcher = match config_manager.spawn_watcher() {
+        Ok((w, config_rx)) => {
+            let watcher_tx = event_tx.clone();
+            std::thread::spawn(move || {
+                while config_rx.recv().is_ok() {
+                    let _ = watcher_tx.send(NotifyEvent::ReloadConfig);
+                }
+            });
+            Some(w)
+        }
+        _ => None,
     };
 
     let app_watcher =
         if let Ok(app_mgr) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
-            if let Ok((w, app_rx)) = app_mgr.spawn_watcher() {
-                let app_tx = event_tx.clone();
-                std::thread::spawn(move || {
-                    while app_rx.recv().is_ok() {
-                        let _ = app_tx.send(NotifyEvent::ReloadConfig);
-                    }
-                });
-                Some(w)
-            } else {
-                None
+            match app_mgr.spawn_watcher() {
+                Ok((w, app_rx)) => {
+                    let app_tx = event_tx.clone();
+                    std::thread::spawn(move || {
+                        while app_rx.recv().is_ok() {
+                            let _ = app_tx.send(NotifyEvent::ReloadConfig);
+                        }
+                    });
+                    Some(w)
+                }
+                _ => None,
             }
         } else {
             None
@@ -484,7 +484,11 @@ impl Application for CortenNotificationApp {
             Message::DbusEvent(event) => match event {
                 NotifyEvent::Add(item) => {
                     if item.urgency != Urgency::Critical
-                        && self.config.muted_apps.iter().any(|m| m.eq_ignore_ascii_case(&item.app_name))
+                        && self
+                            .config
+                            .muted_apps
+                            .iter()
+                            .any(|m| m.eq_ignore_ascii_case(&item.app_name))
                     {
                         info!("Notification from muted app '{}' suppressed", item.app_name);
                         return Task::none();
@@ -551,7 +555,9 @@ impl Application for CortenNotificationApp {
                     info!("Notification: ClearHistory executed");
                 }
                 NotifyEvent::ReloadConfig => {
-                    info!("Notification: ReloadConfig received, reading from ~/.config/corten/notify.toml");
+                    info!(
+                        "Notification: ReloadConfig received, reading from ~/.config/corten/notify.toml"
+                    );
                     if let Ok(new_cfg) = ConfigManager::<NotifyConfig>::load_or_default("notify") {
                         self.config = new_cfg.get().clone();
                         self._dnd_enabled
@@ -603,7 +609,8 @@ impl Application for CortenNotificationApp {
                     self.config.muted_apps.remove(pos);
                 } else {
                     self.config.muted_apps.push(app.clone());
-                    self.notifications.retain(|n| !n.item.app_name.eq_ignore_ascii_case(&app));
+                    self.notifications
+                        .retain(|n| !n.item.app_name.eq_ignore_ascii_case(&app));
                 }
                 let _ = self.config_manager.update(self.config.clone());
             }
@@ -788,14 +795,19 @@ impl Application for CortenNotificationApp {
                         button(
                             row![
                                 text(app).size(10.0).color(palette.text_primary.to_iced()),
-                                text(Icon::X).font(LUCIDE_FONT).size(9.0).color(palette.text_muted.to_iced()),
+                                text(Icon::X)
+                                    .font(LUCIDE_FONT)
+                                    .size(9.0)
+                                    .color(palette.text_muted.to_iced()),
                             ]
                             .spacing(4)
                             .align_y(Alignment::Center),
                         )
                         .padding([2, 6])
                         .style(move |_, _| button::Style {
-                            background: Some(iced::Background::Color(palette.surface_hover.to_iced())),
+                            background: Some(iced::Background::Color(
+                                palette.surface_hover.to_iced(),
+                            )),
                             border: iced::Border {
                                 color: palette.border.to_iced(),
                                 width: 1.0,
@@ -825,9 +837,11 @@ impl Application for CortenNotificationApp {
                         .filter(|h| h.app_name == item.app_name)
                         .count();
 
-                    let mut app_header = row![text(&item.app_name)
-                        .size(Typography::CAPTION)
-                        .color(palette.primary.to_iced()),]
+                    let mut app_header = row![
+                        text(&item.app_name)
+                            .size(Typography::CAPTION)
+                            .color(palette.primary.to_iced()),
+                    ]
                     .spacing(4)
                     .align_y(Alignment::Center);
 
@@ -1224,7 +1238,7 @@ impl Application for CortenNotificationApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{tick_visible_notification, VisibleNotification};
+    use super::{VisibleNotification, tick_visible_notification};
     use crate::dbus::{NotificationItem, Urgency};
 
     fn notification(urgency: Urgency, remaining_ms: u64) -> VisibleNotification {

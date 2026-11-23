@@ -5,7 +5,7 @@
 use thiserror::Error;
 use tracing::info;
 use zbus::connection::Builder;
-use zbus::{proxy, Connection};
+use zbus::{Connection, proxy};
 
 pub mod doctor;
 
@@ -105,7 +105,10 @@ pub trait CompositorControl {
     /// Returns snapshots of all managed windows: (id, app_id, title, workspace, is_active, is_floating).
     fn get_windows(&self) -> zbus::Result<Vec<(u64, String, String, u32, bool, bool)>>;
     /// High-performance atomic snapshot: returns (active_workspace, occupied_workspaces, windows) in a single D-Bus RPC.
-    fn get_full_state(&self, output_name: &str) -> zbus::Result<(u32, Vec<u32>, Vec<(u64, String, String, u32, bool, bool)>)>;
+    fn get_full_state(
+        &self,
+        output_name: &str,
+    ) -> zbus::Result<(u32, Vec<u32>, Vec<(u64, String, String, u32, bool, bool)>)>;
 }
 
 /// D-Bus proxy for the independent Corten capture service.

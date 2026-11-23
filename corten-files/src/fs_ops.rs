@@ -145,13 +145,23 @@ pub fn get_image_preview_path(path: &Path) -> Option<PathBuf> {
     let ext = path.extension()?.to_str()?;
     if matches!(
         ext,
-        "png" | "PNG" | "jpg" | "JPG" | "jpeg" | "JPEG" | "webp" | "WEBP" | "bmp" | "BMP" | "ico" | "ICO"
-    ) {
-        if let Ok(meta) = fs::metadata(path) {
-            // Guard against massive images eating memory in the grid view
-            if meta.len() <= 16 * 1024 * 1024 {
-                return Some(path.to_path_buf());
-            }
+        "png"
+            | "PNG"
+            | "jpg"
+            | "JPG"
+            | "jpeg"
+            | "JPEG"
+            | "webp"
+            | "WEBP"
+            | "bmp"
+            | "BMP"
+            | "ico"
+            | "ICO"
+    ) && let Ok(meta) = fs::metadata(path)
+    {
+        // Guard against massive images eating memory in the grid view
+        if meta.len() <= 16 * 1024 * 1024 {
+            return Some(path.to_path_buf());
         }
     }
     None
@@ -512,9 +522,12 @@ pub fn trash_info_dir() -> PathBuf {
 }
 
 fn quick_dir_count(path: &Path) -> Option<usize> {
-    fs::read_dir(path)
-        .ok()
-        .map(|rd| rd.take(500).flatten().filter(|e| !e.file_name().to_string_lossy().starts_with('.')).count())
+    fs::read_dir(path).ok().map(|rd| {
+        rd.take(500)
+            .flatten()
+            .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+            .count()
+    })
 }
 
 pub fn standard_places() -> Vec<SidebarPlace> {
@@ -728,11 +741,7 @@ pub fn move_to_trash(src: &Path) -> Result<PathBuf, String> {
     move_to_trash_in(src, &trash_files_dir(), &trash_info_dir())
 }
 
-pub fn move_to_trash_in(
-    src: &Path,
-    files_dir: &Path,
-    info_dir: &Path,
-) -> Result<PathBuf, String> {
+pub fn move_to_trash_in(src: &Path, files_dir: &Path, info_dir: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(files_dir).map_err(|e| format!("Çöp dizini oluşturulamadı: {e}"))?;
     fs::create_dir_all(info_dir).map_err(|e| format!("Çöp bilgi dizini oluşturulamadı: {e}"))?;
 
@@ -763,7 +772,11 @@ pub fn move_to_trash_in(
     let mut year = 1970;
     let mut d = days;
     loop {
-        let leap = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
+        let leap = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            366
+        } else {
+            365
+        };
         if d < leap {
             break;
         }
@@ -771,7 +784,20 @@ pub fn move_to_trash_in(
         year += 1;
     }
     let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let month_days = [31, if is_leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31,
+        if is_leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1;
     for &md in &month_days {
         if d < md {
@@ -781,7 +807,8 @@ pub fn move_to_trash_in(
         month += 1;
     }
     let day = d + 1;
-    let deletion_date = format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}");
+    let deletion_date =
+        format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}");
     let info_contents = format!(
         "[Trash Info]\nPath={}\nDeletionDate={deletion_date}\n",
         abs_src.to_string_lossy()
@@ -877,7 +904,16 @@ pub fn open_with_system(path: &Path) -> Result<(), String> {
 pub fn spawn_terminal_in(dir: &Path) -> Result<(), String> {
     let mut last_err = None;
     let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "corten-0".into());
-    for prog in ["corten-terminal", "alacritty", "foot", "kitty", "konsole", "xterm", "pterm", "bash"] {
+    for prog in [
+        "corten-terminal",
+        "alacritty",
+        "foot",
+        "kitty",
+        "konsole",
+        "xterm",
+        "pterm",
+        "bash",
+    ] {
         let mut cmd = Command::new(prog);
         cmd.current_dir(dir)
             .env("WAYLAND_DISPLAY", &wayland_display);
@@ -905,11 +941,7 @@ pub fn extract_archive(archive_path: &Path, dest_dir: &Path) -> Result<PathBuf, 
         .or_else(|| lower.strip_suffix(".tar.xz"))
         .or_else(|| lower.strip_suffix(".tar.bz2"))
         .or_else(|| lower.strip_suffix(".tar.zst"))
-        .or_else(|| {
-            archive_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-        })
+        .or_else(|| archive_path.file_stem().and_then(|s| s.to_str()))
         .unwrap_or("extracted");
 
     let out_dir = unique_destination(dest_dir, stem);
@@ -1001,14 +1033,8 @@ mod tests {
         fs::write(tmp.join("alpha.rs"), "fn main() {}").unwrap();
         fs::write(tmp.join("beta.txt"), "hello").unwrap();
 
-        let list = read_directory(
-            &tmp,
-            false,
-            "",
-            SortColumn::Name,
-            SortDirection::Ascending,
-        )
-        .unwrap();
+        let list =
+            read_directory(&tmp, false, "", SortColumn::Name, SortDirection::Ascending).unwrap();
         assert_eq!(list.len(), 3);
         assert_eq!(list[0].name, "zeta_dir");
         assert!(list[0].is_dir);

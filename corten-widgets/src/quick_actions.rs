@@ -52,9 +52,6 @@ impl QuickActions {
     ];
 
     pub fn launch(command: &str) {
-        let _ = Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .spawn();
+        let _ = Command::new("sh").arg("-c").arg(command).spawn();
     }
 }

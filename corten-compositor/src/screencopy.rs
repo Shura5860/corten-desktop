@@ -16,9 +16,9 @@ use smithay::reexports::wayland_protocols_wlr::screencopy::v1::server::{
     zwlr_screencopy_manager_v1::{self, ZwlrScreencopyManagerV1},
 };
 use smithay::reexports::wayland_server::{
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     backend::GlobalId,
     protocol::{wl_buffer::WlBuffer, wl_output::WlOutput, wl_shm},
-    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
 };
 use smithay::utils::{Buffer as BufferCoord, Logical, Physical, Rectangle, Size, Transform};
 use smithay::wayland::shm::with_buffer_contents_mut;
@@ -99,19 +99,23 @@ pub fn clamp_capture_region(
     }
 }
 
-fn output_phys_and_scale(state: &CortenCompositor, wl_output: &WlOutput) -> (Size<i32, Physical>, f64) {
-    if let Some(output) = Output::from_resource(wl_output) {
-        let size = output
-            .current_mode()
-            .map(|m| m.size)
-            .unwrap_or_else(|| Size::from((state.output_size.w, state.output_size.h)));
-        let scale = output.current_scale().fractional_scale();
-        (size, scale)
-    } else {
-        (
+fn output_phys_and_scale(
+    state: &CortenCompositor,
+    wl_output: &WlOutput,
+) -> (Size<i32, Physical>, f64) {
+    match Output::from_resource(wl_output) {
+        Some(output) => {
+            let size = output
+                .current_mode()
+                .map(|m| m.size)
+                .unwrap_or_else(|| Size::from((state.output_size.w, state.output_size.h)));
+            let scale = output.current_scale().fractional_scale();
+            (size, scale)
+        }
+        _ => (
             Size::from((state.output_size.w.max(1), state.output_size.h.max(1))),
             1.0,
-        )
+        ),
     }
 }
 
@@ -434,8 +438,7 @@ pub fn fulfill_pending_captures<E>(
         let rect = clamp_capture_region(
             output_size,
             scale,
-            shot.region
-                .map(|r| (r.loc.x, r.loc.y, r.size.w, r.size.h)),
+            shot.region.map(|r| (r.loc.x, r.loc.y, r.size.w, r.size.h)),
         );
         match renderer.copy_texture(&offscreen_tex, rect, Fourcc::Abgr8888) {
             Ok(mapping) => match renderer.map_texture(&mapping) {
@@ -448,9 +451,15 @@ pub fn fulfill_pending_captures<E>(
                             Ok(png_bytes) => {
                                 let path = next_screenshot_path();
                                 if let Err(err) = std::fs::write(&path, &png_bytes) {
-                                    error!("failed to save screenshot to {}: {err}", path.display());
+                                    error!(
+                                        "failed to save screenshot to {}: {err}",
+                                        path.display()
+                                    );
                                 } else {
-                                    info!("Saved native compositor screenshot to {}", path.display());
+                                    info!(
+                                        "Saved native compositor screenshot to {}",
+                                        path.display()
+                                    );
                                     let _ = Command::new("notify-send")
                                         .args([
                                             "Ekran Görüntüsü Kaydedildi",
@@ -518,4 +527,3 @@ mod tests {
         assert!(png.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]));
     }
 }
-

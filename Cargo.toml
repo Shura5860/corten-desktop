@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/auth",
     "crates/theme",
@@ -35,7 +35,7 @@ members = [
 
 [workspace.package]
 version = "0.6.0"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 authors = ["Corten Desktop Contributors"]
 repository = "https://github.com/Shura5860/corten-desktop"

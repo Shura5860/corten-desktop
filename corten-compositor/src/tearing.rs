@@ -4,9 +4,8 @@ use wayland_protocols::wp::tearing_control::v1::server::{
     wp_tearing_control_v1::{self, PresentationHint, WpTearingControlV1},
 };
 use wayland_server::{
-    backend::ObjectId,
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, Resource, backend::ObjectId,
     protocol::wl_surface::WlSurface,
-    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, Resource,
 };
 
 use crate::state::CortenCompositor;
@@ -83,14 +82,23 @@ impl Dispatch<WpTearingControlV1, TearingUserData> for CortenCompositor {
         match request {
             wp_tearing_control_v1::Request::SetPresentationHint { hint } => match hint {
                 wayland_server::WEnum::Value(PresentationHint::Async) => {
-                    state.tearing_state.tearing_surfaces.insert(data.surface.id());
+                    state
+                        .tearing_state
+                        .tearing_surfaces
+                        .insert(data.surface.id());
                 }
                 _ => {
-                    state.tearing_state.tearing_surfaces.remove(&data.surface.id());
+                    state
+                        .tearing_state
+                        .tearing_surfaces
+                        .remove(&data.surface.id());
                 }
             },
             wp_tearing_control_v1::Request::Destroy => {
-                state.tearing_state.tearing_surfaces.remove(&data.surface.id());
+                state
+                    .tearing_state
+                    .tearing_surfaces
+                    .remove(&data.surface.id());
             }
             _ => {}
         }
@@ -102,7 +110,10 @@ impl Dispatch<WpTearingControlV1, TearingUserData> for CortenCompositor {
         _resource: &WpTearingControlV1,
         data: &TearingUserData,
     ) {
-        state.tearing_state.tearing_surfaces.remove(&data.surface.id());
+        state
+            .tearing_state
+            .tearing_surfaces
+            .remove(&data.surface.id());
     }
 }
 

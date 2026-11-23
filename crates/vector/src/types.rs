@@ -114,4 +114,3 @@ fn fnv1a_hash(bytes: &[u8], seed: u32) -> u32 {
     }
     hash
 }
-

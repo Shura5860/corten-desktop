@@ -117,22 +117,21 @@ impl CaptureSession {
     pub async fn stop(mut self) -> Result<(), CaptureSessionError> {
         let mut first_error = None;
         for pump in self.pumps.into_iter().flatten() {
-            if let Err(error) = pump.stop() {
-                if first_error.is_none() {
-                    first_error = Some(CaptureSessionError::Consumer(error));
-                }
+            if let Err(error) = pump.stop()
+                && first_error.is_none()
+            {
+                first_error = Some(CaptureSessionError::Consumer(error));
             }
         }
         self.frames.clear();
         for capture in self.captures {
             capture.stop();
         }
-        if let Some(portal) = self.portal.take() {
-            if let Err(error) = portal.close().await {
-                if first_error.is_none() {
-                    first_error = Some(CaptureSessionError::PortalClose(error));
-                }
-            }
+        if let Some(portal) = self.portal.take()
+            && let Err(error) = portal.close().await
+            && first_error.is_none()
+        {
+            first_error = Some(CaptureSessionError::PortalClose(error));
         }
         first_error.map_or(Ok(()), Err)
     }

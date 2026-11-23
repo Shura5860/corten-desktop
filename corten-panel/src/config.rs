@@ -74,11 +74,7 @@ fn default_autohide_mode() -> String {
 }
 
 fn default_pinned_apps() -> Vec<String> {
-    vec![
-        "files".into(),
-        "settings".into(),
-        "corten-forge".into(),
-    ]
+    vec!["files".into(), "settings".into(), "corten-forge".into()]
 }
 
 impl Default for PanelConfig {

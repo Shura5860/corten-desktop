@@ -10,10 +10,11 @@ fn apply_power_profile(profile: &str) -> Result<(), String> {
 pub fn apply_sound(config: &SoundSettingsConfig) -> Result<(), String> {
     let mut errors = Vec::new();
     let output_node = config.output_device.trim();
-    if !output_node.is_empty() && output_node != "Default Audio Device" {
-        if let Err(error) = pipewire::set_default(output_node) {
-            errors.push(error.to_string());
-        }
+    if !output_node.is_empty()
+        && output_node != "Default Audio Device"
+        && let Err(error) = pipewire::set_default(output_node)
+    {
+        errors.push(error.to_string());
     }
     for node in ["@DEFAULT_AUDIO_SINK@", "@DEFAULT_AUDIO_SOURCE@"] {
         let percent = if node == "@DEFAULT_AUDIO_SINK@" {
@@ -77,7 +78,11 @@ pub fn detect_drm_outputs() -> Vec<ConnectedDisplayInfo> {
                 let status_path = entry.path().join("status");
                 if let Ok(status) = std::fs::read_to_string(&status_path) {
                     let is_connected = status.trim() == "connected";
-                    let port_name = name.split_once('-').map(|x| x.1).unwrap_or(&name).to_string();
+                    let port_name = name
+                        .split_once('-')
+                        .map(|x| x.1)
+                        .unwrap_or(&name)
+                        .to_string();
                     let mut modes = Vec::new();
                     let modes_path = entry.path().join("modes");
                     if let Ok(modes_str) = std::fs::read_to_string(&modes_path) {

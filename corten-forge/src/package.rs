@@ -1,7 +1,7 @@
+use futures::stream::{self, StreamExt};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Stdio;
-use futures::stream::{self, StreamExt};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
@@ -28,7 +28,7 @@ impl PackageSource {
         match self {
             PackageSource::Flatpak => (0.20, 0.65, 0.85), // Cyan/Teal
             PackageSource::ArchRepo => (0.88, 0.42, 0.23), // Corten rust/copper
-            PackageSource::Aur => (0.85, 0.65, 0.15),      // Amber
+            PackageSource::Aur => (0.85, 0.65, 0.15),     // Amber
             PackageSource::CortenCore => (0.88, 0.45, 0.18), // Corten Forged Patina
         }
     }
@@ -38,8 +38,14 @@ impl PackageSource {
 pub enum PackageState {
     Available,
     Installed,
-    Upgradable { current_version: String, new_version: String },
-    Installing { progress: Option<f32>, message: String },
+    Upgradable {
+        current_version: String,
+        new_version: String,
+    },
+    Installing {
+        progress: Option<f32>,
+        message: String,
+    },
     Removing,
 }
 
@@ -557,8 +563,12 @@ impl PackageManager {
             let model_dir = std::env::var("HOME")
                 .map(|h| std::path::PathBuf::from(h).join(".local/share/corten/models"))
                 .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
-            model_dir.join("qwen2.5-coder-1.5b-instruct-q4_k_m.gguf").exists()
-                || model_dir.join("qwen2.5-coder-3b-instruct-q4_k_m.gguf").exists()
+            model_dir
+                .join("qwen2.5-coder-1.5b-instruct-q4_k_m.gguf")
+                .exists()
+                || model_dir
+                    .join("qwen2.5-coder-3b-instruct-q4_k_m.gguf")
+                    .exists()
         };
 
         // Cross-reference with live system status
@@ -595,7 +605,11 @@ impl PackageManager {
     pub async fn fetch_installed_flatpaks() -> Vec<PackageItem> {
         let mut list = Vec::new();
         let output = match Command::new("flatpak")
-            .args(["list", "--app", "--columns=application,name,version,branch,arch"])
+            .args([
+                "list",
+                "--app",
+                "--columns=application,name,version,branch,arch",
+            ])
             .output()
             .await
         {
@@ -623,13 +637,14 @@ impl PackageManager {
                     id: id.clone(),
                     name,
                     summary: format!("Kurulu Flatpak Uygulaması ({})", id),
-                    description: "Sisteminizde sanal alan (sandbox) içinde çalışan yerel uygulama.".into(),
+                    description: "Sisteminizde sanal alan (sandbox) içinde çalışan yerel uygulama."
+                        .into(),
                     version,
                     source: PackageSource::Flatpak,
                     state: PackageState::Installed,
                     category: ProductCategory::All,
                     icon_char: ICON_DOWNLOAD,
-                icon_url: None,
+                    icon_url: None,
                     download_size: None,
                     installed_size: None,
                     developer: None,
@@ -731,16 +746,17 @@ impl PackageManager {
 
         let cache_key = format!("{:?}.json", category).to_lowercase();
         let cache_path = Self::cache_subdir("catalog").join(cache_key);
-        if let Ok(meta) = tokio::fs::metadata(&cache_path).await {
-            if let Ok(modified) = meta.modified() {
-                if modified.elapsed().map(|d| d.as_secs() < 600).unwrap_or(false) {
-                    if let Ok(cached_body) = tokio::fs::read_to_string(&cache_path).await {
-                        let parsed = Self::parse_flathub_hits(&cached_body, category, &installed_flatpaks);
-                        if !parsed.is_empty() {
-                            return parsed;
-                        }
-                    }
-                }
+        if let Ok(meta) = tokio::fs::metadata(&cache_path).await
+            && let Ok(modified) = meta.modified()
+            && modified
+                .elapsed()
+                .map(|d| d.as_secs() < 600)
+                .unwrap_or(false)
+            && let Ok(cached_body) = tokio::fs::read_to_string(&cache_path).await
+        {
+            let parsed = Self::parse_flathub_hits(&cached_body, category, &installed_flatpaks);
+            if !parsed.is_empty() {
+                return parsed;
             }
         }
 
@@ -803,106 +819,114 @@ impl PackageManager {
             ])
             .output()
             .await
+            && flathub_out.status.success()
         {
-            if flathub_out.status.success() {
-                let body = String::from_utf8_lossy(&flathub_out.stdout);
-                for item in Self::parse_flathub_hits(&body, ProductCategory::All, &installed_flatpaks)
-                {
-                    if seen_ids.insert(item.id.clone()) {
-                        results.push(item);
-                    }
+            let body = String::from_utf8_lossy(&flathub_out.stdout);
+            for item in Self::parse_flathub_hits(&body, ProductCategory::All, &installed_flatpaks) {
+                if seen_ids.insert(item.id.clone()) {
+                    results.push(item);
                 }
             }
         }
 
         // 1. Local Flatpak CLI Search (merges any extra remotes / versions)
         if let Ok(flatpak_out) = Command::new("flatpak")
-            .args(["search", q, "--columns=application,name,description,version,branch,remotes"])
+            .args([
+                "search",
+                q,
+                "--columns=application,name,description,version,branch,remotes",
+            ])
             .output()
             .await
+            && flatpak_out.status.success()
         {
-            if flatpak_out.status.success() {
-                let stdout = String::from_utf8_lossy(&flatpak_out.stdout);
-                for line in stdout.lines() {
-                    let cols: Vec<&str> = line.split('\t').collect();
-                    if cols.len() >= 4 {
-                        let id = cols[0].trim().to_string();
-                        let name = cols[1].trim().to_string();
-                        let desc = cols[2].trim().to_string();
-                        let ver = cols[3].trim().to_string();
+            let stdout = String::from_utf8_lossy(&flatpak_out.stdout);
+            for line in stdout.lines() {
+                let cols: Vec<&str> = line.split('\t').collect();
+                if cols.len() >= 4 {
+                    let id = cols[0].trim().to_string();
+                    let name = cols[1].trim().to_string();
+                    let desc = cols[2].trim().to_string();
+                    let ver = cols[3].trim().to_string();
 
-                        if id.is_empty() || id == "Application ID" || !seen_ids.insert(id.clone()) {
-                            continue;
-                        }
-
-                        let is_installed = installed_flatpaks.contains(&id);
-                        results.push(PackageItem {
-                            id: id.clone(),
-                            name,
-                            summary: desc.clone(),
-                            description: desc,
-                            version: ver,
-                            source: PackageSource::Flatpak,
-                            state: if is_installed { PackageState::Installed } else { PackageState::Available },
-                            category: ProductCategory::All,
-                            icon_char: ICON_DOWNLOAD,
-                icon_url: None,
-                            download_size: None,
-                            installed_size: None,
-                            developer: None,
-                            license: None,
-                            permissions: None,
-                        });
+                    if id.is_empty() || id == "Application ID" || !seen_ids.insert(id.clone()) {
+                        continue;
                     }
+
+                    let is_installed = installed_flatpaks.contains(&id);
+                    results.push(PackageItem {
+                        id: id.clone(),
+                        name,
+                        summary: desc.clone(),
+                        description: desc,
+                        version: ver,
+                        source: PackageSource::Flatpak,
+                        state: if is_installed {
+                            PackageState::Installed
+                        } else {
+                            PackageState::Available
+                        },
+                        category: ProductCategory::All,
+                        icon_char: ICON_DOWNLOAD,
+                        icon_url: None,
+                        download_size: None,
+                        installed_size: None,
+                        developer: None,
+                        license: None,
+                        permissions: None,
+                    });
                 }
             }
         }
 
         // 2. Pacman Search (top 15 matches)
-        if let Ok(pacman_out) = Command::new("pacman")
-            .args(["-Ss", q])
-            .output()
-            .await
+        if let Ok(pacman_out) = Command::new("pacman").args(["-Ss", q]).output().await
+            && pacman_out.status.success()
         {
-            if pacman_out.status.success() {
-                let stdout = String::from_utf8_lossy(&pacman_out.stdout);
-                let mut lines = stdout.lines();
-                let mut count = 0;
+            let stdout = String::from_utf8_lossy(&pacman_out.stdout);
+            let mut lines = stdout.lines();
+            let mut count = 0;
 
-                while let Some(line1) = lines.next() {
-                    if count >= 12 {
-                        break;
-                    }
-                    if line1.starts_with(' ') || line1.is_empty() {
-                        continue;
-                    }
+            while let Some(line1) = lines.next() {
+                if count >= 12 {
+                    break;
+                }
+                if line1.starts_with(' ') || line1.is_empty() {
+                    continue;
+                }
 
-                    // Format: repo/name version [options]
-                    if let Some((repo_pkg, ver_info)) = line1.split_once(' ') {
-                        let pkg_name = repo_pkg.split_once('/').map(|(_, n)| n).unwrap_or(repo_pkg);
-                        let version = ver_info.split_whitespace().next().unwrap_or("bilinmiyor");
-                        let desc = lines.next().map(|l| l.trim().to_string()).unwrap_or_default();
+                // Format: repo/name version [options]
+                if let Some((repo_pkg, ver_info)) = line1.split_once(' ') {
+                    let pkg_name = repo_pkg.split_once('/').map(|(_, n)| n).unwrap_or(repo_pkg);
+                    let version = ver_info.split_whitespace().next().unwrap_or("bilinmiyor");
+                    let desc = lines
+                        .next()
+                        .map(|l| l.trim().to_string())
+                        .unwrap_or_default();
 
-                        let is_installed = installed_pacmans.contains(pkg_name);
-                        results.push(PackageItem {
-                            id: pkg_name.to_string(),
-                            name: pkg_name.to_string(),
-                            summary: desc.clone(),
-                            description: desc,
-                            version: version.to_string(),
-                            source: PackageSource::ArchRepo,
-                            state: if is_installed { PackageState::Installed } else { PackageState::Available },
-                            category: ProductCategory::All,
-                            icon_char: ICON_ZAP,
-                icon_url: None,
-                            download_size: None,
-                            installed_size: None,
-                            developer: None,
-                            license: None,
-                            permissions: None,
-                        });
-                        count += 1;
-                    }
+                    let is_installed = installed_pacmans.contains(pkg_name);
+                    results.push(PackageItem {
+                        id: pkg_name.to_string(),
+                        name: pkg_name.to_string(),
+                        summary: desc.clone(),
+                        description: desc,
+                        version: version.to_string(),
+                        source: PackageSource::ArchRepo,
+                        state: if is_installed {
+                            PackageState::Installed
+                        } else {
+                            PackageState::Available
+                        },
+                        category: ProductCategory::All,
+                        icon_char: ICON_ZAP,
+                        icon_url: None,
+                        download_size: None,
+                        installed_size: None,
+                        developer: None,
+                        license: None,
+                        permissions: None,
+                    });
+                    count += 1;
                 }
             }
         }
@@ -985,19 +1009,20 @@ impl PackageManager {
                         _ => {}
                     }
                 }
-            } else if in_session_bus {
-                if let Some((bus_name, _policy)) = trimmed.split_once('=') {
-                    let b = bus_name.trim();
-                    if !b.is_empty() {
-                        dbus_talk.push(b.to_string());
-                    }
+            } else if in_session_bus && let Some((bus_name, _policy)) = trimmed.split_once('=') {
+                let b = bus_name.trim();
+                if !b.is_empty() {
+                    dbus_talk.push(b.to_string());
                 }
             }
         }
 
         // Calculate Safety Score
         let mut score = 100u8;
-        if filesystems.iter().any(|f| f.starts_with("host") || f.starts_with("home")) {
+        if filesystems
+            .iter()
+            .any(|f| f.starts_with("host") || f.starts_with("home"))
+        {
             score = score.saturating_sub(40);
         }
         if x11_fallback && !wayland {
@@ -1008,11 +1033,13 @@ impl PackageManager {
         }
 
         let summary = if score >= 90 {
-            "Mükemmel İzolasyon: Uygulama tam sanal alandadır, kişisel dosyalara izinsiz erişemez.".to_string()
+            "Mükemmel İzolasyon: Uygulama tam sanal alandadır, kişisel dosyalara izinsiz erişemez."
+                .to_string()
         } else if score >= 70 {
             "Geliştirici İzni: Yerel dosya sistemi veya belirli D-Bus servislerine erişim yetkisi var.".to_string()
         } else {
-            "Genişletilmiş İzin: Tüm ev dizinine veya ana sisteme erişim yetkisi talep ediyor.".to_string()
+            "Genişletilmiş İzin: Tüm ev dizinine veya ana sisteme erişim yetkisi talep ediyor."
+                .to_string()
         };
 
         Some(SandboxPermissions {
@@ -1029,8 +1056,14 @@ impl PackageManager {
     }
 
     /// Executes asynchronous package installation with streaming terminal logs
-    pub async fn install_package(pkg: PackageItem, tx: UnboundedSender<String>) -> Result<(), String> {
-        let _ = tx.send(format!("🚀 Kurulum başlatılıyor: {} ({})\n", pkg.name, pkg.id));
+    pub async fn install_package(
+        pkg: PackageItem,
+        tx: UnboundedSender<String>,
+    ) -> Result<(), String> {
+        let _ = tx.send(format!(
+            "🚀 Kurulum başlatılıyor: {} ({})\n",
+            pkg.name, pkg.id
+        ));
 
         match pkg.source {
             PackageSource::Flatpak => {
@@ -1077,12 +1110,18 @@ impl PackageManager {
                     });
                 }
 
-                let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
+                let status = child
+                    .wait()
+                    .await
+                    .map_err(|e| format!("Bekleme hatası: {}", e))?;
                 if status.success() {
                     let _ = tx.send(format!("✅ {} başarıyla kuruldu!\n", pkg.name));
                     Ok(())
                 } else {
-                    Err(format!("Kurulum başarısız oldu (Çıkış kodu: {:?})", status.code()))
+                    Err(format!(
+                        "Kurulum başarısız oldu (Çıkış kodu: {:?})",
+                        status.code()
+                    ))
                 }
             }
             PackageSource::Aur => {
@@ -1092,7 +1131,9 @@ impl PackageManager {
                 } else if std::path::Path::new("/usr/bin/yay").exists() {
                     "yay"
                 } else {
-                    return Err("AUR paketlerini kurmak için 'paru' veya 'yay' kurulu olmalıdır.".into());
+                    return Err(
+                        "AUR paketlerini kurmak için 'paru' veya 'yay' kurulu olmalıdır.".into(),
+                    );
                 };
                 let mut child = Command::new(helper)
                     .args(["-S", "--noconfirm", &pkg.id])
@@ -1120,24 +1161,34 @@ impl PackageManager {
                     });
                 }
 
-                let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
+                let status = child
+                    .wait()
+                    .await
+                    .map_err(|e| format!("Bekleme hatası: {}", e))?;
                 if status.success() {
                     let _ = tx.send(format!("✅ {} (AUR) başarıyla kuruldu!\n", pkg.name));
                     Ok(())
                 } else {
-                    Err(format!("AUR kurulumu başarısız oldu (Çıkış kodu: {:?})", status.code()))
+                    Err(format!(
+                        "AUR kurulumu başarısız oldu (Çıkış kodu: {:?})",
+                        status.code()
+                    ))
                 }
             }
             PackageSource::ArchRepo => {
-                let (pm_args, pm_label): (Vec<&str>, &str) = if std::path::Path::new("/usr/bin/pacman").exists() {
-                    (vec!["pacman", "-S", "--noconfirm", &pkg.id], "pacman")
-                } else if std::path::Path::new("/usr/bin/apt-get").exists() {
-                    (vec!["apt-get", "install", "-y", &pkg.id], "apt-get")
-                } else if std::path::Path::new("/usr/bin/dnf").exists() {
-                    (vec!["dnf", "install", "-y", &pkg.id], "dnf")
-                } else {
-                    return Err("Desteklenen yerel paket yöneticisi (pacman/apt/dnf) bulunamadı.".into());
-                };
+                let (pm_args, pm_label): (Vec<&str>, &str) =
+                    if std::path::Path::new("/usr/bin/pacman").exists() {
+                        (vec!["pacman", "-S", "--noconfirm", &pkg.id], "pacman")
+                    } else if std::path::Path::new("/usr/bin/apt-get").exists() {
+                        (vec!["apt-get", "install", "-y", &pkg.id], "apt-get")
+                    } else if std::path::Path::new("/usr/bin/dnf").exists() {
+                        (vec!["dnf", "install", "-y", &pkg.id], "dnf")
+                    } else {
+                        return Err(
+                            "Desteklenen yerel paket yöneticisi (pacman/apt/dnf) bulunamadı."
+                                .into(),
+                        );
+                    };
                 let mut child = Command::new("pkexec")
                     .args(&pm_args)
                     .stdout(Stdio::piped())
@@ -1164,17 +1215,25 @@ impl PackageManager {
                     });
                 }
 
-                let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
+                let status = child
+                    .wait()
+                    .await
+                    .map_err(|e| format!("Bekleme hatası: {}", e))?;
                 if status.success() {
                     let _ = tx.send(format!("✅ {} başarıyla kuruldu!\n", pkg.name));
                     Ok(())
                 } else {
-                    Err(format!("Kurulum başarısız oldu (Çıkış kodu: {:?})", status.code()))
+                    Err(format!(
+                        "Kurulum başarısız oldu (Çıkış kodu: {:?})",
+                        status.code()
+                    ))
                 }
             }
             PackageSource::CortenCore => {
                 if pkg.id == "corten-aura-model" {
-                    let _ = tx.send("📥 Corten AURA yerel yapay zeka modeli indiriliyor (~986 MB)...\n".into());
+                    let _ = tx.send(
+                        "📥 Corten AURA yerel yapay zeka modeli indiriliyor (~986 MB)...\n".into(),
+                    );
                     let dest_dir = std::env::var("HOME")
                         .map(|h| std::path::PathBuf::from(h).join(".local/share/corten/models"))
                         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
@@ -1200,12 +1259,21 @@ impl PackageManager {
                         });
                     }
 
-                    let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
+                    let status = child
+                        .wait()
+                        .await
+                        .map_err(|e| format!("Bekleme hatası: {}", e))?;
                     if status.success() {
-                        let _ = tx.send(format!("✅ Corten AURA yerel modeli başarıyla kuruldu: `{}`!\n", dest_path_str));
+                        let _ = tx.send(format!(
+                            "✅ Corten AURA yerel modeli başarıyla kuruldu: `{}`!\n",
+                            dest_path_str
+                        ));
                         Ok(())
                     } else {
-                        Err(format!("Model indirme başarısız oldu (Çıkış kodu: {:?})", status.code()))
+                        Err(format!(
+                            "Model indirme başarısız oldu (Çıkış kodu: {:?})",
+                            status.code()
+                        ))
                     }
                 } else {
                     let _ = tx.send("⚡ Corten Desktop OTA güncellemesi uygulanıyor...\n".into());
@@ -1215,7 +1283,10 @@ impl PackageManager {
                         let _ = tx_clone.send(format!("  {}\n", msg));
                     })
                     .await?;
-                    let _ = tx.send(format!("✅ Corten Desktop başarıyla {} sürümüne güncellendi!\n", info.latest_version));
+                    let _ = tx.send(format!(
+                        "✅ Corten Desktop başarıyla {} sürümüne güncellendi!\n",
+                        info.latest_version
+                    ));
                     Ok(())
                 }
             }
@@ -1223,8 +1294,14 @@ impl PackageManager {
     }
 
     /// Executes asynchronous package uninstallation
-    pub async fn uninstall_package(pkg: PackageItem, tx: UnboundedSender<String>) -> Result<(), String> {
-        let _ = tx.send(format!("🗑️ Kaldırma işlemi başlatılıyor: {} ({})\n", pkg.name, pkg.id));
+    pub async fn uninstall_package(
+        pkg: PackageItem,
+        tx: UnboundedSender<String>,
+    ) -> Result<(), String> {
+        let _ = tx.send(format!(
+            "🗑️ Kaldırma işlemi başlatılıyor: {} ({})\n",
+            pkg.name, pkg.id
+        ));
 
         match pkg.source {
             PackageSource::Flatpak => {
@@ -1254,12 +1331,18 @@ impl PackageManager {
                     });
                 }
 
-                let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
+                let status = child
+                    .wait()
+                    .await
+                    .map_err(|e| format!("Bekleme hatası: {}", e))?;
                 if status.success() {
                     let _ = tx.send(format!("✅ {} sistemden kaldırıldı.\n", pkg.name));
                     Ok(())
                 } else {
-                    Err(format!("Kaldırma başarısız oldu (Çıkış kodu: {:?})", status.code()))
+                    Err(format!(
+                        "Kaldırma başarısız oldu (Çıkış kodu: {:?})",
+                        status.code()
+                    ))
                 }
             }
             PackageSource::ArchRepo | PackageSource::Aur => {
@@ -1289,12 +1372,18 @@ impl PackageManager {
                     });
                 }
 
-                let status = child.wait().await.map_err(|e| format!("Bekleme hatası: {}", e))?;
+                let status = child
+                    .wait()
+                    .await
+                    .map_err(|e| format!("Bekleme hatası: {}", e))?;
                 if status.success() {
                     let _ = tx.send(format!("✅ {} sistemden kaldırıldı.\n", pkg.name));
                     Ok(())
                 } else {
-                    Err(format!("Kaldırma başarısız oldu (Çıkış kodu: {:?})", status.code()))
+                    Err(format!(
+                        "Kaldırma başarısız oldu (Çıkış kodu: {:?})",
+                        status.code()
+                    ))
                 }
             }
             PackageSource::CortenCore => {
@@ -1305,7 +1394,10 @@ impl PackageManager {
                     let dest_file = dest_dir.join("qwen2.5-coder-1.5b-instruct-q4_k_m.gguf");
                     if dest_file.exists() {
                         let _ = tokio::fs::remove_file(&dest_file).await;
-                        let _ = tx.send(format!("✅ Model dosyası silindi: `{}`\n", dest_file.display()));
+                        let _ = tx.send(format!(
+                            "✅ Model dosyası silindi: `{}`\n",
+                            dest_file.display()
+                        ));
                     }
                     Ok(())
                 } else {
@@ -1320,68 +1412,78 @@ impl PackageManager {
         let mut list = Vec::new();
 
         // 1. Check Corten Desktop Core OS Update (GitHub Releases OTA)
-        if let Ok(corten_info) = corten_update::CortenUpdater::check_for_updates().await {
-            if corten_info.has_update {
-                let size_str = corten_info.asset_size_bytes.map(|b| format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)));
-                list.push(PackageItem {
-                    id: "corten-desktop-core".into(),
-                    name: "Corten Desktop (Wayland Çekirdek Sistem)".into(),
-                    summary: format!("Corten Desktop {} sürümü hazır!", corten_info.latest_version),
-                    description: corten_info.release_notes,
-                    version: corten_info.latest_version.clone(),
-                    source: PackageSource::CortenCore,
-                    state: PackageState::Upgradable {
-                        current_version: corten_info.current_version,
-                        new_version: corten_info.latest_version,
-                    },
-                    category: ProductCategory::System,
-                    icon_char: ICON_ZAP,
+        if let Ok(corten_info) = corten_update::CortenUpdater::check_for_updates().await
+            && corten_info.has_update
+        {
+            let size_str = corten_info
+                .asset_size_bytes
+                .map(|b| format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)));
+            list.push(PackageItem {
+                id: "corten-desktop-core".into(),
+                name: "Corten Desktop (Wayland Çekirdek Sistem)".into(),
+                summary: format!(
+                    "Corten Desktop {} sürümü hazır!",
+                    corten_info.latest_version
+                ),
+                description: corten_info.release_notes,
+                version: corten_info.latest_version.clone(),
+                source: PackageSource::CortenCore,
+                state: PackageState::Upgradable {
+                    current_version: corten_info.current_version,
+                    new_version: corten_info.latest_version,
+                },
+                category: ProductCategory::System,
+                icon_char: ICON_ZAP,
                 icon_url: None,
-                    download_size: size_str,
-                    installed_size: None,
-                    developer: Some("Corten Desktop Contributors".into()),
-                    license: Some("MIT / GPL-3.0".into()),
-                    permissions: None,
-                });
-            }
+                download_size: size_str,
+                installed_size: None,
+                developer: Some("Corten Desktop Contributors".into()),
+                license: Some("MIT / GPL-3.0".into()),
+                permissions: None,
+            });
         }
 
         // 2. Check Flatpak application updates
         if let Ok(output) = Command::new("flatpak")
-            .args(["remote-ls", "--updates", "--columns=application,name,version,branch"])
+            .args([
+                "remote-ls",
+                "--updates",
+                "--columns=application,name,version,branch",
+            ])
             .output()
             .await
+            && output.status.success()
         {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    let cols: Vec<&str> = line.split('\t').collect();
-                    if cols.len() >= 3 {
-                        let id = cols[0].trim().to_string();
-                        let name = cols[1].trim().to_string();
-                        let ver = cols[2].trim().to_string();
-                        if !id.is_empty() && id != "Application ID" {
-                            list.push(PackageItem {
-                                id: id.clone(),
-                                name,
-                                summary: "Yeni güncelleme mevcut".into(),
-                                description: "Bu uygulamanın Flathub deposunda yeni bir sürümü yayınlandı.".into(),
-                                version: ver,
-                                source: PackageSource::Flatpak,
-                                state: PackageState::Upgradable {
-                                    current_version: "Yüklü Sürüm".into(),
-                                    new_version: "Yeni Sürüm".into(),
-                                },
-                                category: ProductCategory::All,
-                                icon_char: ICON_DOWNLOAD,
-                icon_url: None,
-                                download_size: None,
-                                installed_size: None,
-                                developer: None,
-                                license: None,
-                                permissions: None,
-                            });
-                        }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let cols: Vec<&str> = line.split('\t').collect();
+                if cols.len() >= 3 {
+                    let id = cols[0].trim().to_string();
+                    let name = cols[1].trim().to_string();
+                    let ver = cols[2].trim().to_string();
+                    if !id.is_empty() && id != "Application ID" {
+                        list.push(PackageItem {
+                            id: id.clone(),
+                            name,
+                            summary: "Yeni güncelleme mevcut".into(),
+                            description:
+                                "Bu uygulamanın Flathub deposunda yeni bir sürümü yayınlandı."
+                                    .into(),
+                            version: ver,
+                            source: PackageSource::Flatpak,
+                            state: PackageState::Upgradable {
+                                current_version: "Yüklü Sürüm".into(),
+                                new_version: "Yeni Sürüm".into(),
+                            },
+                            category: ProductCategory::All,
+                            icon_char: ICON_DOWNLOAD,
+                            icon_url: None,
+                            download_size: None,
+                            installed_size: None,
+                            developer: None,
+                            license: None,
+                            permissions: None,
+                        });
                     }
                 }
             }
@@ -1395,14 +1497,13 @@ impl PackageManager {
             .args(["list", "--app", "--columns=application"])
             .output()
             .await
+            && output.status.success()
         {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    let id = line.trim();
-                    if !id.is_empty() && id != "Application ID" {
-                        ids.insert(id.to_string());
-                    }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let id = line.trim();
+                if !id.is_empty() && id != "Application ID" {
+                    ids.insert(id.to_string());
                 }
             }
         }
@@ -1411,14 +1512,14 @@ impl PackageManager {
 
     async fn get_installed_pacman_pkgs() -> HashSet<String> {
         let mut pkgs = HashSet::new();
-        if let Ok(output) = Command::new("pacman").args(["-Qq"]).output().await {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    let p = line.trim();
-                    if !p.is_empty() {
-                        pkgs.insert(p.to_string());
-                    }
+        if let Ok(output) = Command::new("pacman").args(["-Qq"]).output().await
+            && output.status.success()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let p = line.trim();
+                if !p.is_empty() {
+                    pkgs.insert(p.to_string());
                 }
             }
         }
@@ -1564,7 +1665,11 @@ impl PackageManager {
                             let src = sz.get("src").and_then(|v| v.as_str())?;
                             let w = sz
                                 .get("width")
-                                .and_then(|v| v.as_str().and_then(|s| s.parse::<u32>().ok()).or_else(|| v.as_u64().map(|n| n as u32)))
+                                .and_then(|v| {
+                                    v.as_str()
+                                        .and_then(|s| s.parse::<u32>().ok())
+                                        .or_else(|| v.as_u64().map(|n| n as u32))
+                                })
                                 .unwrap_or(0);
                             Some((src, w))
                         })
@@ -1656,10 +1761,10 @@ impl PackageManager {
     }
 
     async fn download_image_cached(url: &str, cache_path: &PathBuf) -> Option<Vec<u8>> {
-        if let Ok(bytes) = tokio::fs::read(cache_path).await {
-            if Self::is_valid_image_bytes(&bytes) {
-                return Some(bytes);
-            }
+        if let Ok(bytes) = tokio::fs::read(cache_path).await
+            && Self::is_valid_image_bytes(&bytes)
+        {
+            return Some(bytes);
         }
         let out = Command::new("curl")
             .args([
@@ -1688,18 +1793,18 @@ impl PackageManager {
     ) -> Option<(String, Vec<u8>)> {
         let safe = Self::safe_cache_name(&app_id);
         let cache_path = Self::cache_subdir("icons").join(format!("{}.img", safe));
-        if let Ok(bytes) = tokio::fs::read(&cache_path).await {
-            if Self::is_valid_image_bytes(&bytes) {
-                return Some((app_id, bytes));
-            }
+        if let Ok(bytes) = tokio::fs::read(&cache_path).await
+            && Self::is_valid_image_bytes(&bytes)
+        {
+            return Some((app_id, bytes));
         }
 
         match source {
             PackageSource::Flatpak => {
-                if let Some(ref url) = icon_url {
-                    if let Some(bytes) = Self::download_image_cached(url, &cache_path).await {
-                        return Some((app_id, bytes));
-                    }
+                if let Some(ref url) = icon_url
+                    && let Some(bytes) = Self::download_image_cached(url, &cache_path).await
+                {
+                    return Some((app_id, bytes));
                 }
                 let fallback = format!(
                     "https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/{}.png",
@@ -1716,11 +1821,11 @@ impl PackageManager {
                     format!("/usr/share/pixmaps/{}.png", app_id),
                 ];
                 for path in candidates {
-                    if let Ok(bytes) = tokio::fs::read(&path).await {
-                        if Self::is_valid_image_bytes(&bytes) {
-                            let _ = tokio::fs::write(&cache_path, &bytes).await;
-                            return Some((app_id, bytes));
-                        }
+                    if let Ok(bytes) = tokio::fs::read(&path).await
+                        && Self::is_valid_image_bytes(&bytes)
+                    {
+                        let _ = tokio::fs::write(&cache_path, &bytes).await;
+                        return Some((app_id, bytes));
                     }
                 }
                 None
@@ -1748,18 +1853,19 @@ impl PackageManager {
     ) -> (String, Vec<(Vec<u8>, Option<String>)>) {
         let safe = Self::safe_cache_name(&app_id);
         let dir = Self::cache_subdir("screenshots");
-        let results: Vec<(usize, Vec<u8>, Option<String>)> = stream::iter(urls.into_iter().enumerate())
-            .map(|(idx, (url, caption))| {
-                let cache_path = dir.join(format!("{}_{}.img", safe, idx));
-                async move {
-                    let bytes = Self::download_image_cached(&url, &cache_path).await?;
-                    Some((idx, bytes, caption))
-                }
-            })
-            .buffer_unordered(4)
-            .filter_map(|res| async move { res })
-            .collect()
-            .await;
+        let results: Vec<(usize, Vec<u8>, Option<String>)> =
+            stream::iter(urls.into_iter().enumerate())
+                .map(|(idx, (url, caption))| {
+                    let cache_path = dir.join(format!("{}_{}.img", safe, idx));
+                    async move {
+                        let bytes = Self::download_image_cached(&url, &cache_path).await?;
+                        Some((idx, bytes, caption))
+                    }
+                })
+                .buffer_unordered(4)
+                .filter_map(|res| async move { res })
+                .collect()
+                .await;
 
         let mut sorted = results;
         sorted.sort_by_key(|(idx, _, _)| *idx);
@@ -1786,7 +1892,10 @@ mod tests {
     fn test_category_labels_and_icons() {
         assert_eq!(ProductCategory::Development.label(), "Geliştirici Araçları");
         assert_eq!(ProductCategory::Graphics.label(), "Grafik & Tasarım");
-        assert_eq!(ProductCategory::AudioVideo.icon(), corten_theme::Icon::MUSIC);
+        assert_eq!(
+            ProductCategory::AudioVideo.icon(),
+            corten_theme::Icon::MUSIC
+        );
         assert_eq!(ProductCategory::Gaming.icon(), corten_theme::Icon::GAMEPAD);
     }
 
@@ -1829,7 +1938,8 @@ mod tests {
 
     #[test]
     fn test_strip_html_to_text_and_entities() {
-        let html = "<p>Hello <b>Corten</b> &amp; friends!</p><ul><li>Fast</li><li>Safe &lt;3</li></ul>";
+        let html =
+            "<p>Hello <b>Corten</b> &amp; friends!</p><ul><li>Fast</li><li>Safe &lt;3</li></ul>";
         let text = PackageManager::strip_html_to_text(html);
         assert!(text.contains("Hello Corten & friends!"));
         assert!(text.contains("• Fast"));
@@ -1866,8 +1976,12 @@ mod tests {
 
     #[test]
     fn test_is_valid_image_bytes() {
-        assert!(PackageManager::is_valid_image_bytes(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0]));
-        assert!(PackageManager::is_valid_image_bytes(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert!(PackageManager::is_valid_image_bytes(&[
+            0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0
+        ]));
+        assert!(PackageManager::is_valid_image_bytes(&[
+            0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0
+        ]));
         assert!(PackageManager::is_valid_image_bytes(b"RIFF1234WEBPxxxx"));
         assert!(!PackageManager::is_valid_image_bytes(b"<html>404</html>"));
     }

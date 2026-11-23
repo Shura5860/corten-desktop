@@ -5,20 +5,18 @@ use std::process::Stdio;
 
 use smithay::desktop::Window;
 use smithay::reexports::calloop::LoopHandle;
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Rectangle};
+use smithay::wayland::selection::SelectionTarget;
 use smithay::wayland::selection::data_device::{
     clear_data_device_selection, request_data_device_client_selection, set_data_device_selection,
 };
 use smithay::wayland::selection::primary_selection::{
     clear_primary_selection, request_primary_client_selection, set_primary_selection,
 };
-use smithay::wayland::selection::SelectionTarget;
 use smithay::wayland::xwayland_shell::{XWaylandShellHandler, XWaylandShellState};
-use smithay::xwayland::xwm::{
-    Reorder, ResizeEdge as X11ResizeEdge, X11Wm, XwmHandler, XwmId,
-};
+use smithay::xwayland::xwm::{Reorder, ResizeEdge as X11ResizeEdge, X11Wm, XwmHandler, XwmId};
 use smithay::xwayland::{X11Surface, XWayland, XWaylandEvent};
 use tracing::{info, warn};
 
@@ -30,12 +28,7 @@ impl XWaylandShellHandler for CortenCompositor {
         &mut self.xwayland_shell_state
     }
 
-    fn surface_associated(
-        &mut self,
-        _xwm: XwmId,
-        wl_surface: WlSurface,
-        window: X11Surface,
-    ) {
+    fn surface_associated(&mut self, _xwm: XwmId, wl_surface: WlSurface, window: X11Surface) {
         self.output.enter(&wl_surface);
         let output_scale = self.output.current_scale().fractional_scale();
         let scale = compute_xwayland_surface_scale(output_scale, self.xwayland_force_zero_scaling);
@@ -62,14 +55,14 @@ impl XWaylandShellHandler for CortenCompositor {
                 let max_h = (usable.size.h - 32).max(160);
                 let w = geo.size.w.clamp(160, max_w);
                 let h = (geo.size.h + titlebar_h).clamp(100 + titlebar_h, max_h);
-                let x = geo
-                    .loc
-                    .x
-                    .clamp(usable.loc.x + 16, (usable.loc.x + usable.size.w - w).max(usable.loc.x));
-                let y = geo
-                    .loc
-                    .y
-                    .clamp(usable.loc.y + 16, (usable.loc.y + usable.size.h - h).max(usable.loc.y));
+                let x = geo.loc.x.clamp(
+                    usable.loc.x + 16,
+                    (usable.loc.x + usable.size.w - w).max(usable.loc.x),
+                );
+                let y = geo.loc.y.clamp(
+                    usable.loc.y + 16,
+                    (usable.loc.y + usable.size.h - h).max(usable.loc.y),
+                );
                 let rect = Rectangle::new((x, y).into(), (w, h).into());
                 self.layout.set_floating_geometry(&smithay_window, rect);
                 configure_window_geometry(&smithay_window, rect);
@@ -123,8 +116,14 @@ impl XwmHandler for CortenCompositor {
             let max_h = (usable.size.h - 32).max(160);
             let w = geo.size.w.clamp(160, max_w);
             let h = (geo.size.h + titlebar_h).clamp(100 + titlebar_h, max_h);
-            let x = geo.loc.x.clamp(usable.loc.x + 16, (usable.loc.x + usable.size.w - w).max(usable.loc.x));
-            let y = geo.loc.y.clamp(usable.loc.y + 16, (usable.loc.y + usable.size.h - h).max(usable.loc.y));
+            let x = geo.loc.x.clamp(
+                usable.loc.x + 16,
+                (usable.loc.x + usable.size.w - w).max(usable.loc.x),
+            );
+            let y = geo.loc.y.clamp(
+                usable.loc.y + 16,
+                (usable.loc.y + usable.size.h - h).max(usable.loc.y),
+            );
             let rect = Rectangle::new((x, y).into(), (w, h).into());
             self.layout.set_floating_geometry(&smithay_window, rect);
             configure_window_geometry(&smithay_window, rect);
@@ -139,7 +138,8 @@ impl XwmHandler for CortenCompositor {
         if let Some(wl_surface) = window.wl_surface() {
             self.output.enter(&wl_surface);
             let output_scale = self.output.current_scale().fractional_scale();
-            let scale = compute_xwayland_surface_scale(output_scale, self.xwayland_force_zero_scaling);
+            let scale =
+                compute_xwayland_surface_scale(output_scale, self.xwayland_force_zero_scaling);
             smithay::wayland::compositor::with_states(&wl_surface, |states| {
                 smithay::wayland::fractional_scale::with_fractional_scale(states, |fscale| {
                     fscale.set_preferred_scale(scale);
@@ -171,14 +171,14 @@ impl XwmHandler for CortenCompositor {
             let max_h = (usable.size.h - 32).max(160);
             let w = geo.size.w.clamp(160, max_w);
             let h = (geo.size.h + titlebar_h).clamp(100 + titlebar_h, max_h);
-            let x = geo
-                .loc
-                .x
-                .clamp(usable.loc.x + 16, (usable.loc.x + usable.size.w - w).max(usable.loc.x));
-            let y = geo
-                .loc
-                .y
-                .clamp(usable.loc.y + 16, (usable.loc.y + usable.size.h - h).max(usable.loc.y));
+            let x = geo.loc.x.clamp(
+                usable.loc.x + 16,
+                (usable.loc.x + usable.size.w - w).max(usable.loc.x),
+            );
+            let y = geo.loc.y.clamp(
+                usable.loc.y + 16,
+                (usable.loc.y + usable.size.h - h).max(usable.loc.y),
+            );
             let rect = Rectangle::new((x, y).into(), (w, h).into());
             self.layout.set_floating_geometry(&smithay_window, rect);
             configure_window_geometry(&smithay_window, rect);
@@ -252,11 +252,16 @@ impl XwmHandler for CortenCompositor {
 
         if window.is_override_redirect() || is_floating.is_some() || !window.is_mapped() {
             if let Some(win) = is_floating {
-                let titlebar_h = crate::layout::window_titlebar_height(&win, window.is_fullscreen());
+                let titlebar_h =
+                    crate::layout::window_titlebar_height(&win, window.is_fullscreen());
                 // Convert client geometry into outer frame geometry (avoiding 36px drift)
                 let frame_geo = Rectangle::new(
                     (geo.loc.x, (geo.loc.y - titlebar_h).max(0)).into(),
-                    (geo.size.w.max(160), (geo.size.h + titlebar_h).max(100 + titlebar_h)).into(),
+                    (
+                        geo.size.w.max(160),
+                        (geo.size.h + titlebar_h).max(100 + titlebar_h),
+                    )
+                        .into(),
                 );
                 self.layout.set_floating_geometry(&win, frame_geo);
                 configure_window_geometry(&win, frame_geo);
@@ -287,7 +292,11 @@ impl XwmHandler for CortenCompositor {
             // Reconstruct outer frame geometry so X11 client y+titlebar_h does not drift downwards!
             let frame_geo = Rectangle::new(
                 (geometry.loc.x, (geometry.loc.y - titlebar_h).max(0)).into(),
-                (geometry.size.w.max(160), (geometry.size.h + titlebar_h).max(100 + titlebar_h)).into(),
+                (
+                    geometry.size.w.max(160),
+                    (geometry.size.h + titlebar_h).max(100 + titlebar_h),
+                )
+                    .into(),
             );
             self.layout.set_floating_geometry(&win, frame_geo);
         }
@@ -453,20 +462,16 @@ impl XwmHandler for CortenCompositor {
     ) {
         match selection {
             SelectionTarget::Clipboard => {
-                if let Err(err) = request_data_device_client_selection(
-                    &self.seat,
-                    mime_type.clone(),
-                    fd,
-                ) {
+                if let Err(err) =
+                    request_data_device_client_selection(&self.seat, mime_type.clone(), fd)
+                {
                     tracing::debug!(?err, %mime_type, "Clipboard selection request from X11 not satisfied by Wayland client");
                 }
             }
             SelectionTarget::Primary => {
-                if let Err(err) = request_primary_client_selection(
-                    &self.seat,
-                    mime_type.clone(),
-                    fd,
-                ) {
+                if let Err(err) =
+                    request_primary_client_selection(&self.seat, mime_type.clone(), fd)
+                {
                     tracing::debug!(?err, %mime_type, "Primary selection request from X11 not satisfied by Wayland client");
                 }
             }
@@ -477,20 +482,10 @@ impl XwmHandler for CortenCompositor {
         let dh = self.display_handle.clone();
         match selection {
             SelectionTarget::Clipboard => {
-                set_data_device_selection::<Self>(
-                    &dh,
-                    &self.seat,
-                    mime_types,
-                    (),
-                );
+                set_data_device_selection::<Self>(&dh, &self.seat, mime_types, ());
             }
             SelectionTarget::Primary => {
-                set_primary_selection::<Self>(
-                    &dh,
-                    &self.seat,
-                    mime_types,
-                    (),
-                );
+                set_primary_selection::<Self>(&dh, &self.seat, mime_types, ());
             }
         }
     }
@@ -570,7 +565,7 @@ impl CortenCompositor {
 pub fn start_xwayland(
     display: &DisplayHandle,
     loop_handle: &LoopHandle<'static, CortenCompositor>,
-) -> Option< wl_client_guard::XWaylandInstance > {
+) -> Option<wl_client_guard::XWaylandInstance> {
     let (xwayland, client) = match XWayland::spawn(
         display,
         None,

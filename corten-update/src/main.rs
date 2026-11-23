@@ -1,7 +1,7 @@
 use std::time::Duration;
 use tracing::info;
 
-use corten_update::{CortenUpdater, CURRENT_VERSION};
+use corten_update::{CURRENT_VERSION, CortenUpdater};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,7 +44,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match CortenUpdater::check_for_updates().await {
                 Ok(info) => {
                     if !info.has_update && !args.iter().any(|a| a == "--force") {
-                        println!("✓ Sisteminiz zaten en son sürümde ({}).", info.current_version);
+                        println!(
+                            "✓ Sisteminiz zaten en son sürümde ({}).",
+                            info.current_version
+                        );
                         println!("Yine de yeniden kurmak için: corten-update apply --force");
                         return Ok(());
                     }
@@ -68,23 +71,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "daemon" | "--daemon" => {
             info!("Corten OTA Update Daemon başlatıldı (periyot: 4 saat)...");
             loop {
-                if let Ok(info) = CortenUpdater::check_for_updates().await {
-                    if info.has_update {
-                        info!("Yeni güncelleme tespit edildi: {}", info.latest_version);
-                        let _ = std::process::Command::new("notify-send")
-                            .args([
-                                "-a",
-                                "Corten OTA",
-                                "-i",
-                                "system-software-update",
-                                "Corten Desktop Güncellemesi Mevcut",
-                                &format!(
-                                    "Yeni sürüm ({}) yayınlandı. Güncellemek için Corten Forge'u açın.",
-                                    info.latest_version
-                                ),
-                            ])
-                            .spawn();
-                    }
+                if let Ok(info) = CortenUpdater::check_for_updates().await
+                    && info.has_update
+                {
+                    info!("Yeni güncelleme tespit edildi: {}", info.latest_version);
+                    let _ = std::process::Command::new("notify-send")
+                        .args([
+                            "-a",
+                            "Corten OTA",
+                            "-i",
+                            "system-software-update",
+                            "Corten Desktop Güncellemesi Mevcut",
+                            &format!(
+                                "Yeni sürüm ({}) yayınlandı. Güncellemek için Corten Forge'u açın.",
+                                info.latest_version
+                            ),
+                        ])
+                        .spawn();
                 }
                 // Sleep for 4 hours
                 tokio::time::sleep(Duration::from_secs(4 * 3600)).await;
@@ -106,4 +109,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

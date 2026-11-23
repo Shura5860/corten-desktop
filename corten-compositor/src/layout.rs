@@ -1,8 +1,8 @@
 use corten_config::{LayoutMode, WindowRuleConfig};
 use serde::{Deserialize, Serialize};
 use smithay::desktop::Window;
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
@@ -265,7 +265,11 @@ fn configure_window_geometry_ex(
         let needs_configure = toplevel.with_pending_state(|pending| {
             use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State;
             let is_fs = pending.states.contains(State::Fullscreen);
-            let titlebar_h = if is_fs || !uses_ssd { 0 } else { TITLEBAR_HEIGHT };
+            let titlebar_h = if is_fs || !uses_ssd {
+                0
+            } else {
+                TITLEBAR_HEIGHT
+            };
             let client_h = (rect.size.h - titlebar_h).max(100);
             let new_size = Some((rect.size.w.max(160), client_h).into());
             let mut changed = force_send;
@@ -358,12 +362,11 @@ pub fn is_window_mapped(window: &Window) -> bool {
 
 /// Retrieves the requested minimum dimensions (width, height) of a window.
 pub fn window_min_size(window: &Window) -> (i32, i32) {
-    if let Some(x11) = window.x11_surface() {
-        if let Some(hints) = x11.size_hints() {
-            if let Some(min) = hints.min_size {
-                return (min.0.max(160), min.1.max(100));
-            }
-        }
+    if let Some(x11) = window.x11_surface()
+        && let Some(hints) = x11.size_hints()
+        && let Some(min) = hints.min_size
+    {
+        return (min.0.max(160), min.1.max(100));
     }
     if let Some(toplevel) = window.toplevel() {
         let (min_w, min_h) = with_states(toplevel.wl_surface(), |states| {
@@ -382,15 +385,11 @@ pub fn window_min_size(window: &Window) -> (i32, i32) {
 
 /// Retrieves the requested maximum dimensions `(max_w, max_h)` of a window (`None` = unconstrained).
 pub fn window_max_size(window: &Window) -> (Option<i32>, Option<i32>) {
-    if let Some(x11) = window.x11_surface() {
-        if let Some(hints) = x11.size_hints() {
-            if let Some(max) = hints.max_size {
-                return (
-                    (max.0 > 0).then_some(max.0),
-                    (max.1 > 0).then_some(max.1),
-                );
-            }
-        }
+    if let Some(x11) = window.x11_surface()
+        && let Some(hints) = x11.size_hints()
+        && let Some(max) = hints.max_size
+    {
+        return ((max.0 > 0).then_some(max.0), (max.1 > 0).then_some(max.1));
     }
     if let Some(toplevel) = window.toplevel() {
         let (max_w, max_h) = with_states(toplevel.wl_surface(), |states| {
@@ -400,10 +399,7 @@ pub fn window_max_size(window: &Window) -> (Option<i32>, Option<i32>) {
             let cached = guard.current();
             (cached.max_size.w, cached.max_size.h)
         });
-        return (
-            (max_w > 0).then_some(max_w),
-            (max_h > 0).then_some(max_h),
-        );
+        return ((max_w > 0).then_some(max_w), (max_h > 0).then_some(max_h));
     }
     (None, None)
 }
@@ -415,12 +411,13 @@ pub fn should_auto_float(window: &Window) -> bool {
         if x11.is_popup() || x11.is_transient_for().is_some() {
             return true;
         }
-        if let Some(hints) = x11.size_hints() {
-            if let (Some(min), Some(max)) = (hints.min_size, hints.max_size) {
-                if min.0 > 0 && min.1 > 0 && min == max {
-                    return true;
-                }
-            }
+        if let Some(hints) = x11.size_hints()
+            && let (Some(min), Some(max)) = (hints.min_size, hints.max_size)
+            && min.0 > 0
+            && min.1 > 0
+            && min == max
+        {
+            return true;
         }
     }
     if let Some(toplevel) = window.toplevel() {
@@ -429,10 +426,10 @@ pub fn should_auto_float(window: &Window) -> bool {
                 .data_map
                 .get::<XdgToplevelSurfaceData>()
                 .and_then(|data| data.lock().ok());
-            if let Some(r) = role.as_ref() {
-                if r.parent.is_some() || r.modal {
-                    return true;
-                }
+            if let Some(r) = role.as_ref()
+                && (r.parent.is_some() || r.modal)
+            {
+                return true;
             }
             false
         });
@@ -503,10 +500,7 @@ pub struct WindowRuleMatch {
 
 /// Evaluates user-configured `window_rules` against a window's `(app_id, title)`
 /// and applies smart workspace auto-routing for well-known app classes.
-pub fn evaluate_window_rules_full(
-    window: &Window,
-    rules: &[WindowRuleConfig],
-) -> WindowRuleMatch {
+pub fn evaluate_window_rules_full(window: &Window, rules: &[WindowRuleConfig]) -> WindowRuleMatch {
     let (app_id, title) = window_metadata(window);
     let app_lower = app_id.to_ascii_lowercase();
     let title_lower = title.to_ascii_lowercase();
@@ -574,8 +568,17 @@ pub fn is_window_blur_eligible(window: &Window, rules: &[WindowRuleConfig]) -> b
         return true;
     }
     for term in [
-        "alacritty", "kitty", "foot", "wezterm", "gnome-terminal", "tilix", "urxvt", "xterm",
-        "neovide", "corten-terminal", "terminal",
+        "alacritty",
+        "kitty",
+        "foot",
+        "wezterm",
+        "gnome-terminal",
+        "tilix",
+        "urxvt",
+        "xterm",
+        "neovide",
+        "corten-terminal",
+        "terminal",
     ] {
         if app_lower.contains(term) {
             return true;
@@ -589,7 +592,7 @@ pub fn is_window_blur_eligible(window: &Window, rules: &[WindowRuleConfig]) -> b
 pub enum SplitDirection {
     #[default]
     Horizontal, // Split left/right
-    Vertical,   // Split top/bottom
+    Vertical, // Split top/bottom
 }
 
 impl SplitDirection {
@@ -622,7 +625,9 @@ impl BspNode {
     pub fn contains(&self, window_id: u64) -> bool {
         match self {
             Self::Leaf(id) => *id == window_id,
-            Self::Split { left, right, .. } => left.contains(window_id) || right.contains(window_id),
+            Self::Split { left, right, .. } => {
+                left.contains(window_id) || right.contains(window_id)
+            }
         }
     }
 
@@ -714,7 +719,12 @@ impl BspNode {
             Self::Leaf(id) => {
                 out.insert(*id, rect);
             }
-            Self::Split { dir, ratio, left, right } => {
+            Self::Split {
+                dir,
+                ratio,
+                left,
+                right,
+            } => {
                 let clamped_ratio = ratio.clamp(0.1, 0.9);
                 match dir {
                     SplitDirection::Horizontal => {
@@ -935,10 +945,7 @@ impl LayoutManager {
     /// Toggles the drop-down scratchpad window: if a scratchpad window is currently active/visible
     /// in floating windows, hides it back into the pool; otherwise pops the top scratchpad window
     /// centered at 72% x 68% of `usable_area`.
-    pub fn toggle_scratchpad(
-        &mut self,
-        usable_area: Rectangle<i32, Logical>,
-    ) -> Option<Window> {
+    pub fn toggle_scratchpad(&mut self, usable_area: Rectangle<i32, Logical>) -> Option<Window> {
         // If we have a scratchpad window waiting, bring it up centered as floating
         if let Some(win) = self.scratchpad_windows.pop() {
             let w = ((usable_area.size.w as f32) * 0.72).round() as i32;
@@ -947,7 +954,8 @@ impl LayoutManager {
             let y = usable_area.loc.y + (usable_area.size.h - h) / 2;
             let rect = Rectangle::new(Point::from((x, y)), Size::from((w.max(320), h.max(240))));
             self.floating_windows.push(win.clone());
-            self.floating_geometries.insert(window_stable_id(&win), rect);
+            self.floating_geometries
+                .insert(window_stable_id(&win), rect);
             self.active_floating = Some(win.clone());
             configure_window_geometry(&win, rect);
             return Some(win);
@@ -970,13 +978,16 @@ impl LayoutManager {
         let col_w = ((usable_area.size.w as f64) * self.scroll_column_fraction as f64).max(320.0);
         let step = col_w + self.gap as f64;
         let max_scroll = (self.windows.len().saturating_sub(1) as f64 * step).max(0.0);
-        self.target_scroll_offset_x = (self.target_scroll_offset_x + (dir as f64) * step).clamp(0.0, max_scroll);
-        self.scroll_offset_x = crate::render::step_smooth_scroll(self.scroll_offset_x, self.target_scroll_offset_x);
+        self.target_scroll_offset_x =
+            (self.target_scroll_offset_x + (dir as f64) * step).clamp(0.0, max_scroll);
+        self.scroll_offset_x =
+            crate::render::step_smooth_scroll(self.scroll_offset_x, self.target_scroll_offset_x);
     }
 
     /// Advances smooth horizontal scroll strip animation by one frame.
     pub fn step_scroll_animation(&mut self) {
-        self.scroll_offset_x = crate::render::step_smooth_scroll(self.scroll_offset_x, self.target_scroll_offset_x);
+        self.scroll_offset_x =
+            crate::render::step_smooth_scroll(self.scroll_offset_x, self.target_scroll_offset_x);
     }
 
     /// Cycles column width preset in `LayoutMode::Scrollable`: 33% -> 50% -> 66% -> 100%.
@@ -1123,8 +1134,13 @@ impl LayoutManager {
     ) {
         let dragged_id = window_stable_id(&dragged);
         let target_id = window_stable_id(&target);
-        self.floating_windows.retain(|w| window_stable_id(w) != dragged_id);
-        if !self.windows.iter().any(|w| window_stable_id(w) == dragged_id) {
+        self.floating_windows
+            .retain(|w| window_stable_id(w) != dragged_id);
+        if !self
+            .windows
+            .iter()
+            .any(|w| window_stable_id(w) == dragged_id)
+        {
             self.windows.push(dragged.clone());
         }
         self.sync_bsp_tree();
@@ -1135,8 +1151,16 @@ impl LayoutManager {
                     *tree = BspNode::Split {
                         dir,
                         ratio: 0.5,
-                        left: Box::new(if new_on_left_or_top { BspNode::Leaf(dragged_id) } else { BspNode::Leaf(target_id) }),
-                        right: Box::new(if new_on_left_or_top { BspNode::Leaf(target_id) } else { BspNode::Leaf(dragged_id) }),
+                        left: Box::new(if new_on_left_or_top {
+                            BspNode::Leaf(dragged_id)
+                        } else {
+                            BspNode::Leaf(target_id)
+                        }),
+                        right: Box::new(if new_on_left_or_top {
+                            BspNode::Leaf(target_id)
+                        } else {
+                            BspNode::Leaf(dragged_id)
+                        }),
                     };
                 } else {
                     tree.remove(dragged_id);
@@ -1152,16 +1176,32 @@ impl LayoutManager {
         }
 
         // Reorder self.windows so that dragged is placed right next to target
-        if let Some(dragged_pos) = self.windows.iter().position(|w| window_stable_id(w) == dragged_id) {
+        if let Some(dragged_pos) = self
+            .windows
+            .iter()
+            .position(|w| window_stable_id(w) == dragged_id)
+        {
             let win = self.windows.remove(dragged_pos);
-            let insert_idx = if let Some(target_pos) = self.windows.iter().position(|w| window_stable_id(w) == target_id) {
-                if new_on_left_or_top { target_pos } else { target_pos + 1 }
+            let insert_idx = if let Some(target_pos) = self
+                .windows
+                .iter()
+                .position(|w| window_stable_id(w) == target_id)
+            {
+                if new_on_left_or_top {
+                    target_pos
+                } else {
+                    target_pos + 1
+                }
             } else {
                 self.windows.len()
             };
             self.windows.insert(insert_idx.min(self.windows.len()), win);
         }
-        self.active_index = self.windows.iter().position(|w| window_stable_id(w) == dragged_id).unwrap_or(0);
+        self.active_index = self
+            .windows
+            .iter()
+            .position(|w| window_stable_id(w) == dragged_id)
+            .unwrap_or(0);
     }
 
     /// Add a new window into the layout (auto-detect dialogs as floating)
@@ -1247,23 +1287,22 @@ impl LayoutManager {
 
         let mut rule_match = evaluate_window_rules_full(window, rules);
         let mut session_geo: Option<Rectangle<i32, Logical>> = None;
-        if !app_id.is_empty() {
-            if let Some(pos) = self
+        if !app_id.is_empty()
+            && let Some(pos) = self
                 .pending_session_entries
                 .iter()
                 .position(|e| e.app_id == app_id)
-            {
-                let saved = self.pending_session_entries.remove(pos);
-                if rule_match.workspace.is_none() && (1..=9).contains(&saved.workspace) {
-                    rule_match.workspace = Some(saved.workspace);
-                }
-                if rule_match.floating.is_none() && saved.is_floating {
-                    rule_match.floating = Some(true);
-                    session_geo = Some(Rectangle::new(
-                        Point::from((saved.x, saved.y)),
-                        Size::from((saved.width.max(160), saved.height.max(120))),
-                    ));
-                }
+        {
+            let saved = self.pending_session_entries.remove(pos);
+            if rule_match.workspace.is_none() && (1..=9).contains(&saved.workspace) {
+                rule_match.workspace = Some(saved.workspace);
+            }
+            if rule_match.floating.is_none() && saved.is_floating {
+                rule_match.floating = Some(true);
+                session_geo = Some(Rectangle::new(
+                    Point::from((saved.x, saved.y)),
+                    Size::from((saved.width.max(160), saved.height.max(120))),
+                ));
             }
         }
         let target_float = rule_match.floating.unwrap_or(auto_float);
@@ -1290,9 +1329,10 @@ impl LayoutManager {
             changed = true;
         }
 
-        if let Some(ref dec_mode) = rule_match.decoration_mode {
-            if let Some(toplevel) = window.toplevel() {
-                toplevel.with_pending_state(|tstate| {
+        if let Some(ref dec_mode) = rule_match.decoration_mode
+            && let Some(toplevel) = window.toplevel()
+        {
+            toplevel.with_pending_state(|tstate| {
                     use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
                     tstate.decoration_mode = Some(if dec_mode.eq_ignore_ascii_case("csd") {
                         Mode::ClientSide
@@ -1300,23 +1340,23 @@ impl LayoutManager {
                         Mode::ServerSide
                     });
                 });
-                if toplevel_initial_configure_sent(toplevel) {
-                    toplevel.send_configure();
-                }
+            if toplevel_initial_configure_sent(toplevel) {
+                toplevel.send_configure();
             }
         }
 
-        if target_float && !self.is_floating(window) {
-            if let Some(pos) = self.windows.iter().position(|w| w == window) {
-                let win = self.windows.remove(pos);
-                self.animated_rects.remove(&wid);
-                if self.active_index >= self.windows.len() && !self.windows.is_empty() {
-                    self.active_index = self.windows.len() - 1;
-                }
-                self.floating_windows.push(win.clone());
-                self.active_floating = Some(win);
-                changed = true;
+        if target_float
+            && !self.is_floating(window)
+            && let Some(pos) = self.windows.iter().position(|w| w == window)
+        {
+            let win = self.windows.remove(pos);
+            self.animated_rects.remove(&wid);
+            if self.active_index >= self.windows.len() && !self.windows.is_empty() {
+                self.active_index = self.windows.len() - 1;
             }
+            self.floating_windows.push(win.clone());
+            self.active_floating = Some(win);
+            changed = true;
         }
 
         if let Some(geo) = session_geo {
@@ -1545,10 +1585,10 @@ impl LayoutManager {
 
     /// Currently active window (either floating top or tiled active)
     pub fn active_window(&self) -> Option<&Window> {
-        if let Some(ref fw) = self.active_floating {
-            if self.floating_windows.contains(fw) {
-                return Some(fw);
-            }
+        if let Some(ref fw) = self.active_floating
+            && self.floating_windows.contains(fw)
+        {
+            return Some(fw);
         }
         self.windows.get(self.active_index)
     }
@@ -1574,13 +1614,19 @@ impl LayoutManager {
         }
 
         let current_active = self.active_window().cloned();
-        let current_pos = current_active.as_ref().and_then(|act| {
-            if let Some(pos) = self.windows.iter().position(|w| w == act) {
-                Some(pos)
-            } else {
-                self.floating_windows.iter().position(|w| w == act).map(|p| self.windows.len() + p)
-            }
-        }).unwrap_or(0);
+        let current_pos = current_active
+            .as_ref()
+            .and_then(|act| {
+                if let Some(pos) = self.windows.iter().position(|w| w == act) {
+                    Some(pos)
+                } else {
+                    self.floating_windows
+                        .iter()
+                        .position(|w| w == act)
+                        .map(|p| self.windows.len() + p)
+                }
+            })
+            .unwrap_or(0);
 
         let next_pos = (current_pos + 1) % total;
         let target = if next_pos < self.windows.len() {
@@ -1606,13 +1652,19 @@ impl LayoutManager {
         }
 
         let current_active = self.active_window().cloned();
-        let current_pos = current_active.as_ref().and_then(|act| {
-            if let Some(pos) = self.windows.iter().position(|w| w == act) {
-                Some(pos)
-            } else {
-                self.floating_windows.iter().position(|w| w == act).map(|p| self.windows.len() + p)
-            }
-        }).unwrap_or(0);
+        let current_pos = current_active
+            .as_ref()
+            .and_then(|act| {
+                if let Some(pos) = self.windows.iter().position(|w| w == act) {
+                    Some(pos)
+                } else {
+                    self.floating_windows
+                        .iter()
+                        .position(|w| w == act)
+                        .map(|p| self.windows.len() + p)
+                }
+            })
+            .unwrap_or(0);
 
         let prev_pos = if current_pos == 0 {
             total - 1
@@ -1793,15 +1845,18 @@ impl LayoutManager {
             usable_area
         } else {
             self.maximized_windows.remove(&wid);
-            let restored = self.saved_unmaximized_geometries.remove(&wid).unwrap_or_else(|| {
-                Rectangle::new(
-                    Point::from((usable_area.loc.x + 40, usable_area.loc.y + 40)),
-                    Size::from((
-                        (usable_area.size.w - 80).max(400),
-                        (usable_area.size.h - 80).max(300),
-                    )),
-                )
-            });
+            let restored = self
+                .saved_unmaximized_geometries
+                .remove(&wid)
+                .unwrap_or_else(|| {
+                    Rectangle::new(
+                        Point::from((usable_area.loc.x + 40, usable_area.loc.y + 40)),
+                        Size::from((
+                            (usable_area.size.w - 80).max(400),
+                            (usable_area.size.h - 80).max(300),
+                        )),
+                    )
+                });
             self.set_floating_geometry(window, restored);
             restored
         };
@@ -1867,7 +1922,12 @@ impl LayoutManager {
             self.floating_geometries.insert(win_id, rect);
         }
         // Keep all siblings in the same tab group synchronized to this frame geometry
-        if let Some(group) = self.tab_groups.iter().find(|g| g.contains(&win_id)).cloned() {
+        if let Some(group) = self
+            .tab_groups
+            .iter()
+            .find(|g| g.contains(&win_id))
+            .cloned()
+        {
             for sibling_id in group {
                 self.floating_geometries.insert(sibling_id, rect);
             }
@@ -1876,9 +1936,7 @@ impl LayoutManager {
 
     /// Returns true if the window is currently managed in an active multi-window tiled layout.
     pub fn is_window_tiled(&self, window: &Window) -> bool {
-        self.mode != LayoutMode::Floating
-            && !self.is_floating(window)
-            && self.windows.len() > 1
+        self.mode != LayoutMode::Floating && !self.is_floating(window) && self.windows.len() > 1
     }
 
     /// Merges `guest_id` into `host_id`'s tab group (creating a new group if `host_id` is not yet grouped).
@@ -1952,7 +2010,9 @@ impl LayoutManager {
     }
 
     pub fn floating_geometry(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
-        self.floating_geometries.get(&window_stable_id(window)).copied()
+        self.floating_geometries
+            .get(&window_stable_id(window))
+            .copied()
     }
 
     /// Return slice of floating windows on the active workspace.
@@ -2038,19 +2098,19 @@ impl LayoutManager {
         if target_ws == 9 {
             // Window was minimized to workspace 9: restore it to current workspace
             let current_ws = self.workspace;
-            if let Some(list) = self.workspace_windows.get_mut(&9) {
-                if let Some(pos) = list.iter().position(|w| window_stable_id(w) == target_id) {
-                    let w = list.remove(pos);
-                    self.add_window(w.clone());
-                    return Some((current_ws, w));
-                }
+            if let Some(list) = self.workspace_windows.get_mut(&9)
+                && let Some(pos) = list.iter().position(|w| window_stable_id(w) == target_id)
+            {
+                let w = list.remove(pos);
+                self.add_window(w.clone());
+                return Some((current_ws, w));
             }
-            if let Some(list) = self.workspace_floating.get_mut(&9) {
-                if let Some(pos) = list.iter().position(|w| window_stable_id(w) == target_id) {
-                    let w = list.remove(pos);
-                    self.add_floating_window(w.clone());
-                    return Some((current_ws, w));
-                }
+            if let Some(list) = self.workspace_floating.get_mut(&9)
+                && let Some(pos) = list.iter().position(|w| window_stable_id(w) == target_id)
+            {
+                let w = list.remove(pos);
+                self.add_floating_window(w.clone());
+                return Some((current_ws, w));
             }
         }
 
@@ -2293,7 +2353,10 @@ impl LayoutManager {
                         .round()
                         .max(320.0) as i32;
                     let center_x = total_x + (total_w - col_w).max(0) / 2;
-                    Rectangle::new(Point::from((center_x, total_y)), Size::from((col_w, total_h)))
+                    Rectangle::new(
+                        Point::from((center_x, total_y)),
+                        Size::from((col_w, total_h)),
+                    )
                 }
                 LayoutMode::MasterStack | LayoutMode::Dwindle | LayoutMode::Bsp => Rectangle::new(
                     Point::from((total_x, total_y)),
@@ -2316,10 +2379,8 @@ impl LayoutManager {
 
                 for (idx, window) in self.windows.iter().enumerate() {
                     let x = total_x + (idx as i32 * step) - scroll_x;
-                    let rect = Rectangle::new(
-                        Point::from((x, total_y)),
-                        Size::from((col_w, total_h)),
-                    );
+                    let rect =
+                        Rectangle::new(Point::from((x, total_y)), Size::from((col_w, total_h)));
                     results.push((window.clone(), rect));
                 }
                 results
@@ -2338,8 +2399,16 @@ impl LayoutManager {
                         };
                         let max_cascade_x = (total_w.saturating_sub(w) - 64).max(0);
                         let max_cascade_y = (total_h.saturating_sub(h) - 64).max(0);
-                        let cascade_x = if max_cascade_x > 0 { (i as i32 * 52) % max_cascade_x } else { 0 };
-                        let cascade_y = if max_cascade_y > 0 { (i as i32 * 44) % max_cascade_y } else { 0 };
+                        let cascade_x = if max_cascade_x > 0 {
+                            (i as i32 * 52) % max_cascade_x
+                        } else {
+                            0
+                        };
+                        let cascade_y = if max_cascade_y > 0 {
+                            (i as i32 * 44) % max_cascade_y
+                        } else {
+                            0
+                        };
                         Rectangle::new(
                             Point::from((total_x + 36 + cascade_x, total_y + 36 + cascade_y)),
                             Size::from((w, h)),
@@ -2468,7 +2537,10 @@ impl LayoutManager {
                     for window in &self.windows {
                         results.push((
                             window.clone(),
-                            Rectangle::new(Point::from((total_x, total_y)), Size::from((total_w, total_h))),
+                            Rectangle::new(
+                                Point::from((total_x, total_y)),
+                                Size::from((total_w, total_h)),
+                            ),
                         ));
                     }
                 }
@@ -2623,7 +2695,10 @@ impl LayoutManager {
                 let (mut w, mut h) = if win_geo.size.w > 0 && win_geo.size.h > 0 {
                     (win_geo.size.w, win_geo.size.h + 36)
                 } else {
-                    (960.min(usable_area.size.w - 48), 640.min(usable_area.size.h - 48))
+                    (
+                        960.min(usable_area.size.w - 48),
+                        640.min(usable_area.size.h - 48),
+                    )
                 };
                 w = w.min(usable_area.size.w - 48).max(200);
                 h = h.min(usable_area.size.h - 48).max(200);
@@ -2634,8 +2709,16 @@ impl LayoutManager {
                 let max_cascade_y = (usable_area.size.h.saturating_sub(h) - 64).max(0);
                 let step_x = 52;
                 let step_y = 44;
-                let cascade_x = if max_cascade_x > 0 { (i as i32 * step_x) % max_cascade_x } else { 0 };
-                let cascade_y = if max_cascade_y > 0 { (i as i32 * step_y) % max_cascade_y } else { 0 };
+                let cascade_x = if max_cascade_x > 0 {
+                    (i as i32 * step_x) % max_cascade_x
+                } else {
+                    0
+                };
+                let cascade_y = if max_cascade_y > 0 {
+                    (i as i32 * step_y) % max_cascade_y
+                } else {
+                    0
+                };
                 let x = usable_area.loc.x + 36 + cascade_x;
                 let y = usable_area.loc.y + 36 + cascade_y;
                 let initial_rect = Rectangle::new(Point::from((x, y)), Size::from((w, h)));
@@ -2683,11 +2766,11 @@ impl LayoutManager {
         // Raise the active window to the very top of the Z-order:
         // By placing it at the end of animated_results, the compositor's `.rev()` front-to-back
         // iteration processes the active window first, ensuring it is drawn on top of all other windows!
-        if let Some(active) = self.active_window().cloned() {
-            if let Some(pos) = animated_results.iter().position(|(w, _)| w == &active) {
-                let active_item = animated_results.remove(pos);
-                animated_results.push(active_item);
-            }
+        if let Some(active) = self.active_window().cloned()
+            && let Some(pos) = animated_results.iter().position(|(w, _)| w == &active)
+        {
+            let active_item = animated_results.remove(pos);
+            animated_results.push(active_item);
         }
 
         animated_results
@@ -2779,14 +2862,11 @@ pub fn snap_window_to_edges(
 
     for &target in &x_targets {
         let delta_left = target - cand_left;
-        if delta_left.abs() <= snap_distance
-            && best_dx.is_none_or(|b| delta_left.abs() < b.abs())
-        {
+        if delta_left.abs() <= snap_distance && best_dx.is_none_or(|b| delta_left.abs() < b.abs()) {
             best_dx = Some(delta_left);
         }
         let delta_right = target - cand_right;
-        if delta_right.abs() <= snap_distance
-            && best_dx.is_none_or(|b| delta_right.abs() < b.abs())
+        if delta_right.abs() <= snap_distance && best_dx.is_none_or(|b| delta_right.abs() < b.abs())
         {
             best_dx = Some(delta_right);
         }
@@ -2813,9 +2893,7 @@ pub fn snap_window_to_edges(
 
     for &target in &y_targets {
         let delta_top = target - cand_top;
-        if delta_top.abs() <= snap_distance
-            && best_dy.is_none_or(|b| delta_top.abs() < b.abs())
-        {
+        if delta_top.abs() <= snap_distance && best_dy.is_none_or(|b| delta_top.abs() < b.abs()) {
             best_dy = Some(delta_top);
         }
         let delta_bottom = target - cand_bottom;
@@ -2856,9 +2934,7 @@ pub fn snap_window_resize(
     let mut best_dw: Option<i32> = None;
     for &target in &x_targets {
         let delta = target - cand_right;
-        if delta.abs() <= snap_distance
-            && best_dw.is_none_or(|b| delta.abs() < b.abs())
-        {
+        if delta.abs() <= snap_distance && best_dw.is_none_or(|b| delta.abs() < b.abs()) {
             best_dw = Some(delta);
         }
     }
@@ -2880,9 +2956,7 @@ pub fn snap_window_resize(
     let mut best_dh: Option<i32> = None;
     for &target in &y_targets {
         let delta = target - cand_bottom;
-        if delta.abs() <= snap_distance
-            && best_dh.is_none_or(|b| delta.abs() < b.abs())
-        {
+        if delta.abs() <= snap_distance && best_dh.is_none_or(|b| delta.abs() < b.abs()) {
             best_dh = Some(delta);
         }
     }
@@ -3123,11 +3197,7 @@ pub fn hit_test_titlebar_tab(
     let avail_w = max_right - start_x;
     let pill_w = (avail_w / tab_count as f64).clamp(36.0, 96.0);
     let idx = ((rel_x - start_x) / pill_w).floor() as usize;
-    if idx < tab_count {
-        Some(idx)
-    } else {
-        None
-    }
+    if idx < tab_count { Some(idx) } else { None }
 }
 
 /// Detects if a dragged window is hovered over the titlebar center zone of another window
@@ -3145,7 +3215,10 @@ pub fn detect_drag_tab_target(
         let rel_x = cursor.x - rect.loc.x as f64;
         let rel_y = cursor.y - rect.loc.y as f64;
         let w = rect.size.w as f64;
-        if (0.0..=36.0).contains(&rel_y) && rel_x >= (w * 0.16).max(36.0) && rel_x <= (w - 92.0).max(60.0) {
+        if (0.0..=36.0).contains(&rel_y)
+            && rel_x >= (w * 0.16).max(36.0)
+            && rel_x <= (w - 92.0).max(60.0)
+        {
             return Some((win.clone(), *rect));
         }
     }
@@ -3333,9 +3406,15 @@ mod tests {
         let mut manager = LayoutManager::new();
         // Target opacity defaults to 1.0
         let fake_wid = 999;
-        assert_eq!(manager.target_alphas.get(&fake_wid).copied().unwrap_or(1.0), 1.0);
+        assert_eq!(
+            manager.target_alphas.get(&fake_wid).copied().unwrap_or(1.0),
+            1.0
+        );
         manager.target_alphas.insert(fake_wid, 0.85);
-        assert_eq!(manager.target_alphas.get(&fake_wid).copied().unwrap_or(1.0), 0.85);
+        assert_eq!(
+            manager.target_alphas.get(&fake_wid).copied().unwrap_or(1.0),
+            0.85
+        );
     }
 
     #[test]
@@ -3397,7 +3476,10 @@ mod tests {
         let mut manager = LayoutManager::new();
         assert!(manager.merge_windows_into_tab_group(101, 202));
         assert!(manager.merge_windows_into_tab_group(101, 303));
-        assert_eq!(manager.tab_group_for_window(202), Some(&[101, 202, 303][..]));
+        assert_eq!(
+            manager.tab_group_for_window(202),
+            Some(&[101, 202, 303][..])
+        );
 
         let win_rect = Rectangle::new(Point::from((100, 100)), Size::from((800, 600)));
         let tab0 = hit_test_titlebar_tab(win_rect, 3, Point::from((265.0, 118.0)));
@@ -3412,15 +3494,42 @@ mod tests {
     #[test]
     fn test_8_directional_resize_edge_hit_testing() {
         let rect = Rectangle::new(Point::from((100, 100)), Size::from((800, 600)));
-        assert_eq!(hit_test_resize_edge(rect, Point::from((102.0, 102.0)), 8.0), Some(ResizeEdge::TopLeft));
-        assert_eq!(hit_test_resize_edge(rect, Point::from((898.0, 102.0)), 8.0), Some(ResizeEdge::TopRight));
-        assert_eq!(hit_test_resize_edge(rect, Point::from((102.0, 698.0)), 8.0), Some(ResizeEdge::BottomLeft));
-        assert_eq!(hit_test_resize_edge(rect, Point::from((898.0, 698.0)), 8.0), Some(ResizeEdge::BottomRight));
-        assert_eq!(hit_test_resize_edge(rect, Point::from((102.0, 400.0)), 8.0), Some(ResizeEdge::Left));
-        assert_eq!(hit_test_resize_edge(rect, Point::from((898.0, 400.0)), 8.0), Some(ResizeEdge::Right));
-        assert_eq!(hit_test_resize_edge(rect, Point::from((500.0, 102.0)), 8.0), Some(ResizeEdge::Top));
-        assert_eq!(hit_test_resize_edge(rect, Point::from((500.0, 698.0)), 8.0), Some(ResizeEdge::Bottom));
-        assert_eq!(hit_test_resize_edge(rect, Point::from((500.0, 400.0)), 8.0), None);
+        assert_eq!(
+            hit_test_resize_edge(rect, Point::from((102.0, 102.0)), 8.0),
+            Some(ResizeEdge::TopLeft)
+        );
+        assert_eq!(
+            hit_test_resize_edge(rect, Point::from((898.0, 102.0)), 8.0),
+            Some(ResizeEdge::TopRight)
+        );
+        assert_eq!(
+            hit_test_resize_edge(rect, Point::from((102.0, 698.0)), 8.0),
+            Some(ResizeEdge::BottomLeft)
+        );
+        assert_eq!(
+            hit_test_resize_edge(rect, Point::from((898.0, 698.0)), 8.0),
+            Some(ResizeEdge::BottomRight)
+        );
+        assert_eq!(
+            hit_test_resize_edge(rect, Point::from((102.0, 400.0)), 8.0),
+            Some(ResizeEdge::Left)
+        );
+        assert_eq!(
+            hit_test_resize_edge(rect, Point::from((898.0, 400.0)), 8.0),
+            Some(ResizeEdge::Right)
+        );
+        assert_eq!(
+            hit_test_resize_edge(rect, Point::from((500.0, 102.0)), 8.0),
+            Some(ResizeEdge::Top)
+        );
+        assert_eq!(
+            hit_test_resize_edge(rect, Point::from((500.0, 698.0)), 8.0),
+            Some(ResizeEdge::Bottom)
+        );
+        assert_eq!(
+            hit_test_resize_edge(rect, Point::from((500.0, 400.0)), 8.0),
+            None
+        );
     }
 
     #[test]
@@ -3452,7 +3561,7 @@ mod tests {
         assert_eq!(clamped_max.size.w, 700);
         assert_eq!(clamped_max.size.h, 536); // 500 client + 36 SSD titlebar
         assert_eq!(clamped_max.loc.x, 100); // 800 - 700
-        assert_eq!(clamped_max.loc.y, 14);  // 550 - 536
+        assert_eq!(clamped_max.loc.y, 14); // 550 - 536
 
         // Dragging right edge inward past min_size clamps cleanly at min_size
         let clamped_min = compute_resized_rect(

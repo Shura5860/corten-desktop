@@ -31,23 +31,28 @@ impl AppEntry {
             idx += 1;
         }
         while idx < args.len() {
-            if let Some((k, v)) = args[idx].split_once('=') {
-                if !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                    envs.push((k.to_string(), v.to_string()));
-                    idx += 1;
-                    continue;
-                }
+            if let Some((k, v)) = args[idx].split_once('=')
+                && !k.is_empty()
+                && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                envs.push((k.to_string(), v.to_string()));
+                idx += 1;
+                continue;
             }
             break;
         }
 
-        let (program, arguments) = args.get(idx..).and_then(|s| s.split_first()).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty Exec entry")
-        })?;
+        let (program, arguments) =
+            args.get(idx..)
+                .and_then(|s| s.split_first())
+                .ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty Exec entry")
+                })?;
 
         info!("Launching app '{}': {}", self.name, program);
 
-        let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "corten-0".into());
+        let wayland_display =
+            std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "corten-0".into());
         let x11_display = std::env::var("DISPLAY").ok().or_else(|| {
             std::env::var("XDG_RUNTIME_DIR")
                 .ok()
@@ -125,7 +130,7 @@ fn parse_exec(exec: &str) -> Result<Vec<String>, String> {
             match code {
                 "%" => expanded.push("%".into()),
                 "f" | "F" | "u" | "U" | "d" | "D" | "n" | "N" | "i" | "c" | "k" | "v" | "m" => {
-                    continue
+                    continue;
                 }
                 _ => return Err(format!("unsupported desktop-entry field code: %{code}")),
             }
@@ -142,7 +147,11 @@ fn convert_svg_to_png(svg_path: &std::path::Path, out_size: u32) -> Option<PathB
 
     let cache_dir = directories::BaseDirs::new()
         .map(|b| b.cache_dir().join("corten").join("icons"))
-        .or_else(|| std::env::var("XDG_RUNTIME_DIR").ok().map(|d| PathBuf::from(d).join("corten_icon_cache")))
+        .or_else(|| {
+            std::env::var("XDG_RUNTIME_DIR")
+                .ok()
+                .map(|d| PathBuf::from(d).join("corten_icon_cache"))
+        })
         .unwrap_or_else(|| PathBuf::from("/tmp/corten_icon_cache"));
     let _ = std::fs::create_dir_all(&cache_dir);
 
@@ -150,17 +159,23 @@ fn convert_svg_to_png(svg_path: &std::path::Path, out_size: u32) -> Option<PathB
     let mut hasher = DefaultHasher::new();
     svg_path.hash(&mut hasher);
     let path_hash = hasher.finish();
-    let out_file = cache_dir.join(format!("{}_{:08x}_{}x{}.png", file_stem, path_hash as u32, out_size, out_size));
+    let out_file = cache_dir.join(format!(
+        "{}_{:08x}_{}x{}.png",
+        file_stem, path_hash as u32, out_size, out_size
+    ));
     if out_file.exists() {
         return Some(out_file);
     }
 
     let status = std::process::Command::new("rsvg-convert")
         .args([
-            "-w", &out_size.to_string(),
-            "-h", &out_size.to_string(),
+            "-w",
+            &out_size.to_string(),
+            "-h",
+            &out_size.to_string(),
             svg_path.to_str()?,
-            "-o", out_file.to_str()?,
+            "-o",
+            out_file.to_str()?,
         ])
         .status()
         .ok();
@@ -179,7 +194,11 @@ fn convert_svg_to_png(svg_path: &std::path::Path, out_size: u32) -> Option<PathB
 /// Pure-Rust SVG icon fallback rasterizer when `rsvg-convert` is not installed:
 /// extracts the primary hex fill/stroke color from the SVG XML and writes a valid
 /// uncompressed/zlib PNG badge so SVG desktop icons still render without external binaries.
-pub fn rasterize_svg_pure_rust(svg_path: &std::path::Path, out_file: &std::path::Path, out_size: u32) -> bool {
+pub fn rasterize_svg_pure_rust(
+    svg_path: &std::path::Path,
+    out_file: &std::path::Path,
+    out_size: u32,
+) -> bool {
     let Ok(svg_text) = std::fs::read_to_string(svg_path) else {
         return false;
     };
@@ -190,17 +209,19 @@ pub fn rasterize_svg_pure_rust(svg_path: &std::path::Path, out_file: &std::path:
 
 pub fn extract_svg_accent_color(svg_text: &str) -> (u8, u8, u8) {
     for chunk in svg_text.split('#').skip(1) {
-        let hex: String = chunk.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
-        if hex.len() == 6 {
-            if let (Ok(r), Ok(g), Ok(b)) = (
+        let hex: String = chunk
+            .chars()
+            .take_while(|c| c.is_ascii_hexdigit())
+            .collect();
+        if hex.len() == 6
+            && let (Ok(r), Ok(g), Ok(b)) = (
                 u8::from_str_radix(&hex[0..2], 16),
                 u8::from_str_radix(&hex[2..4], 16),
                 u8::from_str_radix(&hex[4..6], 16),
-            ) {
-                if (r as u16 + g as u16 + b as u16) > 45 {
-                    return (r, g, b);
-                }
-            }
+            )
+            && (r as u16 + g as u16 + b as u16) > 45
+        {
+            return (r, g, b);
         }
     }
     (217, 107, 67)
@@ -301,22 +322,27 @@ pub fn resolve_desktop_icon(icon_name: Option<&str>, name: &str, exec: &str) -> 
     result
 }
 
-fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str) -> Option<PathBuf> {
+fn resolve_desktop_icon_uncached(
+    icon_name: Option<&str>,
+    name: &str,
+    exec: &str,
+) -> Option<PathBuf> {
     // 1. Direct path check
-    if let Some(ic) = icon_name {
-        if ic.starts_with('/') {
-            let p = PathBuf::from(ic);
-            if p.exists() {
-                if ic.ends_with(".svg") {
-                    return convert_svg_to_png(&p, 64);
-                }
-                return Some(p);
+    if let Some(ic) = icon_name
+        && ic.starts_with('/')
+    {
+        let p = PathBuf::from(ic);
+        if p.exists() {
+            if ic.ends_with(".svg") {
+                return convert_svg_to_png(&p, 64);
             }
+            return Some(p);
         }
     }
 
     let raw_icon = icon_name.unwrap_or("").trim();
-    let clean_icon = raw_icon.strip_suffix(".png")
+    let clean_icon = raw_icon
+        .strip_suffix(".png")
         .or_else(|| raw_icon.strip_suffix(".svg"))
         .unwrap_or(raw_icon);
 
@@ -324,10 +350,22 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
     if !clean_icon.is_empty() {
         let home = std::env::var("HOME").unwrap_or_default();
         let flatpak_candidates = [
-            format!("{}/.local/share/flatpak/exports/share/icons/hicolor/128x128/apps/{}.png", home, clean_icon),
-            format!("{}/.local/share/flatpak/exports/share/icons/hicolor/64x64/apps/{}.png", home, clean_icon),
-            format!("/var/lib/flatpak/exports/share/icons/hicolor/128x128/apps/{}.png", clean_icon),
-            format!("/var/lib/flatpak/exports/share/icons/hicolor/64x64/apps/{}.png", clean_icon),
+            format!(
+                "{}/.local/share/flatpak/exports/share/icons/hicolor/128x128/apps/{}.png",
+                home, clean_icon
+            ),
+            format!(
+                "{}/.local/share/flatpak/exports/share/icons/hicolor/64x64/apps/{}.png",
+                home, clean_icon
+            ),
+            format!(
+                "/var/lib/flatpak/exports/share/icons/hicolor/128x128/apps/{}.png",
+                clean_icon
+            ),
+            format!(
+                "/var/lib/flatpak/exports/share/icons/hicolor/64x64/apps/{}.png",
+                clean_icon
+            ),
             format!("{}/.cache/corten-forge/icons/{}.img", home, clean_icon),
         ];
         for fp in &flatpak_candidates {
@@ -473,7 +511,10 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
             "/usr/share/icons/breeze/apps/48/internet-web-browser.svg",
             "/usr/share/icons/oxygen/base/64x64/apps/internet-web-browser.png",
         ]
-    } else if combined.contains("system-monitor") || combined.contains("htop") || combined.contains("monitor") {
+    } else if combined.contains("system-monitor")
+        || combined.contains("htop")
+        || combined.contains("monitor")
+    {
         &[
             "assets/icons/hicolor/64x64/apps/corten-monitor.png",
             "assets/icons/hicolor/48x48/apps/corten-monitor.png",
@@ -531,16 +572,16 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
 
             // SVG check with auto rasterization
             let s1 = PathBuf::from(format!("{}/{}.svg", base, clean_icon));
-            if s1.exists() {
-                if let Some(png) = convert_svg_to_png(&s1, 64) {
-                    return Some(png);
-                }
+            if s1.exists()
+                && let Some(png) = convert_svg_to_png(&s1, 64)
+            {
+                return Some(png);
             }
             let s2 = PathBuf::from(format!("{}/{}.svg", base, lower_icon));
-            if s2.exists() {
-                if let Some(png) = convert_svg_to_png(&s2, 64) {
-                    return Some(png);
-                }
+            if s2.exists()
+                && let Some(png) = convert_svg_to_png(&s2, 64)
+            {
+                return Some(png);
             }
 
             // Reverse DNS check e.g. org.gnome.Terminal -> terminal
@@ -550,10 +591,10 @@ fn resolve_desktop_icon_uncached(icon_name: Option<&str>, name: &str, exec: &str
                     return Some(p3);
                 }
                 let s3 = PathBuf::from(format!("{}/{}.svg", base, last_part.to_lowercase()));
-                if s3.exists() {
-                    if let Some(png) = convert_svg_to_png(&s3, 64) {
-                        return Some(png);
-                    }
+                if s3.exists()
+                    && let Some(png) = convert_svg_to_png(&s3, 64)
+                {
+                    return Some(png);
                 }
             }
         }
@@ -645,7 +686,11 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         comment: Some("Corten Wayland yerel GPU-hızlandırmalı rust terminali".to_string()),
         exec: resolve_bin("corten-terminal"),
         icon: Some("corten-terminal".to_string()),
-        icon_path: resolve_desktop_icon(Some("corten-terminal"), "Corten Terminal", "corten-terminal"),
+        icon_path: resolve_desktop_icon(
+            Some("corten-terminal"),
+            "Corten Terminal",
+            "corten-terminal",
+        ),
         terminal: false,
         categories: vec!["System".to_string(), "TerminalEmulator".to_string()],
     });
@@ -660,7 +705,11 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         icon: Some("corten-files".to_string()),
         icon_path: resolve_desktop_icon(Some("corten-files"), "Corten Files", "corten-files"),
         terminal: false,
-        categories: vec!["System".to_string(), "Utility".to_string(), "FileManager".to_string()],
+        categories: vec![
+            "System".to_string(),
+            "Utility".to_string(),
+            "FileManager".to_string(),
+        ],
     });
     seen_ids.insert("corten-files.desktop".to_string());
 
@@ -671,7 +720,11 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         comment: Some("Corten Wayland masaüstü ayarları ve yapılandırması".to_string()),
         exec: resolve_bin("corten-settings"),
         icon: Some("corten-settings".to_string()),
-        icon_path: resolve_desktop_icon(Some("corten-settings"), "Corten Settings", "corten-settings"),
+        icon_path: resolve_desktop_icon(
+            Some("corten-settings"),
+            "Corten Settings",
+            "corten-settings",
+        ),
         terminal: false,
         categories: vec!["System".to_string(), "Settings".to_string()],
     });
@@ -699,7 +752,11 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         icon: Some("corten-welcome".to_string()),
         icon_path: resolve_desktop_icon(Some("corten-welcome"), "Corten Welcome", "corten-welcome"),
         terminal: false,
-        categories: vec!["System".to_string(), "Settings".to_string(), "Documentation".to_string()],
+        categories: vec![
+            "System".to_string(),
+            "Settings".to_string(),
+            "Documentation".to_string(),
+        ],
     });
     seen_ids.insert("corten-welcome.desktop".to_string());
 
@@ -712,7 +769,11 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         icon: Some("corten-ai".to_string()),
         icon_path: resolve_desktop_icon(Some("corten-ai"), "Corten AI", "corten-ai"),
         terminal: false,
-        categories: vec!["System".to_string(), "Utility".to_string(), "AI".to_string()],
+        categories: vec![
+            "System".to_string(),
+            "Utility".to_string(),
+            "AI".to_string(),
+        ],
     });
     seen_ids.insert("corten-ai.desktop".to_string());
 
@@ -725,7 +786,11 @@ pub fn scan_desktop_entries() -> Vec<AppEntry> {
         icon: Some("corten-forge".to_string()),
         icon_path: resolve_desktop_icon(Some("corten-forge"), "Corten Forge", "corten-forge"),
         terminal: false,
-        categories: vec!["System".to_string(), "PackageManager".to_string(), "Settings".to_string()],
+        categories: vec![
+            "System".to_string(),
+            "PackageManager".to_string(),
+            "Settings".to_string(),
+        ],
     });
     seen_ids.insert("corten-forge.desktop".to_string());
 
@@ -826,8 +891,16 @@ mod tests {
 
     #[test]
     fn test_icon_caching() {
-        let first = super::resolve_desktop_icon(Some("utilities-terminal"), "Corten Terminal", "corten-terminal");
-        let second = super::resolve_desktop_icon(Some("utilities-terminal"), "Corten Terminal", "corten-terminal");
+        let first = super::resolve_desktop_icon(
+            Some("utilities-terminal"),
+            "Corten Terminal",
+            "corten-terminal",
+        );
+        let second = super::resolve_desktop_icon(
+            Some("utilities-terminal"),
+            "Corten Terminal",
+            "corten-terminal",
+        );
         assert_eq!(first, second);
     }
 }

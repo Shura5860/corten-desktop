@@ -2,20 +2,20 @@ mod package;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use corten_config::{AppearanceConfig, ConfigManager};
 use corten_theme::iced_styles::card_style;
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, Spacing, ThemeMode, Typography,
 };
 use iced::widget::{
     button, column, container, horizontal_space, image, row, scrollable, text, text_input,
     vertical_space,
 };
-use iced::{event, Alignment, ContentFit, Element, Event, Length, Subscription, Task};
+use iced::{Alignment, ContentFit, Element, Event, Length, Subscription, Task, event};
 
 use package::{PackageItem, PackageManager, PackageSource, PackageState, ProductCategory};
 
@@ -142,13 +142,22 @@ impl CortenForgeApp {
     fn new() -> (Self, Task<Message>) {
         let app = Self::default();
         let init_task = Task::batch(vec![
-            Task::perform(PackageManager::fetch_curated_catalog(), Message::CatalogLoaded),
+            Task::perform(
+                PackageManager::fetch_curated_catalog(),
+                Message::CatalogLoaded,
+            ),
             Task::perform(
                 PackageManager::fetch_flathub_collection(ProductCategory::Featured),
                 Message::CategoryCatalogLoaded,
             ),
-            Task::perform(PackageManager::fetch_installed_flatpaks(), Message::InstalledLoaded),
-            Task::perform(PackageManager::check_flatpak_updates(), Message::UpdatesLoaded),
+            Task::perform(
+                PackageManager::fetch_installed_flatpaks(),
+                Message::InstalledLoaded,
+            ),
+            Task::perform(
+                PackageManager::check_flatpak_updates(),
+                Message::UpdatesLoaded,
+            ),
         ]);
         (app, init_task)
     }
@@ -163,7 +172,10 @@ impl CortenForgeApp {
         if pending.is_empty() {
             Task::none()
         } else {
-            Task::perform(PackageManager::fetch_icons_batch(pending), Message::IconsLoaded)
+            Task::perform(
+                PackageManager::fetch_icons_batch(pending),
+                Message::IconsLoaded,
+            )
         }
     }
 
@@ -238,10 +250,10 @@ impl CortenForgeApp {
                             pkg.icon_url = Some(url.clone());
                         }
                     };
-                    if let Some(ref mut selected) = self.selected_package {
-                        if selected.id == app_id {
-                            apply_details(selected);
-                        }
+                    if let Some(ref mut selected) = self.selected_package
+                        && selected.id == app_id
+                    {
+                        apply_details(selected);
                     }
                     for item in &mut self.catalog {
                         if item.id == app_id {
@@ -303,10 +315,10 @@ impl CortenForgeApp {
                 let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
             }
             Message::PermissionsLoaded(app_id, opt_perm) => {
-                if let Some(ref mut selected) = self.selected_package {
-                    if selected.id == app_id {
-                        selected.permissions = opt_perm.clone();
-                    }
+                if let Some(ref mut selected) = self.selected_package
+                    && selected.id == app_id
+                {
+                    selected.permissions = opt_perm.clone();
                 }
                 for item in &mut self.catalog {
                     if item.id == app_id {
@@ -381,7 +393,8 @@ impl CortenForgeApp {
                 self.is_busy = true;
                 self.busy_message = Some(format!("{} kuruluyor...", pkg.name));
                 self.active_logs.clear();
-                self.active_logs.push(format!(">>> {} kurulumu başlatıldı...\n", pkg.name));
+                self.active_logs
+                    .push(format!(">>> {} kurulumu başlatıldı...\n", pkg.name));
 
                 let (tx, rx) = unbounded_channel();
                 self.log_rx = Some(Arc::new(Mutex::new(rx)));
@@ -396,7 +409,8 @@ impl CortenForgeApp {
                 self.is_busy = true;
                 self.busy_message = Some(format!("{} kaldırılıyor...", pkg.name));
                 self.active_logs.clear();
-                self.active_logs.push(format!(">>> {} kaldırma işlemi başlatıldı...\n", pkg.name));
+                self.active_logs
+                    .push(format!(">>> {} kaldırma işlemi başlatıldı...\n", pkg.name));
 
                 let (tx, rx) = unbounded_channel();
                 self.log_rx = Some(Arc::new(Mutex::new(rx)));
@@ -412,7 +426,10 @@ impl CortenForgeApp {
                     std::env::var("XDG_RUNTIME_DIR")
                         .ok()
                         .and_then(|d| {
-                            std::fs::read_to_string(std::path::PathBuf::from(d).join("corten-x11-display")).ok()
+                            std::fs::read_to_string(
+                                std::path::PathBuf::from(d).join("corten-x11-display"),
+                            )
+                            .ok()
                         })
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
@@ -452,7 +469,8 @@ impl CortenForgeApp {
                 self.log_rx = None;
                 match res {
                     Ok(()) => {
-                        self.active_logs.push("\n>>> İşlem başarıyla tamamlandı.\n".into());
+                        self.active_logs
+                            .push("\n>>> İşlem başarıyla tamamlandı.\n".into());
                     }
                     Err(err) => {
                         self.active_logs.push(format!("\n>>> Hata: {}\n", err));
@@ -465,9 +483,18 @@ impl CortenForgeApp {
                 self.is_busy = true;
                 self.busy_message = Some("Sistem paketleri yenileniyor...".into());
                 return Task::batch(vec![
-                    Task::perform(PackageManager::fetch_curated_catalog(), Message::CatalogLoaded),
-                    Task::perform(PackageManager::fetch_installed_flatpaks(), Message::InstalledLoaded),
-                    Task::perform(PackageManager::check_flatpak_updates(), Message::UpdatesLoaded),
+                    Task::perform(
+                        PackageManager::fetch_curated_catalog(),
+                        Message::CatalogLoaded,
+                    ),
+                    Task::perform(
+                        PackageManager::fetch_installed_flatpaks(),
+                        Message::InstalledLoaded,
+                    ),
+                    Task::perform(
+                        PackageManager::check_flatpak_updates(),
+                        Message::UpdatesLoaded,
+                    ),
                 ]);
             }
             Message::EventTriggered(_) => {}
@@ -530,10 +557,14 @@ impl CortenForgeApp {
             };
             let status_bar = container(
                 row![
-                    text(if self.is_busy { Icon::REFRESH } else { Icon::CHECK })
-                        .font(LUCIDE_FONT)
-                        .size(13.0)
-                        .color(accent),
+                    text(if self.is_busy {
+                        Icon::REFRESH
+                    } else {
+                        Icon::CHECK
+                    })
+                    .font(LUCIDE_FONT)
+                    .size(13.0)
+                    .color(accent),
                     text(status_text)
                         .size(11.5)
                         .color(palette.text_primary.to_iced()),
@@ -559,16 +590,20 @@ impl CortenForgeApp {
 
         let right_pane = right_col;
 
-        container(row![sidebar, right_pane].spacing(Spacing::LG).padding(Spacing::LG))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.06, 0.07, 0.09, 0.98,
-                ))),
-                ..Default::default()
-            })
-            .into()
+        container(
+            row![sidebar, right_pane]
+                .spacing(Spacing::LG)
+                .padding(Spacing::LG),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                0.06, 0.07, 0.09, 0.98,
+            ))),
+            ..Default::default()
+        })
+        .into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -635,7 +670,11 @@ impl CortenForgeApp {
         let nav_updates = Self::sidebar_nav_button(
             Icon::REFRESH,
             "Güncellemeler",
-            if self.updates.is_empty() { None } else { Some(self.updates.len()) },
+            if self.updates.is_empty() {
+                None
+            } else {
+                Some(self.updates.len())
+            },
             matches!(self.current_tab, NavigationTab::Updates),
             palette,
             Message::NavigateTo(NavigationTab::Updates),
@@ -679,7 +718,9 @@ impl CortenForgeApp {
         )
         .padding([8, 10])
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03))),
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                1.0, 1.0, 1.0, 0.03,
+            ))),
             border: iced::Border {
                 color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                 width: 1.0,
@@ -811,9 +852,16 @@ impl CortenForgeApp {
         .on_press(Message::PerformSearch);
 
         // Filter Pills: All | Flatpak | Arch
-        let filter_all = Self::source_filter_chip("Tümü", SourceFilter::All, self.source_filter, palette);
-        let filter_flatpak = Self::source_filter_chip("Flatpak", SourceFilter::FlatpakOnly, self.source_filter, palette);
-        let filter_arch = Self::source_filter_chip("Arch", SourceFilter::ArchOnly, self.source_filter, palette);
+        let filter_all =
+            Self::source_filter_chip("Tümü", SourceFilter::All, self.source_filter, palette);
+        let filter_flatpak = Self::source_filter_chip(
+            "Flatpak",
+            SourceFilter::FlatpakOnly,
+            self.source_filter,
+            palette,
+        );
+        let filter_arch =
+            Self::source_filter_chip("Arch", SourceFilter::ArchOnly, self.source_filter, palette);
 
         let refresh_btn = button(
             row![
@@ -995,7 +1043,9 @@ impl CortenForgeApp {
             .filter(|p| match self.source_filter {
                 SourceFilter::All => true,
                 SourceFilter::FlatpakOnly => p.source == PackageSource::Flatpak,
-                SourceFilter::ArchOnly => p.source == PackageSource::ArchRepo || p.source == PackageSource::Aur,
+                SourceFilter::ArchOnly => {
+                    p.source == PackageSource::ArchRepo || p.source == PackageSource::Aur
+                }
             })
             .cloned()
             .collect();
@@ -1013,7 +1063,11 @@ impl CortenForgeApp {
         scrollable(col).height(Length::Fill).into()
     }
 
-    fn render_category_view<'a>(&'a self, category: ProductCategory, palette: Palette) -> Element<'a, Message> {
+    fn render_category_view<'a>(
+        &'a self,
+        category: ProductCategory,
+        palette: Palette,
+    ) -> Element<'a, Message> {
         let items: Vec<PackageItem> = self
             .catalog
             .iter()
@@ -1043,11 +1097,9 @@ impl CortenForgeApp {
 
         let grid = self.render_package_grid(&items, palette);
 
-        scrollable(
-            column![header, vertical_space().height(Spacing::XS), grid].spacing(Spacing::MD),
-        )
-        .height(Length::Fill)
-        .into()
+        scrollable(column![header, vertical_space().height(Spacing::XS), grid].spacing(Spacing::MD))
+            .height(Length::Fill)
+            .into()
     }
 
     fn render_installed_view<'a>(&'a self, palette: Palette) -> Element<'a, Message> {
@@ -1090,8 +1142,12 @@ impl CortenForgeApp {
                     ]
                     .spacing(2)
                     .width(Length::FillPortion(3)),
-                    container(text(format!("v{}", item.version)).size(11.0).color(palette.text_muted.to_iced()))
-                        .padding([2, 6]),
+                    container(
+                        text(format!("v{}", item.version))
+                            .size(11.0)
+                            .color(palette.text_muted.to_iced())
+                    )
+                    .padding([2, 6]),
                     button(
                         text("Detay / Güvenlik")
                             .size(11.0)
@@ -1143,7 +1199,9 @@ impl CortenForgeApp {
             .padding([8, 12])
             .width(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.025))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.025,
+                ))),
                 border: iced::Border {
                     color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                     width: 1.0,
@@ -1212,7 +1270,9 @@ impl CortenForgeApp {
             )
             .padding([8, 16])
             .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.05,
+                ))),
                 border: iced::Border {
                     radius: iced::border::Radius::from(Radius::SM),
                     ..Default::default()
@@ -1232,11 +1292,8 @@ impl CortenForgeApp {
             );
         } else {
             for line in &self.active_logs {
-                log_lines = log_lines.push(
-                    text(line)
-                        .size(11.0)
-                        .color(palette.text_primary.to_iced()),
-                );
+                log_lines =
+                    log_lines.push(text(line).size(11.0).color(palette.text_primary.to_iced()));
             }
         }
 
@@ -1252,9 +1309,7 @@ impl CortenForgeApp {
                             .size(10.0)
                             .color(palette.warning.to_iced())
                     } else {
-                        text("Boşta")
-                            .size(10.0)
-                            .color(palette.text_muted.to_iced())
+                        text("Boşta").size(10.0).color(palette.text_muted.to_iced())
                     },
                 ]
                 .align_y(Alignment::Center),
@@ -1265,7 +1320,9 @@ impl CortenForgeApp {
         .padding(Spacing::MD)
         .width(Length::Fill)
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(0.03, 0.04, 0.05, 0.98))),
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                0.03, 0.04, 0.05, 0.98,
+            ))),
             border: iced::Border {
                 color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
                 width: 1.0,
@@ -1287,7 +1344,11 @@ impl CortenForgeApp {
         .into()
     }
 
-    fn render_detail_view<'a>(&'a self, pkg: &'a PackageItem, palette: Palette) -> Element<'a, Message> {
+    fn render_detail_view<'a>(
+        &'a self,
+        pkg: &'a PackageItem,
+        palette: Palette,
+    ) -> Element<'a, Message> {
         let pkg_clone = pkg.clone();
         let pkg_clone2 = pkg.clone();
         let is_installed = pkg.state == PackageState::Installed;
@@ -1301,7 +1362,9 @@ impl CortenForgeApp {
         )
         .padding([3, 8])
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(r, g, b, 0.15))),
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                r, g, b, 0.15,
+            ))),
             border: iced::Border {
                 color: iced::Color::from_rgb(r, g, b),
                 width: 1.0,
@@ -1399,7 +1462,9 @@ impl CortenForgeApp {
                 {
                     let clean_license = match pkg.license.as_deref() {
                         None => "Açık Kaynak".to_string(),
-                        Some(l) if l.starts_with("LicenseRef-proprietary") => "Özel Mülk".to_string(),
+                        Some(l) if l.starts_with("LicenseRef-proprietary") => {
+                            "Özel Mülk".to_string()
+                        }
                         Some(l) if l.contains("http://") || l.contains("https://") => {
                             let base = l.split('=').next().unwrap_or(l).trim();
                             if base.is_empty() || base.starts_with("LicenseRef-") {
@@ -1414,11 +1479,17 @@ impl CortenForgeApp {
                         Some(l) => l.to_string(),
                     };
                     let meta_row_1 = row![
-                        text(format!("Sürüm: {}", pkg.version)).size(11.0).color(palette.text_muted.to_iced()),
+                        text(format!("Sürüm: {}", pkg.version))
+                            .size(11.0)
+                            .color(palette.text_muted.to_iced()),
                         text("•").size(11.0).color(palette.text_muted.to_iced()),
-                        text(pkg.developer.as_deref().unwrap_or("Topluluk")).size(11.0).color(palette.text_muted.to_iced()),
+                        text(pkg.developer.as_deref().unwrap_or("Topluluk"))
+                            .size(11.0)
+                            .color(palette.text_muted.to_iced()),
                         text("•").size(11.0).color(palette.text_muted.to_iced()),
-                        text(clean_license).size(11.0).color(palette.text_muted.to_iced()),
+                        text(clean_license)
+                            .size(11.0)
+                            .color(palette.text_muted.to_iced()),
                     ]
                     .spacing(Spacing::XS)
                     .align_y(Alignment::Center);
@@ -1438,8 +1509,13 @@ impl CortenForgeApp {
                         meta_row_2 = meta_row_2.push(
                             button(
                                 row![
-                                    text(Icon::GLOBE).font(LUCIDE_FONT).size(11.0).color(palette.primary.to_iced()),
-                                    text("Web Sitesi").size(11.0).color(palette.primary.to_iced()),
+                                    text(Icon::GLOBE)
+                                        .font(LUCIDE_FONT)
+                                        .size(11.0)
+                                        .color(palette.primary.to_iced()),
+                                    text("Web Sitesi")
+                                        .size(11.0)
+                                        .color(palette.primary.to_iced()),
                                 ]
                                 .spacing(4)
                                 .align_y(Alignment::Center),
@@ -1447,7 +1523,9 @@ impl CortenForgeApp {
                             .padding([2, 6])
                             .style(move |_, status| button::Style {
                                 background: Some(iced::Background::Color(match status {
-                                    button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                                    button::Status::Hovered => {
+                                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+                                    }
                                     _ => iced::Color::TRANSPARENT,
                                 })),
                                 border: iced::Border {
@@ -1474,104 +1552,105 @@ impl CortenForgeApp {
         .align_y(Alignment::Center);
 
         // Screenshot Gallery Section
-        let screenshots_section: Option<Element<'a, Message>> =
-            if let Some(shots) = self.detail_screenshots.get(&pkg.id) {
-                if shots.is_empty() {
-                    None
-                } else {
-                    let active_idx = self.selected_screenshot_idx.min(shots.len() - 1);
-                    let (active_handle, active_caption) = &shots[active_idx];
+        let screenshots_section: Option<Element<'a, Message>> = if let Some(shots) =
+            self.detail_screenshots.get(&pkg.id)
+        {
+            if shots.is_empty() {
+                None
+            } else {
+                let active_idx = self.selected_screenshot_idx.min(shots.len() - 1);
+                let (active_handle, active_caption) = &shots[active_idx];
 
-                    let hero_img = container(
-                        image(active_handle.clone())
-                            .width(Length::Fill)
-                            .height(Length::Fixed(320.0))
-                            .content_fit(ContentFit::Contain),
-                    )
-                    .width(Length::Fill)
-                    .padding(Spacing::SM)
-                    .center_x(Length::Fill)
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba(
-                            0.0, 0.0, 0.0, 0.35,
-                        ))),
-                        border: iced::Border {
-                            color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-                            width: 1.0,
-                            radius: iced::border::Radius::from(Radius::MD),
-                        },
-                        ..Default::default()
-                    });
+                let hero_img = container(
+                    image(active_handle.clone())
+                        .width(Length::Fill)
+                        .height(Length::Fixed(320.0))
+                        .content_fit(ContentFit::Contain),
+                )
+                .width(Length::Fill)
+                .padding(Spacing::SM)
+                .center_x(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.35,
+                    ))),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(Radius::MD),
+                    },
+                    ..Default::default()
+                });
 
-                    let mut gallery_col = column![
-                        row![
-                            text("Ekran Görüntüleri")
-                                .size(Typography::TITLE_SM)
-                                .color(palette.text_primary.to_iced()),
-                            horizontal_space(),
-                            text(format!("{} / {}", active_idx + 1, shots.len()))
-                                .size(11.0)
-                                .color(palette.text_muted.to_iced()),
-                        ]
-                        .align_y(Alignment::Center),
-                        hero_img,
+                let mut gallery_col = column![
+                    row![
+                        text("Ekran Görüntüleri")
+                            .size(Typography::TITLE_SM)
+                            .color(palette.text_primary.to_iced()),
+                        horizontal_space(),
+                        text(format!("{} / {}", active_idx + 1, shots.len()))
+                            .size(11.0)
+                            .color(palette.text_muted.to_iced()),
                     ]
-                    .spacing(Spacing::SM);
+                    .align_y(Alignment::Center),
+                    hero_img,
+                ]
+                .spacing(Spacing::SM);
 
-                    if let Some(cap) = active_caption {
-                        gallery_col = gallery_col.push(
-                            text(cap.clone())
-                                .size(Typography::BODY_SM)
-                                .color(palette.text_muted.to_iced()),
-                        );
-                    }
-
-                    if shots.len() > 1 {
-                        let mut thumbs = row![].spacing(Spacing::SM).align_y(Alignment::Center);
-                        for (idx, (handle, _)) in shots.iter().enumerate() {
-                            let is_sel = idx == active_idx;
-                            let thumb_btn = button(
-                                container(
-                                    image(handle.clone())
-                                        .width(Length::Fixed(112.0))
-                                        .height(Length::Fixed(66.0))
-                                        .content_fit(ContentFit::Cover),
-                                )
-                                .padding(2)
-                                .style(move |_| container::Style {
-                                    background: Some(iced::Background::Color(
-                                        iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-                                    )),
-                                    border: iced::Border {
-                                        color: if is_sel {
-                                            palette.primary.to_iced()
-                                        } else {
-                                            iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10)
-                                        },
-                                        width: if is_sel { 2.0 } else { 1.0 },
-                                        radius: iced::border::Radius::from(Radius::SM),
-                                    },
-                                    ..Default::default()
-                                }),
-                            )
-                            .padding(0)
-                            .style(|_, _| button::Style::default())
-                            .on_press(Message::SelectScreenshot(idx));
-                            thumbs = thumbs.push(thumb_btn);
-                        }
-                        gallery_col = gallery_col.push(thumbs);
-                    }
-
-                    Some(
-                        container(gallery_col)
-                            .padding(Spacing::MD)
-                            .width(Length::Fill)
-                            .style(move |_| card_style(palette))
-                            .into(),
-                    )
+                if let Some(cap) = active_caption {
+                    gallery_col = gallery_col.push(
+                        text(cap.clone())
+                            .size(Typography::BODY_SM)
+                            .color(palette.text_muted.to_iced()),
+                    );
                 }
-            } else if self.detail_loading && pkg.source == PackageSource::Flatpak {
+
+                if shots.len() > 1 {
+                    let mut thumbs = row![].spacing(Spacing::SM).align_y(Alignment::Center);
+                    for (idx, (handle, _)) in shots.iter().enumerate() {
+                        let is_sel = idx == active_idx;
+                        let thumb_btn = button(
+                            container(
+                                image(handle.clone())
+                                    .width(Length::Fixed(112.0))
+                                    .height(Length::Fixed(66.0))
+                                    .content_fit(ContentFit::Cover),
+                            )
+                            .padding(2)
+                            .style(move |_| container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                    0.0, 0.0, 0.0, 0.35,
+                                ))),
+                                border: iced::Border {
+                                    color: if is_sel {
+                                        palette.primary.to_iced()
+                                    } else {
+                                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10)
+                                    },
+                                    width: if is_sel { 2.0 } else { 1.0 },
+                                    radius: iced::border::Radius::from(Radius::SM),
+                                },
+                                ..Default::default()
+                            }),
+                        )
+                        .padding(0)
+                        .style(|_, _| button::Style::default())
+                        .on_press(Message::SelectScreenshot(idx));
+                        thumbs = thumbs.push(thumb_btn);
+                    }
+                    gallery_col = gallery_col.push(thumbs);
+                }
+
                 Some(
+                    container(gallery_col)
+                        .padding(Spacing::MD)
+                        .width(Length::Fill)
+                        .style(move |_| card_style(palette))
+                        .into(),
+                )
+            }
+        } else if self.detail_loading && pkg.source == PackageSource::Flatpak {
+            Some(
                     container(
                         row![
                             text(Icon::CAMERA)
@@ -1590,9 +1669,9 @@ impl CortenForgeApp {
                     .style(move |_| card_style(palette))
                     .into(),
                 )
-            } else {
-                None
-            };
+        } else {
+            None
+        };
 
         // Security / Sandbox Röntgen Card
         let security_card = if let Some(ref perm) = pkg.permissions {
@@ -1611,7 +1690,9 @@ impl CortenForgeApp {
             )
             .padding([3, 8])
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.05,
+                ))),
                 border: iced::Border {
                     radius: iced::border::Radius::from(Radius::SM),
                     ..Default::default()
@@ -1622,23 +1703,33 @@ impl CortenForgeApp {
             let mut fs_chips = row![].spacing(Spacing::XS);
             if perm.filesystems.is_empty() {
                 fs_chips = fs_chips.push(
-                    container(text("Tamamen İzole (Dosya erişimi yok)").size(10.5).color(palette.success.to_iced()))
-                        .padding([2, 6])
-                        .style(|_| container::Style::default()),
+                    container(
+                        text("Tamamen İzole (Dosya erişimi yok)")
+                            .size(10.5)
+                            .color(palette.success.to_iced()),
+                    )
+                    .padding([2, 6])
+                    .style(|_| container::Style::default()),
                 );
             } else {
                 for fs in &perm.filesystems {
                     fs_chips = fs_chips.push(
-                        container(text(fs.clone()).size(10.5).color(palette.text_primary.to_iced()))
-                            .padding([2, 6])
-                            .style(move |_| container::Style {
-                                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06))),
-                                border: iced::Border {
-                                    radius: iced::border::Radius::from(Radius::SM),
-                                    ..Default::default()
-                                },
+                        container(
+                            text(fs.clone())
+                                .size(10.5)
+                                .color(palette.text_primary.to_iced()),
+                        )
+                        .padding([2, 6])
+                        .style(move |_| container::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                                1.0, 1.0, 1.0, 0.06,
+                            ))),
+                            border: iced::Border {
+                                radius: iced::border::Radius::from(Radius::SM),
                                 ..Default::default()
-                            }),
+                            },
+                            ..Default::default()
+                        }),
                     );
                 }
             }
@@ -1687,7 +1778,9 @@ impl CortenForgeApp {
             .padding(Spacing::MD)
             .width(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.03,
+                ))),
                 border: iced::Border {
                     color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
                     width: 1.0,
@@ -1742,12 +1835,14 @@ impl CortenForgeApp {
         }
         detail_col = detail_col.push(desc_section).push(security_card);
 
-        scrollable(detail_col)
-            .height(Length::Fill)
-            .into()
+        scrollable(detail_col).height(Length::Fill).into()
     }
 
-    fn render_package_grid<'a>(&'a self, items: &[PackageItem], palette: Palette) -> Element<'a, Message> {
+    fn render_package_grid<'a>(
+        &'a self,
+        items: &[PackageItem],
+        palette: Palette,
+    ) -> Element<'a, Message> {
         let mut col = column![].spacing(Spacing::MD);
         let mut row_chunk = row![].spacing(Spacing::MD);
         let mut in_row = 0;
@@ -1771,7 +1866,11 @@ impl CortenForgeApp {
         col.into()
     }
 
-    fn render_package_card<'a>(&'a self, item: &PackageItem, palette: Palette) -> Element<'a, Message> {
+    fn render_package_card<'a>(
+        &'a self,
+        item: &PackageItem,
+        palette: Palette,
+    ) -> Element<'a, Message> {
         let item_clone = item.clone();
         let item_clone2 = item.clone();
         let (r, g, b) = item.source.badge_color();
@@ -1788,7 +1887,9 @@ impl CortenForgeApp {
         )
         .padding([2, 6])
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(r, g, b, 0.15))),
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                r, g, b, 0.15,
+            ))),
             border: iced::Border {
                 color: iced::Color::from_rgb(r, g, b),
                 width: 1.0,
@@ -1800,38 +1901,32 @@ impl CortenForgeApp {
         let is_installed = item.state == PackageState::Installed;
 
         let action_btn = if is_installed {
-            button(
-                text("Kurulu")
-                    .size(11.0)
-                    .color(palette.success.to_iced()),
-            )
-            .padding([4, 10])
-            .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(0.2, 0.8, 0.4, 0.15))),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(0.2, 0.8, 0.4, 0.4),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(Radius::SM),
-                },
-                ..Default::default()
-            })
-            .on_press(Message::OpenPackageDetail(item_clone))
-        } else {
-            button(
-                text("Kur")
-                    .size(11.0)
-                    .color(palette.text_primary.to_iced()),
-            )
-            .padding([4, 12])
-            .style(move |_, _| button::Style {
-                background: Some(iced::Background::Color(palette.primary.to_iced())),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(Radius::SM),
+            button(text("Kurulu").size(11.0).color(palette.success.to_iced()))
+                .padding([4, 10])
+                .style(move |_, _| button::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        0.2, 0.8, 0.4, 0.15,
+                    ))),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(0.2, 0.8, 0.4, 0.4),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(Radius::SM),
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            })
-            .on_press(Message::InstallRequested(item_clone))
+                })
+                .on_press(Message::OpenPackageDetail(item_clone))
+        } else {
+            button(text("Kur").size(11.0).color(palette.text_primary.to_iced()))
+                .padding([4, 12])
+                .style(move |_, _| button::Style {
+                    background: Some(iced::Background::Color(palette.primary.to_iced())),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(Radius::SM),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::InstallRequested(item_clone))
         };
 
         button(
@@ -1868,7 +1963,9 @@ impl CortenForgeApp {
             .padding(Spacing::MD)
             .width(Length::FillPortion(1))
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.03,
+                ))),
                 border: iced::Border {
                     color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                     width: 1.0,
@@ -1950,21 +2047,25 @@ impl CortenForgeApp {
         msg: Message,
     ) -> Element<'a, Message> {
         let badge: Element<'a, Message> = if let Some(count) = badge_count {
-            container(text(count.to_string()).size(9.5).color(palette.text_primary.to_iced()))
-                .padding([1, 6])
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(if is_active {
-                        palette.primary.to_iced()
-                    } else {
-                        iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10)
-                    })),
-                    border: iced::Border {
-                        radius: iced::border::Radius::from(Radius::FULL),
-                        ..Default::default()
-                    },
+            container(
+                text(count.to_string())
+                    .size(9.5)
+                    .color(palette.text_primary.to_iced()),
+            )
+            .padding([1, 6])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(if is_active {
+                    palette.primary.to_iced()
+                } else {
+                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10)
+                })),
+                border: iced::Border {
+                    radius: iced::border::Radius::from(Radius::FULL),
                     ..Default::default()
-                })
-                .into()
+                },
+                ..Default::default()
+            })
+            .into()
         } else {
             horizontal_space().width(0).into()
         };
@@ -1977,13 +2078,11 @@ impl CortenForgeApp {
                     } else {
                         palette.text_muted.to_iced()
                     }),
-                    text(label)
-                        .size(Typography::BODY_SM)
-                        .color(if is_active {
-                            palette.text_primary.to_iced()
-                        } else {
-                            palette.text_muted.to_iced()
-                        }),
+                    text(label).size(Typography::BODY_SM).color(if is_active {
+                        palette.text_primary.to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    }),
                     horizontal_space(),
                     badge,
                 ]
@@ -1996,7 +2095,12 @@ impl CortenForgeApp {
         .width(Length::Fill)
         .style(move |_, status| {
             let bg = if is_active {
-                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.20)
+                iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.20,
+                )
             } else {
                 match status {
                     button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.07),
@@ -2030,18 +2134,19 @@ impl CortenForgeApp {
         button(
             container(
                 row![
-                    text(cat.icon()).font(LUCIDE_FONT).size(12.0).color(if is_active {
-                        palette.primary.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
-                    text(cat.label())
-                        .size(11.5)
+                    text(cat.icon())
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
                         .color(if is_active {
                             palette.primary.to_iced()
                         } else {
                             palette.text_muted.to_iced()
                         }),
+                    text(cat.label()).size(11.5).color(if is_active {
+                        palette.primary.to_iced()
+                    } else {
+                        palette.text_muted.to_iced()
+                    }),
                 ]
                 .spacing(Spacing::XS)
                 .align_y(Alignment::Center),
@@ -2052,7 +2157,12 @@ impl CortenForgeApp {
         .width(Length::Fill)
         .style(move |_, status| {
             let bg = if is_active {
-                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15)
+                iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.15,
+                )
             } else {
                 match status {
                     button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05),
@@ -2080,21 +2190,22 @@ impl CortenForgeApp {
     ) -> Element<'a, Message> {
         let is_selected = filter == current;
         button(
-            container(
-                text(label)
-                    .size(11.0)
-                    .color(if is_selected {
-                        palette.text_primary.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
-            )
+            container(text(label).size(11.0).color(if is_selected {
+                palette.text_primary.to_iced()
+            } else {
+                palette.text_muted.to_iced()
+            }))
             .padding([4, 10]),
         )
         .padding(0)
         .style(move |_, status| {
             let bg = if is_selected {
-                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.22)
+                iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.22,
+                )
             } else {
                 match status {
                     button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
@@ -2140,7 +2251,9 @@ impl CortenForgeApp {
         )
         .padding([4, 8])
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.04))),
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                1.0, 1.0, 1.0, 0.04,
+            ))),
             border: iced::Border {
                 color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                 width: 1.0,

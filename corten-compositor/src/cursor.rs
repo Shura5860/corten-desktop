@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use smithay::input::pointer::CursorIcon;
 use smithay::utils::{Rectangle, Transform};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::info;
-use xcursor::parser::parse_xcursor;
 use xcursor::CursorTheme;
+use xcursor::parser::parse_xcursor;
 
 pub struct LoadedCursor {
     pub buffer: MemoryRenderBuffer,
@@ -107,36 +107,28 @@ impl CursorThemeManager {
         let mut loaded = None;
 
         for &name in names {
-            if let Some(path) = self.theme.load_icon(name) {
-                if let Ok(bytes) = std::fs::read(&path) {
-                    if let Some(images) = parse_xcursor(&bytes) {
-                        if let Some(best) = images
-                            .into_iter()
-                            .min_by_key(|img| (img.size as i32 - self.target_size as i32).abs())
-                        {
-                            let w = best.width as i32;
-                            let h = best.height as i32;
-                            let mut buffer = MemoryRenderBuffer::new(
-                                Fourcc::Argb8888,
-                                (w, h),
-                                1,
-                                Transform::Normal,
-                                None,
-                            );
-                            let draw_res = buffer.render().draw(|buf| {
-                                buf.copy_from_slice(&best.pixels_argb);
-                                Result::<_, ()>::Ok(vec![Rectangle::from_size((w, h).into())])
-                            });
-                            if draw_res.is_ok() {
-                                loaded = Some(Arc::new(LoadedCursor {
-                                    buffer,
-                                    xhot: best.xhot as i32,
-                                    yhot: best.yhot as i32,
-                                }));
-                                break;
-                            }
-                        }
-                    }
+            if let Some(path) = self.theme.load_icon(name)
+                && let Ok(bytes) = std::fs::read(&path)
+                && let Some(images) = parse_xcursor(&bytes)
+                && let Some(best) = images
+                    .into_iter()
+                    .min_by_key(|img| (img.size as i32 - self.target_size as i32).abs())
+            {
+                let w = best.width as i32;
+                let h = best.height as i32;
+                let mut buffer =
+                    MemoryRenderBuffer::new(Fourcc::Argb8888, (w, h), 1, Transform::Normal, None);
+                let draw_res = buffer.render().draw(|buf| {
+                    buf.copy_from_slice(&best.pixels_argb);
+                    Result::<_, ()>::Ok(vec![Rectangle::from_size((w, h).into())])
+                });
+                if draw_res.is_ok() {
+                    loaded = Some(Arc::new(LoadedCursor {
+                        buffer,
+                        xhot: best.xhot as i32,
+                        yhot: best.yhot as i32,
+                    }));
+                    break;
                 }
             }
         }

@@ -63,15 +63,16 @@ pub async fn fetch_weather_report() -> WeatherReport {
         .output()
         .await;
 
-    if let Ok(output) = output {
-        if output.status.success() {
-            if let Ok(json_str) = std::str::from_utf8(&output.stdout) {
-                if let Ok(parsed) = parse_wttr_json(json_str) {
-                    debug!("Successfully fetched live weather data: {}°C", parsed.temp_c);
-                    return parsed;
-                }
-            }
-        }
+    if let Ok(output) = output
+        && output.status.success()
+        && let Ok(json_str) = std::str::from_utf8(&output.stdout)
+        && let Ok(parsed) = parse_wttr_json(json_str)
+    {
+        debug!(
+            "Successfully fetched live weather data: {}°C",
+            parsed.temp_c
+        );
+        return parsed;
     }
 
     // Fallback to robust default report

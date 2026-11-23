@@ -33,32 +33,31 @@ impl MusicService {
             ])
             .output()
             .await
+            && output.status.success()
         {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let parts: Vec<&str> = text.split('|').collect();
-                if parts.len() >= 4 {
-                    let title = parts[0].trim().to_string();
-                    let artist = parts[1].trim().to_string();
-                    let album = parts[2].trim().to_string();
-                    let status = parts[3].trim().to_lowercase();
-                    let is_playing = status == "playing";
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let parts: Vec<&str> = text.split('|').collect();
+            if parts.len() >= 4 {
+                let title = parts[0].trim().to_string();
+                let artist = parts[1].trim().to_string();
+                let album = parts[2].trim().to_string();
+                let status = parts[3].trim().to_lowercase();
+                let is_playing = status == "playing";
 
-                    return MusicTrack {
-                        title: if title.is_empty() {
-                            "Unknown Title".into()
-                        } else {
-                            title
-                        },
-                        artist: if artist.is_empty() {
-                            "Unknown Artist".into()
-                        } else {
-                            artist
-                        },
-                        album,
-                        is_playing,
-                    };
-                }
+                return MusicTrack {
+                    title: if title.is_empty() {
+                        "Unknown Title".into()
+                    } else {
+                        title
+                    },
+                    artist: if artist.is_empty() {
+                        "Unknown Artist".into()
+                    } else {
+                        artist
+                    },
+                    album,
+                    is_playing,
+                };
             }
         }
 

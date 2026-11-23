@@ -4,19 +4,18 @@ use std::path::PathBuf;
 
 use corten_config::{AppearanceConfig, ConfigManager};
 use corten_theme::{
-    Icon, Palette, PatinaVariant, ThemeMode, Typography, LUCIDE_FONT, LUCIDE_FONT_BYTES,
-    NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    ThemeMode, Typography,
 };
 use iced::mouse::Button;
 use iced::widget::{button, canvas, column, container, horizontal_space, image, row, stack, text};
 use iced::{
-    event, keyboard, mouse, Color, Element, Event, Length, Point, Rectangle, Size,
-    Subscription,
+    Color, Element, Event, Length, Point, Rectangle, Size, Subscription, event, keyboard, mouse,
 };
+use iced_layershell::Application;
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use iced_runtime::Task;
 
 #[derive(Debug, Clone, Default)]
@@ -31,18 +30,16 @@ pub fn detect_fullscreen_geometry() -> String {
             let path = entry.path();
             let status_path = path.join("status");
             let modes_path = path.join("modes");
-            if status_path.exists() && modes_path.exists() {
-                if let Ok(status) = std::fs::read_to_string(&status_path) {
-                    if status.trim() == "connected" {
-                        if let Ok(modes) = std::fs::read_to_string(&modes_path) {
-                            if let Some(first_mode) = modes.lines().next() {
-                                let m = first_mode.trim();
-                                if m.contains('x') {
-                                    return format!("0,0 {}\n", m);
-                                }
-                            }
-                        }
-                    }
+            if status_path.exists()
+                && modes_path.exists()
+                && let Ok(status) = std::fs::read_to_string(&status_path)
+                && status.trim() == "connected"
+                && let Ok(modes) = std::fs::read_to_string(&modes_path)
+                && let Some(first_mode) = modes.lines().next()
+            {
+                let m = first_mode.trim();
+                if m.contains('x') {
+                    return format!("0,0 {}\n", m);
                 }
             }
         }
@@ -184,7 +181,11 @@ impl TryInto<LayershellCustomActions> for Message {
 }
 
 pub fn calculate_contain_image_rect(img_size: Size, bounds: Size) -> (Rectangle, f32) {
-    if img_size.width <= 0.0 || img_size.height <= 0.0 || bounds.width <= 0.0 || bounds.height <= 0.0 {
+    if img_size.width <= 0.0
+        || img_size.height <= 0.0
+        || bounds.width <= 0.0
+        || bounds.height <= 0.0
+    {
         return (Rectangle::new(Point::ORIGIN, bounds), 1.0);
     }
     let scale = (bounds.width / img_size.width).min(bounds.height / img_size.height);
@@ -288,24 +289,29 @@ pub fn apply_annotations_and_save(
                 let sy = ((item.start.y - img_rect.y) / scale).clamp(0.0, img_h - 1.0);
                 let ex = ((item.end.x - img_rect.x) / scale).clamp(0.0, img_w - 1.0);
                 let ey = ((item.end.y - img_rect.y) / scale).clamp(0.0, img_h - 1.0);
-                let draw_thick_line = |img: &mut image_crate::DynamicImage, ax: f32, ay: f32, bx: f32, by: f32| {
-                    let dist = ((bx - ax).hypot(by - ay)).max(1.0);
-                    let steps = (dist * 1.5) as u32;
-                    for s in 0..=steps {
-                        let t = s as f32 / steps.max(1) as f32;
-                        let px = (ax + (bx - ax) * t).round() as i32;
-                        let py = (ay + (by - ay) * t).round() as i32;
-                        for dy in -1..=1 {
-                            for dx in -1..=1 {
-                                let xx = px + dx;
-                                let yy = py + dy;
-                                if xx >= 0 && yy >= 0 && (xx as u32) < img.width() && (yy as u32) < img.height() {
-                                    img.put_pixel(xx as u32, yy as u32, accent);
+                let draw_thick_line =
+                    |img: &mut image_crate::DynamicImage, ax: f32, ay: f32, bx: f32, by: f32| {
+                        let dist = ((bx - ax).hypot(by - ay)).max(1.0);
+                        let steps = (dist * 1.5) as u32;
+                        for s in 0..=steps {
+                            let t = s as f32 / steps.max(1) as f32;
+                            let px = (ax + (bx - ax) * t).round() as i32;
+                            let py = (ay + (by - ay) * t).round() as i32;
+                            for dy in -1..=1 {
+                                for dx in -1..=1 {
+                                    let xx = px + dx;
+                                    let yy = py + dy;
+                                    if xx >= 0
+                                        && yy >= 0
+                                        && (xx as u32) < img.width()
+                                        && (yy as u32) < img.height()
+                                    {
+                                        img.put_pixel(xx as u32, yy as u32, accent);
+                                    }
                                 }
                             }
                         }
-                    }
-                };
+                    };
                 draw_thick_line(&mut img, sx, sy, ex, ey);
                 let angle = (ey - sy).atan2(ex - sx);
                 let head_len = (16.0 / scale.max(0.25)).clamp(8.0, 28.0);
@@ -320,7 +326,10 @@ pub fn apply_annotations_and_save(
     }
 
     let p = PathBuf::from(src_path);
-    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("screenshot");
+    let stem = p
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("screenshot");
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("png");
     let parent = p.parent().unwrap_or_else(|| std::path::Path::new("."));
     let target = parent.join(format!("{}_annotated.{}", stem, ext));
@@ -411,42 +420,55 @@ impl Application for CortenSnipperApp {
     fn subscription(&self) -> Subscription<Self::Message> {
         let key_sub = event::listen_with(|event, _status, _window| match event {
             Event::Mouse(mouse::Event::ButtonPressed(Button::Left)) => None,
-            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                match key {
-                    keyboard::Key::Named(keyboard::key::Named::Escape) => Some(Message::Cancel),
-                    keyboard::Key::Character(ref c) if (c == "w" || c == "W") && modifiers.control() => {
-                        Some(Message::ClosePinned)
-                    }
-                    keyboard::Key::Character(ref c) if c == "q" || c == "Q" => {
-                        Some(Message::ClosePinned)
-                    }
-                    keyboard::Key::Character(ref c) if (c == "z" || c == "Z") && modifiers.control() => {
-                        Some(Message::UndoRedaction)
-                    }
-                    keyboard::Key::Character(ref c) if (c == "y" || c == "Y") && modifiers.control() => {
-                        Some(Message::RedoRedaction)
-                    }
-                    keyboard::Key::Character(ref c) if (c == "s" || c == "S") && modifiers.control() => {
-                        Some(Message::SaveRedactedImage)
-                    }
-                    keyboard::Key::Character(ref c) if (c == "c" || c == "C") && modifiers.control() => {
-                        Some(Message::CopyImageToClipboard)
-                    }
-                    keyboard::Key::Character(ref c) if c == "r" || c == "R" => {
-                        Some(Message::ToggleRedactionMode)
-                    }
-                    _ => None,
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => match key {
+                keyboard::Key::Named(keyboard::key::Named::Escape) => Some(Message::Cancel),
+                keyboard::Key::Character(ref c)
+                    if (c == "w" || c == "W") && modifiers.control() =>
+                {
+                    Some(Message::ClosePinned)
                 }
-            }
+                keyboard::Key::Character(ref c) if c == "q" || c == "Q" => {
+                    Some(Message::ClosePinned)
+                }
+                keyboard::Key::Character(ref c)
+                    if (c == "z" || c == "Z") && modifiers.control() =>
+                {
+                    Some(Message::UndoRedaction)
+                }
+                keyboard::Key::Character(ref c)
+                    if (c == "y" || c == "Y") && modifiers.control() =>
+                {
+                    Some(Message::RedoRedaction)
+                }
+                keyboard::Key::Character(ref c)
+                    if (c == "s" || c == "S") && modifiers.control() =>
+                {
+                    Some(Message::SaveRedactedImage)
+                }
+                keyboard::Key::Character(ref c)
+                    if (c == "c" || c == "C") && modifiers.control() =>
+                {
+                    Some(Message::CopyImageToClipboard)
+                }
+                keyboard::Key::Character(ref c) if c == "r" || c == "R" => {
+                    Some(Message::ToggleRedactionMode)
+                }
+                _ => None,
+            },
             _ => None,
         });
 
         let mut subs = vec![key_sub];
         if self.countdown.is_some() {
-            subs.push(iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::CountdownTick));
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(1))
+                    .map(|_| Message::CountdownTick),
+            );
         }
         if self.pinned_image.is_some() {
-            subs.push(iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::PeriodicTick));
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::PeriodicTick),
+            );
         }
 
         Subscription::batch(subs)
@@ -522,19 +544,25 @@ impl Application for CortenSnipperApp {
                 }
             }
             Message::CopyImageToClipboard => {
-                if !self.redactions.is_empty() && self.last_saved_path.is_none() {
-                    if let Some((ref path_str, _)) = self.pinned_image {
-                        let bounds = if self.canvas_size.width > 0.0 && self.canvas_size.height > 0.0 {
-                            self.canvas_size
-                        } else {
-                            Size::new(520.0, 320.0)
-                        };
-                        if let Ok(target) = apply_annotations_and_save(path_str, &self.redactions, bounds) {
-                            self.last_saved_path = Some(target);
-                        }
+                if !self.redactions.is_empty()
+                    && self.last_saved_path.is_none()
+                    && let Some((ref path_str, _)) = self.pinned_image
+                {
+                    let bounds = if self.canvas_size.width > 0.0 && self.canvas_size.height > 0.0 {
+                        self.canvas_size
+                    } else {
+                        Size::new(520.0, 320.0)
+                    };
+                    if let Ok(target) =
+                        apply_annotations_and_save(path_str, &self.redactions, bounds)
+                    {
+                        self.last_saved_path = Some(target);
                     }
                 }
-                let target_path = self.last_saved_path.as_deref().or_else(|| self.pinned_image.as_ref().map(|(p, _)| p.as_str()));
+                let target_path = self
+                    .last_saved_path
+                    .as_deref()
+                    .or_else(|| self.pinned_image.as_ref().map(|(p, _)| p.as_str()));
                 if let Some(path) = target_path {
                     match copy_image_to_clipboard(path) {
                         Ok(()) => {
@@ -722,13 +750,24 @@ impl Application for CortenSnipperApp {
                 horizontal_space(),
                 button(
                     row![
-                        text(Icon::PEN)
-                            .font(LUCIDE_FONT)
-                            .size(11.0)
-                            .color(if self.redaction_mode { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
-                        text(if self.redaction_mode { "Düzenle: Açık" } else { "Çiz & Gizle" })
-                            .size(11.0)
-                            .color(if self.redaction_mode { palette.primary.to_iced() } else { palette.text_muted.to_iced() }),
+                        text(Icon::PEN).font(LUCIDE_FONT).size(11.0).color(
+                            if self.redaction_mode {
+                                palette.primary.to_iced()
+                            } else {
+                                palette.text_muted.to_iced()
+                            }
+                        ),
+                        text(if self.redaction_mode {
+                            "Düzenle: Açık"
+                        } else {
+                            "Çiz & Gizle"
+                        })
+                        .size(11.0)
+                        .color(if self.redaction_mode {
+                            palette.primary.to_iced()
+                        } else {
+                            palette.text_muted.to_iced()
+                        }),
                     ]
                     .spacing(4)
                     .align_y(iced::Alignment::Center),
@@ -736,23 +775,68 @@ impl Application for CortenSnipperApp {
                 .padding([2, 8])
                 .style(move |_, _| button::Style {
                     background: Some(if self.redaction_mode {
-                        Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.25).into()
+                        Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.25,
+                        )
+                        .into()
                     } else {
                         Color::from_rgba(1.0, 1.0, 1.0, 0.06).into()
                     }),
                     border: iced::Border {
                         radius: iced::border::Radius::from(6.0),
                         width: 1.0,
-                        color: if self.redaction_mode { palette.primary.to_iced() } else { Color::TRANSPARENT },
+                        color: if self.redaction_mode {
+                            palette.primary.to_iced()
+                        } else {
+                            Color::TRANSPARENT
+                        },
                     },
                     ..Default::default()
                 })
                 .on_press(Message::ToggleRedactionMode),
-                button(text(Icon::LOCK).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::Redact)),
-                button(text(Icon::DROPLET).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::BlurPixelate)),
-                button(text(Icon::SQUARE).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::RectangleBox)),
-                button(text(Icon::ARROW_UP_RIGHT).font(LUCIDE_FONT).size(12.0).color(palette.text_primary.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::Arrow)),
-                button(text(Icon::PEN).font(LUCIDE_FONT).size(12.0).color(palette.warning.to_iced())).padding([3, 6]).on_press(Message::SelectAnnotationTool(AnnotationTool::Highlight)),
+                button(
+                    text(Icon::LOCK)
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
+                        .color(palette.text_primary.to_iced())
+                )
+                .padding([3, 6])
+                .on_press(Message::SelectAnnotationTool(AnnotationTool::Redact)),
+                button(
+                    text(Icon::DROPLET)
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
+                        .color(palette.text_primary.to_iced())
+                )
+                .padding([3, 6])
+                .on_press(Message::SelectAnnotationTool(AnnotationTool::BlurPixelate)),
+                button(
+                    text(Icon::SQUARE)
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
+                        .color(palette.text_primary.to_iced())
+                )
+                .padding([3, 6])
+                .on_press(Message::SelectAnnotationTool(AnnotationTool::RectangleBox)),
+                button(
+                    text(Icon::ARROW_UP_RIGHT)
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
+                        .color(palette.text_primary.to_iced())
+                )
+                .padding([3, 6])
+                .on_press(Message::SelectAnnotationTool(AnnotationTool::Arrow)),
+                button(
+                    text(Icon::PEN)
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
+                        .color(palette.warning.to_iced())
+                )
+                .padding([3, 6])
+                .on_press(Message::SelectAnnotationTool(AnnotationTool::Highlight)),
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center);
@@ -761,8 +845,13 @@ impl Application for CortenSnipperApp {
                 header = header.push(
                     button(
                         row![
-                            text(Icon::UNDO).font(LUCIDE_FONT).size(11.0).color(palette.text_muted.to_iced()),
-                            text("Geri Al").size(11.0).color(palette.text_muted.to_iced()),
+                            text(Icon::UNDO)
+                                .font(LUCIDE_FONT)
+                                .size(11.0)
+                                .color(palette.text_muted.to_iced()),
+                            text("Geri Al")
+                                .size(11.0)
+                                .color(palette.text_muted.to_iced()),
                         ]
                         .spacing(4)
                         .align_y(iced::Alignment::Center),
@@ -774,7 +863,10 @@ impl Application for CortenSnipperApp {
                 header = header.push(
                     button(
                         row![
-                            text(Icon::SAVE).font(LUCIDE_FONT).size(11.0).color(palette.primary.to_iced()),
+                            text(Icon::SAVE)
+                                .font(LUCIDE_FONT)
+                                .size(11.0)
+                                .color(palette.primary.to_iced()),
                             text("Kaydet").size(11.0).color(palette.primary.to_iced()),
                         ]
                         .spacing(4)
@@ -782,7 +874,15 @@ impl Application for CortenSnipperApp {
                     )
                     .padding([2, 8])
                     .style(move |_, _| button::Style {
-                        background: Some(Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.20).into()),
+                        background: Some(
+                            Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.20,
+                            )
+                            .into(),
+                        ),
                         border: iced::Border {
                             radius: iced::border::Radius::from(6.0),
                             ..Default::default()
@@ -796,8 +896,13 @@ impl Application for CortenSnipperApp {
             header = header.push(
                 button(
                     row![
-                        text(Icon::COPY).font(LUCIDE_FONT).size(11.0).color(palette.text_primary.to_iced()),
-                        text("Kopyala").size(11.0).color(palette.text_primary.to_iced()),
+                        text(Icon::COPY)
+                            .font(LUCIDE_FONT)
+                            .size(11.0)
+                            .color(palette.text_primary.to_iced()),
+                        text("Kopyala")
+                            .size(11.0)
+                            .color(palette.text_primary.to_iced()),
                     ]
                     .spacing(4)
                     .align_y(iced::Alignment::Center),
@@ -815,10 +920,15 @@ impl Application for CortenSnipperApp {
             );
 
             header = header.push(
-                button(text(Icon::X).font(LUCIDE_FONT).size(12.0).color(palette.text_muted.to_iced()))
-                    .padding([2, 6])
-                    .style(|_, _| button::Style::default())
-                    .on_press(Message::ClosePinned),
+                button(
+                    text(Icon::X)
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
+                        .color(palette.text_muted.to_iced()),
+                )
+                .padding([2, 6])
+                .style(|_, _| button::Style::default())
+                .on_press(Message::ClosePinned),
             );
 
             let img_widget = image(handle.clone())
@@ -839,11 +949,7 @@ impl Application for CortenSnipperApp {
 
             let mut body_col = column![header, image_area].spacing(6);
             if let Some(ref msg) = self.status_msg {
-                body_col = body_col.push(
-                    text(msg)
-                        .size(11.0)
-                        .color(palette.primary.to_iced()),
-                );
+                body_col = body_col.push(text(msg).size(11.0).color(palette.primary.to_iced()));
             }
 
             let pinned_box = container(body_col)
@@ -886,28 +992,36 @@ impl Application for CortenSnipperApp {
                     .size(Typography::BODY_SM)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
-                button(text("⏱️ 3s Gecikme").size(11.0).color(palette.primary.to_iced()))
-                    .padding([2, 8])
-                    .style(move |_, _| button::Style {
-                        background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.06).into()),
-                        border: iced::Border {
-                            radius: iced::border::Radius::from(6.0),
-                            ..Default::default()
-                        },
+                button(
+                    text("⏱️ 3s Gecikme")
+                        .size(11.0)
+                        .color(palette.primary.to_iced())
+                )
+                .padding([2, 8])
+                .style(move |_, _| button::Style {
+                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.06).into()),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(6.0),
                         ..Default::default()
-                    })
-                    .on_press(Message::SetDelay(3)),
-                button(text("⏱️ 5s Gecikme").size(11.0).color(palette.primary.to_iced()))
-                    .padding([2, 8])
-                    .style(move |_, _| button::Style {
-                        background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.06).into()),
-                        border: iced::Border {
-                            radius: iced::border::Radius::from(6.0),
-                            ..Default::default()
-                        },
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::SetDelay(3)),
+                button(
+                    text("⏱️ 5s Gecikme")
+                        .size(11.0)
+                        .color(palette.primary.to_iced())
+                )
+                .padding([2, 8])
+                .style(move |_, _| button::Style {
+                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.06).into()),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(6.0),
                         ..Default::default()
-                    })
-                    .on_press(Message::SetDelay(5)),
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::SetDelay(5)),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
@@ -995,12 +1109,22 @@ impl canvas::Program<Message> for SelectionCanvas {
         if let SnipperState::Selecting { start, current } = self.state {
             let line_color = Color::from_rgba(1.0, 1.0, 1.0, 0.35);
             frame.stroke(
-                &canvas::Path::line(Point::new(0.0, current.y), Point::new(bounds.width, current.y)),
-                canvas::Stroke::default().with_color(line_color).with_width(1.0),
+                &canvas::Path::line(
+                    Point::new(0.0, current.y),
+                    Point::new(bounds.width, current.y),
+                ),
+                canvas::Stroke::default()
+                    .with_color(line_color)
+                    .with_width(1.0),
             );
             frame.stroke(
-                &canvas::Path::line(Point::new(current.x, 0.0), Point::new(current.x, bounds.height)),
-                canvas::Stroke::default().with_color(line_color).with_width(1.0),
+                &canvas::Path::line(
+                    Point::new(current.x, 0.0),
+                    Point::new(current.x, bounds.height),
+                ),
+                canvas::Stroke::default()
+                    .with_color(line_color)
+                    .with_width(1.0),
             );
 
             let min_x = start.x.min(current.x);
@@ -1116,7 +1240,10 @@ impl canvas::Program<Message> for RedactionCanvas {
                         Color::from_rgba(0.06, 0.07, 0.09, 0.96),
                     );
                     frame.stroke(
-                        &canvas::Path::rectangle(Point::new(r.x, r.y), Size::new(r.width, r.height)),
+                        &canvas::Path::rectangle(
+                            Point::new(r.x, r.y),
+                            Size::new(r.width, r.height),
+                        ),
                         canvas::Stroke::default()
                             .with_color(self.palette.primary.to_iced())
                             .with_width(1.5),
@@ -1146,7 +1273,10 @@ impl canvas::Program<Message> for RedactionCanvas {
                 }
                 AnnotationTool::RectangleBox => {
                     frame.stroke(
-                        &canvas::Path::rectangle(Point::new(r.x, r.y), Size::new(r.width, r.height)),
+                        &canvas::Path::rectangle(
+                            Point::new(r.x, r.y),
+                            Size::new(r.width, r.height),
+                        ),
                         canvas::Stroke::default()
                             .with_color(self.palette.primary.to_iced())
                             .with_width(2.5),
@@ -1225,7 +1355,8 @@ mod tests {
     #[test]
     fn test_calculate_contain_image_rect_letterbox() {
         // 16:9 image (1920x1080) inside 1:1 window (1000x1000)
-        let (rect, scale) = calculate_contain_image_rect(Size::new(1920.0, 1080.0), Size::new(1000.0, 1000.0));
+        let (rect, scale) =
+            calculate_contain_image_rect(Size::new(1920.0, 1080.0), Size::new(1000.0, 1000.0));
         assert!((rect.x - 0.0).abs() < 1e-3);
         assert!(rect.y > 0.0); // Letterboxing top and bottom
         assert!((rect.width - 1000.0).abs() < 1e-3);
@@ -1235,7 +1366,8 @@ mod tests {
     #[test]
     fn test_calculate_contain_image_rect_pillarbox() {
         // 4:3 image (800x600) inside wide 16:9 window (1600x900)
-        let (rect, scale) = calculate_contain_image_rect(Size::new(800.0, 600.0), Size::new(1600.0, 900.0));
+        let (rect, scale) =
+            calculate_contain_image_rect(Size::new(800.0, 600.0), Size::new(1600.0, 900.0));
         assert!(rect.x > 0.0); // Pillarboxing left and right
         assert!((rect.y - 0.0).abs() < 1e-3);
         assert!((rect.height - 900.0).abs() < 1e-3);

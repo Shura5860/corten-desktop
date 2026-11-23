@@ -12,16 +12,16 @@ use config::{
 use corten_config::ConfigManager;
 use corten_theme::iced_styles::{card_style, primary_button_style, secondary_button_style};
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Transition, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BOLD, NOTO_SANS_BYTES, NOTO_SANS_MEDIUM,
-    NOTO_SANS_SEMIBOLD,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BOLD, NOTO_SANS_BYTES,
+    NOTO_SANS_MEDIUM, NOTO_SANS_SEMIBOLD, Palette, PatinaVariant, Radius, Spacing, ThemeMode,
+    Transition, Typography,
 };
 use iced::widget::{
     button, column, container, horizontal_space, row, scrollable, slider, text, text_input,
     vertical_space,
 };
 use iced::{
-    border, event, keyboard, Alignment, Border, Color, Element, Event, Length, Shadow, Subscription,
+    Alignment, Border, Color, Element, Event, Length, Shadow, Subscription, border, event, keyboard,
 };
 
 pub fn main() -> iced::Result {
@@ -58,20 +58,20 @@ async fn reload_running_services() -> Vec<String> {
     };
 
     // corten-panel is a daemon: reload its config if running
-    if let Ok(proxy) = corten_ipc::PanelControlProxy::new(&connection).await {
-        if let Err(error) = proxy.reload_config().await {
-            errors.push(format!("panel reload: {error}"));
-        }
+    if let Ok(proxy) = corten_ipc::PanelControlProxy::new(&connection).await
+        && let Err(error) = proxy.reload_config().await
+    {
+        errors.push(format!("panel reload: {error}"));
     }
     // corten-launcher is on-demand, but if it has an active daemon/overlay running, notify it
     if let Ok(proxy) = corten_ipc::LauncherControlProxy::new(&connection).await {
         let _ = proxy.reload_config().await;
     }
     // corten-notify is a daemon: reload its config if running
-    if let Ok(proxy) = corten_ipc::NotificationControlProxy::new(&connection).await {
-        if let Err(error) = proxy.reload_config().await {
-            errors.push(format!("notification reload: {error}"));
-        }
+    if let Ok(proxy) = corten_ipc::NotificationControlProxy::new(&connection).await
+        && let Err(error) = proxy.reload_config().await
+    {
+        errors.push(format!("notification reload: {error}"));
     }
     // corten-compositor is the core compositor daemon
     match corten_ipc::CompositorControlProxy::new(&connection).await {
@@ -127,20 +127,42 @@ impl SettingsCategory {
 
     pub fn search_keywords(self) -> &'static str {
         match self {
-            Self::Appearance => "görünüm tema koyu açık antrasit patina bakır pas verdigris titanyum altın duvar kağıdı wallpaper yoğunluk rahat kompakt",
+            Self::Appearance => {
+                "görünüm tema koyu açık antrasit patina bakır pas verdigris titanyum altın duvar kağıdı wallpaper yoğunluk rahat kompakt"
+            }
             Self::Panel => "panel dock rıhtım üst alt yüzen adacık saat ses ağ pil sistem tepsisi",
-            Self::Launcher => "başlatıcı arama spotlight menü dashboard pano clipboard geçmiş super+v",
-            Self::Widgets => "masaüstü bileşenleri araçlar widget müzik görselleştirici ekolayzer sistem izleyici cpu ram hava durumu not defteri",
-            Self::Input => "klavye fare touchpad dokunmatik doğal kaydırma tap to click capslock ctrl esc tr-q us sanal klavye",
-            Self::Displays => "ekranlar monitör çözünürlük yenileme hızı hz ölçek hidpi retina parlaklık gece ışığı night light mavi ışık vrr freesync tearing hdr icc renk uzayı srgb dci-p3",
-            Self::Sound => "ses hoparlör kulaklık mikrofon pipewire ses seviyesi sessiz mute profil",
+            Self::Launcher => {
+                "başlatıcı arama spotlight menü dashboard pano clipboard geçmiş super+v"
+            }
+            Self::Widgets => {
+                "masaüstü bileşenleri araçlar widget müzik görselleştirici ekolayzer sistem izleyici cpu ram hava durumu not defteri"
+            }
+            Self::Input => {
+                "klavye fare touchpad dokunmatik doğal kaydırma tap to click capslock ctrl esc tr-q us sanal klavye"
+            }
+            Self::Displays => {
+                "ekranlar monitör çözünürlük yenileme hızı hz ölçek hidpi retina parlaklık gece ışığı night light mavi ışık vrr freesync tearing hdr icc renk uzayı srgb dci-p3"
+            }
+            Self::Sound => {
+                "ses hoparlör kulaklık mikrofon pipewire ses seviyesi sessiz mute profil"
+            }
             Self::Bluetooth => "bluetooth kablosuz kulaklık cihaz eşleşme bluez",
-            Self::Power => "güç pil batarya enerji tasarrufu dengeli performans uyku ekran kararma upower",
+            Self::Power => {
+                "güç pil batarya enerji tasarrufu dengeli performans uyku ekran kararma upower"
+            }
             Self::Notifications => "bildirimler süre zaman aşımı otomatik kapatma rahatsız etme",
-            Self::Compositor => "pencere yöneticisi döşeme tiling serbest floating master-stack sarmal dwindle bsp monocle boşluk gap kenar",
-            Self::Shortcuts => "klavye kısayolları tuş atamaları super terminal dosya yöneticisi ekran görüntüsü çalışma alanı workspace kilitle",
-            Self::Ai => "yapay zeka corten ai asistan yerel model eco dengeli pro gpu vram oyun modu ollama aura",
-            Self::Accessibility => "erişilebilirlik yüksek karşıtlık kontrast wcag renk körlüğü protanopi döteranopi tritanopi monokrom metin ölçekleme büyük imleç odak çerçevesi ekran okuyucu orca",
+            Self::Compositor => {
+                "pencere yöneticisi döşeme tiling serbest floating master-stack sarmal dwindle bsp monocle boşluk gap kenar"
+            }
+            Self::Shortcuts => {
+                "klavye kısayolları tuş atamaları super terminal dosya yöneticisi ekran görüntüsü çalışma alanı workspace kilitle"
+            }
+            Self::Ai => {
+                "yapay zeka corten ai asistan yerel model eco dengeli pro gpu vram oyun modu ollama aura"
+            }
+            Self::Accessibility => {
+                "erişilebilirlik yüksek karşıtlık kontrast wcag renk körlüğü protanopi döteranopi tritanopi monokrom metin ölçekleme büyük imleç odak çerçevesi ekran okuyucu orca"
+            }
             Self::About => "corten hakkında sürüm sistem mimari wayland smithay rust",
         }
     }
@@ -489,12 +511,12 @@ impl CortenSettingsApp {
                 self.ai_endpoint_reachable = Some(ok);
             }
             Message::SearchChanged(q) => {
-                if !q.trim().is_empty() && !self.category.matches_query(&q) {
-                    if let Some(&first_match) =
+                if !q.trim().is_empty()
+                    && !self.category.matches_query(&q)
+                    && let Some(&first_match) =
                         Self::categories().iter().find(|c| c.matches_query(&q))
-                    {
-                        self.category = first_match;
-                    }
+                {
+                    self.category = first_match;
                 }
                 self.search_query = q;
             }
@@ -945,13 +967,13 @@ impl CortenSettingsApp {
             Message::ExportThemePack => {
                 let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
                 let out_path = std::path::PathBuf::from(home).join("corten_theme_pack.toml");
-                if let Ok(serialized) = toml::to_string_pretty(&self.appearance) {
-                    if std::fs::write(&out_path, serialized).is_ok() {
-                        self.status_message = Some(format!(
-                            "Tema paketi dışa aktarıldı: {}",
-                            out_path.display()
-                        ));
-                    }
+                if let Ok(serialized) = toml::to_string_pretty(&self.appearance)
+                    && std::fs::write(&out_path, serialized).is_ok()
+                {
+                    self.status_message = Some(format!(
+                        "Tema paketi dışa aktarıldı: {}",
+                        out_path.display()
+                    ));
                 }
             }
             Message::ImportThemePack => {
@@ -1074,7 +1096,7 @@ impl CortenSettingsApp {
                 }
 
                 macro_rules! save_config {
-                    ($config_type:ty, $name:literal, $value:expr) => {
+                    ($config_type:ty, $name:literal, $value:expr_2021) => {
                         if let Err(error) = ConfigManager::<$config_type>::load_or_default($name)
                             .and_then(|mut manager| manager.update($value))
                         {
@@ -1216,9 +1238,9 @@ impl CortenSettingsApp {
                 vertical_space().height(Spacing::LG),
                 footer,
             ]
-                .width(Length::Fill)
-                .max_width(720)
-                .spacing(Spacing::MD),
+            .width(Length::Fill)
+            .max_width(720)
+            .spacing(Spacing::MD),
         )
         .width(Length::Fill)
         .center_x(Length::Fill)
@@ -1713,10 +1735,12 @@ impl CortenSettingsApp {
             horizontal_space().width(Length::Shrink).into()
         };
 
-        let mut text_col = column![text(title)
-            .size(Typography::BODY)
-            .font(NOTO_SANS_MEDIUM)
-            .color(palette.text_primary.to_iced()),]
+        let mut text_col = column![
+            text(title)
+                .size(Typography::BODY)
+                .font(NOTO_SANS_MEDIUM)
+                .color(palette.text_primary.to_iced()),
+        ]
         .spacing(2);
 
         if let Some(sub) = subtitle {
@@ -2284,7 +2308,9 @@ impl CortenSettingsApp {
         .on_input(Message::UpdateWallpaperPath)
         .padding([7, 12])
         .width(Length::Fixed(240.0))
-        .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
+        .style(move |_, status| {
+            corten_theme::iced_styles::corten_text_input_style(palette, status)
+        });
 
         let browse_btn = button(
             row![
@@ -2315,7 +2341,9 @@ impl CortenSettingsApp {
         .on_input(Message::UpdateSecondaryWallpaperPath)
         .padding([7, 12])
         .width(Length::Fixed(240.0))
-        .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
+        .style(move |_, status| {
+            corten_theme::iced_styles::corten_text_input_style(palette, status)
+        });
         let wp_secondary_row = Self::settings_row(
             Some(Icon::MONITOR),
             "İkincil Monitör Duvar Kâğıdı",
@@ -2375,15 +2403,27 @@ impl CortenSettingsApp {
                 swatch_dot(palette.warning.to_iced()),
                 button(text("Palet Çıkar").size(Typography::CAPTION))
                     .padding([5, 10])
-                    .style(move |_, status| corten_theme::iced_styles::secondary_button_style(palette, status))
+                    .style(
+                        move |_, status| corten_theme::iced_styles::secondary_button_style(
+                            palette, status
+                        )
+                    )
                     .on_press(Message::ExtractWallpaperPalette),
                 button(text("Dışa Aktar").size(Typography::CAPTION))
                     .padding([5, 10])
-                    .style(move |_, status| corten_theme::iced_styles::secondary_button_style(palette, status))
+                    .style(
+                        move |_, status| corten_theme::iced_styles::secondary_button_style(
+                            palette, status
+                        )
+                    )
                     .on_press(Message::ExportThemePack),
                 button(text("İçe Aktar").size(Typography::CAPTION))
                     .padding([5, 10])
-                    .style(move |_, status| corten_theme::iced_styles::secondary_button_style(palette, status))
+                    .style(
+                        move |_, status| corten_theme::iced_styles::secondary_button_style(
+                            palette, status
+                        )
+                    )
                     .on_press(Message::ImportThemePack),
             ]
             .spacing(Spacing::XS)
@@ -2405,16 +2445,51 @@ impl CortenSettingsApp {
 
         let current_lang = self.appearance.language.to_lowercase();
         let lang_row1 = row![
-            Self::segment_button("Türkçe (TR)", current_lang.starts_with("tr"), Message::SetLanguage("tr".into()), palette),
-            Self::segment_button("English (EN)", current_lang.starts_with("en"), Message::SetLanguage("en".into()), palette),
-            Self::segment_button("Deutsch (DE)", current_lang.starts_with("de"), Message::SetLanguage("de".into()), palette),
-            Self::segment_button("Français (FR)", current_lang.starts_with("fr"), Message::SetLanguage("fr".into()), palette),
+            Self::segment_button(
+                "Türkçe (TR)",
+                current_lang.starts_with("tr"),
+                Message::SetLanguage("tr".into()),
+                palette
+            ),
+            Self::segment_button(
+                "English (EN)",
+                current_lang.starts_with("en"),
+                Message::SetLanguage("en".into()),
+                palette
+            ),
+            Self::segment_button(
+                "Deutsch (DE)",
+                current_lang.starts_with("de"),
+                Message::SetLanguage("de".into()),
+                palette
+            ),
+            Self::segment_button(
+                "Français (FR)",
+                current_lang.starts_with("fr"),
+                Message::SetLanguage("fr".into()),
+                palette
+            ),
         ]
         .spacing(Spacing::XS);
         let lang_row2 = row![
-            Self::segment_button("Español (ES)", current_lang.starts_with("es"), Message::SetLanguage("es".into()), palette),
-            Self::segment_button("Русский (RU)", current_lang.starts_with("ru"), Message::SetLanguage("ru".into()), palette),
-            Self::segment_button("日本語 (JA)", current_lang.starts_with("ja"), Message::SetLanguage("ja".into()), palette),
+            Self::segment_button(
+                "Español (ES)",
+                current_lang.starts_with("es"),
+                Message::SetLanguage("es".into()),
+                palette
+            ),
+            Self::segment_button(
+                "Русский (RU)",
+                current_lang.starts_with("ru"),
+                Message::SetLanguage("ru".into()),
+                palette
+            ),
+            Self::segment_button(
+                "日本語 (JA)",
+                current_lang.starts_with("ja"),
+                Message::SetLanguage("ja".into()),
+                palette
+            ),
         ]
         .spacing(Spacing::XS);
         let lang_card = Self::bento_card(
@@ -3919,7 +3994,9 @@ impl CortenSettingsApp {
         let resolution_input = text_input("Örn. 1920x1080@60Hz", &self.displays.resolution)
             .on_input(Message::SetDisplayResolution)
             .padding([Spacing::SM, Spacing::MD])
-            .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
+            .style(move |_, status| {
+                corten_theme::iced_styles::corten_text_input_style(palette, status)
+            });
 
         let night_light_cb = Self::pill_switch(
             self.displays.night_light,
@@ -4330,7 +4407,9 @@ impl CortenSettingsApp {
         .on_input(Message::SetOutputDevice)
         .width(Length::Fixed(240.0))
         .padding([7, 12])
-        .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
+        .style(move |_, status| {
+            corten_theme::iced_styles::corten_text_input_style(palette, status)
+        });
 
         // Output Group
         let out_vol_row = Self::settings_row(
@@ -4552,12 +4631,20 @@ impl CortenSettingsApp {
                 .on_input(Message::HotspotSsidChanged)
                 .padding([6, 10])
                 .width(Length::Fixed(130.0))
-                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+                .style(
+                    move |_, status| corten_theme::iced_styles::corten_text_input_style(
+                        palette, status
+                    )
+                ),
             text_input("Parola", &self.hotspot_password)
                 .on_input(Message::HotspotPasswordChanged)
                 .padding([6, 10])
                 .width(Length::Fixed(120.0))
-                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+                .style(
+                    move |_, status| corten_theme::iced_styles::corten_text_input_style(
+                        palette, status
+                    )
+                ),
             button(
                 text(if self.hotspot_active {
                     "Hotspot Kapat"
@@ -4579,7 +4666,17 @@ impl CortenSettingsApp {
             for c in 0..9usize {
                 let is_finder = (r < 3 && c < 3) || (r < 3 && c >= 6) || (r >= 6 && c < 3);
                 let bit = if is_finder {
-                    r == 0 || r == 2 || r == 6 || r == 8 || c == 0 || c == 2 || c == 6 || c == 8 || (r == 1 && c == 1) || (r == 1 && c == 7) || (r == 7 && c == 1)
+                    r == 0
+                        || r == 2
+                        || r == 6
+                        || r == 8
+                        || c == 0
+                        || c == 2
+                        || c == 6
+                        || c == 8
+                        || (r == 1 && c == 1)
+                        || (r == 1 && c == 7)
+                        || (r == 7 && c == 1)
                 } else {
                     let b = bytes[(r * 9 + c) % bytes.len().max(1)];
                     ((b >> ((r + c) % 7)) & 1) == 1
@@ -4600,16 +4697,14 @@ impl CortenSettingsApp {
             }
             qr_grid = qr_grid.push(qr_row);
         }
-        let qr_visual = container(qr_grid)
-            .padding(6)
-            .style(|_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::WHITE)),
-                border: Border {
-                    radius: border::Radius::from(6.0),
-                    ..Default::default()
-                },
+        let qr_visual = container(qr_grid).padding(6).style(|_| container::Style {
+            background: Some(iced::Background::Color(iced::Color::WHITE)),
+            border: Border {
+                radius: border::Radius::from(6.0),
                 ..Default::default()
-            });
+            },
+            ..Default::default()
+        });
 
         let mut vpn_col = column![
             Self::setting_item(
@@ -5388,12 +5483,18 @@ impl CortenSettingsApp {
             .on_input(Message::RuleAppIdChanged)
             .padding([6, 10])
             .width(Length::Fixed(180.0))
-            .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+            .style(move |_, status| {
+                corten_theme::iced_styles::corten_text_input_style(palette, status)
+            }),
             text_input("Alan (1-9)", &self.new_rule_workspace)
                 .on_input(Message::RuleWorkspaceChanged)
                 .padding([6, 10])
                 .width(Length::Fixed(70.0))
-                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status)),
+                .style(
+                    move |_, status| corten_theme::iced_styles::corten_text_input_style(
+                        palette, status
+                    )
+                ),
             Self::segment_button(
                 if self.new_rule_floating {
                     "Yüzen"
@@ -5512,7 +5613,9 @@ impl CortenSettingsApp {
                 .padding([6, 10])
                 .size(Typography::BODY_SM)
                 .width(Length::Fixed(140.0))
-                .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status));
+                .style(move |_, status| {
+                    corten_theme::iced_styles::corten_text_input_style(palette, status)
+                });
 
             container(
                 row![
@@ -6368,7 +6471,7 @@ fn next_category_index(current: usize, direction: i32, count: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_category_index, CortenSettingsApp};
+    use super::{CortenSettingsApp, next_category_index};
 
     #[test]
     fn endpoint_host_port_parsing() {

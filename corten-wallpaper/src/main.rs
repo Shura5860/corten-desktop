@@ -4,13 +4,13 @@ use tracing::info;
 
 use ::image as image_crate;
 use corten_config::{AppearanceConfig, ConfigManager};
-use corten_theme::{Icon, Palette, PatinaVariant, ThemeMode, LUCIDE_FONT, LUCIDE_FONT_BYTES};
+use corten_theme::{Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, Palette, PatinaVariant, ThemeMode};
 use iced::widget::{button, column, container, image as iced_image, row, text};
 use iced::{Element, Length, Subscription};
+use iced_layershell::Application;
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use iced_runtime::Task;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -137,12 +137,13 @@ pub fn resolve_wallpapers_for_output(output_name: Option<&str>) -> Vec<PathBuf> 
     // 0. Check AppearanceConfig for user configured wallpaper (or per-monitor secondary wallpaper)
     if let Ok(app_mgr) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
         let cfg = app_mgr.get();
-        if let Some(out) = output_name {
-            if !out.ends_with("-1") && !cfg.secondary_wallpaper_path.trim().is_empty() {
-                let sec_p = PathBuf::from(cfg.secondary_wallpaper_path.trim());
-                if sec_p.exists() && sec_p.is_file() {
-                    return vec![sec_p];
-                }
+        if let Some(out) = output_name
+            && !out.ends_with("-1")
+            && !cfg.secondary_wallpaper_path.trim().is_empty()
+        {
+            let sec_p = PathBuf::from(cfg.secondary_wallpaper_path.trim());
+            if sec_p.exists() && sec_p.is_file() {
+                return vec![sec_p];
             }
         }
         let path_str = cfg.wallpaper_path.trim();
@@ -273,13 +274,17 @@ pub fn extract_ambiance_color(path: &Path) -> Option<(u8, u8, u8, PatinaVariant)
 pub fn sync_ambiance_to_config(path: &Path) {
     let p = path.to_path_buf();
     std::thread::spawn(move || {
-        if let Some((r, g, b, _patina)) = extract_ambiance_color(&p) {
-            if let Ok(mut app_mgr) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
-                let mut cfg = app_mgr.get().clone();
-                cfg.accent_color = format!("#{:02X}{:02X}{:02X}", r, g, b);
-                let _ = app_mgr.update(cfg);
-                info!("Wallpaper Ambiance Synced in background: #{:02X}{:02X}{:02X}", r, g, b);
-            }
+        if let Some((r, g, b, _patina)) = extract_ambiance_color(&p)
+            && let Ok(mut app_mgr) =
+                ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+        {
+            let mut cfg = app_mgr.get().clone();
+            cfg.accent_color = format!("#{:02X}{:02X}{:02X}", r, g, b);
+            let _ = app_mgr.update(cfg);
+            info!(
+                "Wallpaper Ambiance Synced in background: #{:02X}{:02X}{:02X}",
+                r, g, b
+            );
         }
     });
 }
@@ -387,7 +392,9 @@ impl Application for CortenWallpaperApp {
                 }
             }
             Message::ReloadConfig | Message::CheckPeriodic => {
-                if let Ok(app_mgr) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
+                if let Ok(app_mgr) =
+                    ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                {
                     let cfg = app_mgr.get();
                     let mode = match cfg.theme_mode {
                         corten_config::ThemeModeChoice::Light => ThemeMode::Light,
@@ -403,7 +410,10 @@ impl Application for CortenWallpaperApp {
                     } else {
                         Vec::new()
                     };
-                    let path_str = if self.output_name.as_deref().is_some_and(|o| !o.ends_with("-1"))
+                    let path_str = if self
+                        .output_name
+                        .as_deref()
+                        .is_some_and(|o| !o.ends_with("-1"))
                         && !cfg.secondary_wallpaper_path.trim().is_empty()
                     {
                         cfg.secondary_wallpaper_path.trim()
@@ -413,12 +423,17 @@ impl Application for CortenWallpaperApp {
                     if !path_str.is_empty() {
                         let new_path = PathBuf::from(path_str);
                         if new_path.exists() && new_path.is_file() {
-                            let is_different = self.wallpapers.get(self.current_index) != Some(&new_path);
+                            let is_different =
+                                self.wallpapers.get(self.current_index) != Some(&new_path);
                             if is_different {
-                                info!("corten-wallpaper: Crossfading wallpaper to {}", new_path.display());
+                                info!(
+                                    "corten-wallpaper: Crossfading wallpaper to {}",
+                                    new_path.display()
+                                );
                                 self.previous_handle = self.current_handle.take();
                                 self.fade_progress = 0.0;
-                                self.current_handle = Some(iced_image::Handle::from_path(&new_path));
+                                self.current_handle =
+                                    Some(iced_image::Handle::from_path(&new_path));
                                 self.wallpapers = vec![new_path.clone()];
                                 self.current_index = 0;
                                 sync_ambiance_to_config(&new_path);
@@ -448,64 +463,71 @@ impl Application for CortenWallpaperApp {
 
     fn view(&self) -> Element<'_, Self::Message> {
         let palette = self.palette;
-        let icons_overlay: Option<Element<'_, Self::Message>> = if self.desktop_icons_enabled && !self.desktop_icons.is_empty() {
-            let mut grid_row = row![].spacing(14).padding(24);
-            for chunk in self.desktop_icons.chunks(8) {
-                let mut col = column![].spacing(10);
-                for (name, path, is_dir) in chunk {
-                    let icon_char = if *is_dir { Icon::FOLDER } else { Icon::FILE_TEXT };
-                    let icon_color = if *is_dir {
-                        palette.primary.to_iced()
-                    } else {
-                        palette.text_primary.to_iced()
-                    };
-                    let label = if name.chars().count() > 18 {
-                        format!("{}…", name.chars().take(17).collect::<String>())
-                    } else {
-                        name.clone()
-                    };
-                    let target_path = path.clone();
-                    let item_btn = button(
-                        row![
-                            text(icon_char)
-                                .font(LUCIDE_FONT)
-                                .size(15.0)
-                                .color(icon_color),
-                            text(label)
-                                .size(12.0)
-                                .color(palette.text_primary.to_iced()),
-                        ]
-                        .spacing(8)
-                        .align_y(iced::Alignment::Center),
-                    )
-                    .padding([7, 12])
-                    .width(Length::Fixed(185.0))
-                    .style(move |_, status| {
-                        let mut bg = palette.surface.to_iced();
-                        bg.a = if status == button::Status::Hovered { 0.90 } else { 0.76 };
-                        button::Style {
-                            background: Some(iced::Background::Color(bg)),
-                            border: iced::Border {
-                                color: if status == button::Status::Hovered {
-                                    palette.primary.to_iced()
-                                } else {
-                                    palette.border.to_iced()
+        let icons_overlay: Option<Element<'_, Self::Message>> =
+            if self.desktop_icons_enabled && !self.desktop_icons.is_empty() {
+                let mut grid_row = row![].spacing(14).padding(24);
+                for chunk in self.desktop_icons.chunks(8) {
+                    let mut col = column![].spacing(10);
+                    for (name, path, is_dir) in chunk {
+                        let icon_char = if *is_dir {
+                            Icon::FOLDER
+                        } else {
+                            Icon::FILE_TEXT
+                        };
+                        let icon_color = if *is_dir {
+                            palette.primary.to_iced()
+                        } else {
+                            palette.text_primary.to_iced()
+                        };
+                        let label = if name.chars().count() > 18 {
+                            format!("{}…", name.chars().take(17).collect::<String>())
+                        } else {
+                            name.clone()
+                        };
+                        let target_path = path.clone();
+                        let item_btn = button(
+                            row![
+                                text(icon_char)
+                                    .font(LUCIDE_FONT)
+                                    .size(15.0)
+                                    .color(icon_color),
+                                text(label).size(12.0).color(palette.text_primary.to_iced()),
+                            ]
+                            .spacing(8)
+                            .align_y(iced::Alignment::Center),
+                        )
+                        .padding([7, 12])
+                        .width(Length::Fixed(185.0))
+                        .style(move |_, status| {
+                            let mut bg = palette.surface.to_iced();
+                            bg.a = if status == button::Status::Hovered {
+                                0.90
+                            } else {
+                                0.76
+                            };
+                            button::Style {
+                                background: Some(iced::Background::Color(bg)),
+                                border: iced::Border {
+                                    color: if status == button::Status::Hovered {
+                                        palette.primary.to_iced()
+                                    } else {
+                                        palette.border.to_iced()
+                                    },
+                                    width: 1.0,
+                                    radius: iced::border::Radius::from(10.0),
                                 },
-                                width: 1.0,
-                                radius: iced::border::Radius::from(10.0),
-                            },
-                            ..Default::default()
-                        }
-                    })
-                    .on_press(Message::OpenDesktopEntry(target_path));
-                    col = col.push(item_btn);
+                                ..Default::default()
+                            }
+                        })
+                        .on_press(Message::OpenDesktopEntry(target_path));
+                        col = col.push(item_btn);
+                    }
+                    grid_row = grid_row.push(col);
                 }
-                grid_row = grid_row.push(col);
-            }
-            Some(grid_row.into())
-        } else {
-            None
-        };
+                Some(grid_row.into())
+            } else {
+                None
+            };
 
         if self.live_shader_enabled {
             let r = (0.11 + 0.05 * self.shader_phase.sin()).clamp(0.05, 0.25);
@@ -533,7 +555,8 @@ impl Application for CortenWallpaperApp {
                 .content_fit(iced::ContentFit::Cover)
                 .opacity(eased_alpha);
 
-            let bg: Element<'_, Self::Message> = if let Some(ref prev_handle) = self.previous_handle {
+            let bg: Element<'_, Self::Message> = if let Some(ref prev_handle) = self.previous_handle
+            {
                 if self.fade_progress < 1.0 {
                     let prev_img = iced_image(prev_handle.clone())
                         .width(Length::Fill)
@@ -596,45 +619,44 @@ impl Application for CortenWallpaperApp {
 
         let sigusr1_sub = Subscription::run_with_id(
             "wallpaper-sigusr1-stream",
-            futures::stream::unfold(None, |mut sig_opt: Option<tokio::signal::unix::Signal>| async move {
-                loop {
-                    if sig_opt.is_none() {
-                        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()) {
-                            Ok(s) => sig_opt = Some(s),
-                            Err(_) => {
-                                tokio::time::sleep(Duration::from_secs(1)).await;
-                                continue;
+            futures::stream::unfold(
+                None,
+                |mut sig_opt: Option<tokio::signal::unix::Signal>| async move {
+                    loop {
+                        if sig_opt.is_none() {
+                            match tokio::signal::unix::signal(
+                                tokio::signal::unix::SignalKind::user_defined1(),
+                            ) {
+                                Ok(s) => sig_opt = Some(s),
+                                Err(_) => {
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                    continue;
+                                }
                             }
                         }
-                    }
 
-                    if let Some(ref mut sig) = sig_opt {
-                        sig.recv().await;
-                        return Some((Message::ReloadConfig, sig_opt));
+                        if let Some(ref mut sig) = sig_opt {
+                            sig.recv().await;
+                            return Some((Message::ReloadConfig, sig_opt));
+                        }
                     }
-                }
-            }),
+                },
+            ),
         );
         subs.push(sigusr1_sub);
 
         // Zero-CPU idle: rely on SIGUSR1 from corten-settings/corten-files instead of
         // waking up every 5s and forcing a full-screen wgpu/llvmpipe redraw.
         if self.desktop_icons_enabled {
-            subs.push(
-                iced::time::every(Duration::from_secs(15)).map(|_| Message::CheckPeriodic),
-            );
+            subs.push(iced::time::every(Duration::from_secs(15)).map(|_| Message::CheckPeriodic));
         }
 
         if self.fade_progress < 1.0 {
-            subs.push(
-                iced::time::every(Duration::from_millis(16)).map(|_| Message::FadeTick),
-            );
+            subs.push(iced::time::every(Duration::from_millis(16)).map(|_| Message::FadeTick));
         }
 
         if self.live_shader_enabled {
-            subs.push(
-                iced::time::every(Duration::from_millis(80)).map(|_| Message::ShaderTick),
-            );
+            subs.push(iced::time::every(Duration::from_millis(80)).map(|_| Message::ShaderTick));
         }
 
         Subscription::batch(subs)

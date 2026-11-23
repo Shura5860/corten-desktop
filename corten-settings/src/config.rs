@@ -1,8 +1,8 @@
-use corten_config::{KeybindingsConfig, LayoutMode, WindowRuleConfig};
 pub use corten_config::{
-    AccessibilityConfig, AiSettingsConfig, AppearanceConfig, ColorFilterChoice, DisplaySettingsConfig, InputSettingsConfig, PowerSettingsConfig,
-    ThemeModeChoice,
+    AccessibilityConfig, AiSettingsConfig, AppearanceConfig, ColorFilterChoice,
+    DisplaySettingsConfig, InputSettingsConfig, PowerSettingsConfig, ThemeModeChoice,
 };
+use corten_config::{KeybindingsConfig, LayoutMode, WindowRuleConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

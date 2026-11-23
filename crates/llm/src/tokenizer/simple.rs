@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::gguf::GgufValue;
+use std::collections::HashMap;
 
 pub struct SimpleTokenizer {
     pub id_to_token: HashMap<u32, String>,
@@ -16,13 +16,17 @@ impl SimpleTokenizer {
                 token_to_id.insert(token_str.clone(), id as u32);
             }
         }
-        Self { id_to_token, token_to_id }
+        Self {
+            id_to_token,
+            token_to_id,
+        }
     }
 
     pub fn decode_tokens(&self, tokens: &[usize]) -> String {
         let mut bytes = Vec::new();
         for &id in tokens {
-            let raw = self.id_to_token
+            let raw = self
+                .id_to_token
                 .get(&(id as u32))
                 .cloned()
                 .unwrap_or_else(|| "<unk>".to_string());
@@ -96,7 +100,11 @@ impl SimpleTokenizer {
             }
             if next_special_idx == 0 {
                 // Safety guard against zero-progress loop
-                next_special_idx = remaining.chars().next().map(|c| c.len_utf8()).unwrap_or(remaining.len());
+                next_special_idx = remaining
+                    .chars()
+                    .next()
+                    .map(|c| c.len_utf8())
+                    .unwrap_or(remaining.len());
             }
 
             let text_chunk = &remaining[..next_special_idx];

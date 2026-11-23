@@ -10,14 +10,14 @@ use corten_auth::AuthController;
 use corten_config::{AppearanceConfig, ConfigManager, InputSettingsConfig};
 use corten_theme::iced_styles::acrylic_glass_style;
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, ThemeMode, Transition, LUCIDE_FONT, LUCIDE_FONT_BYTES,
-    NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, ThemeMode, Transition,
 };
 use iced::widget::{button, container, image, row, stack, text};
-use iced::{event, Alignment, Element, Event, Length, Padding, Subscription, Task};
+use iced::{Alignment, Element, Event, Length, Padding, Subscription, Task, event};
+use iced_sessionlock::MultiApplication;
 use iced_sessionlock::actions::UnLockAction;
 use iced_sessionlock::settings::Settings;
-use iced_sessionlock::MultiApplication;
 use tracing::{info, warn};
 
 const MAX_VISIBLE_PASSWORD_CHARS: usize = 22;
@@ -34,7 +34,8 @@ pub fn main() -> Result<(), iced_sessionlock::Error> {
     info!("Starting corten-lock (Wayland ext-session-lock-v1)...");
 
     if std::env::var_os("ICED_PRESENT_MODE").is_none() {
-        std::env::set_var("ICED_PRESENT_MODE", "mailbox");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("ICED_PRESENT_MODE", "mailbox") };
     }
 
     let current_user = users::get_current_username()
@@ -153,10 +154,10 @@ impl CortenLockApp {
                 let name = entry.file_name();
                 if name.to_string_lossy().ends_with("::capslock") {
                     let brightness = entry.path().join("brightness");
-                    if let Ok(val) = std::fs::read_to_string(brightness) {
-                        if val.trim() == "1" {
-                            return true;
-                        }
+                    if let Ok(val) = std::fs::read_to_string(brightness)
+                        && val.trim() == "1"
+                    {
+                        return true;
                     }
                 }
             }
@@ -235,13 +236,13 @@ impl CortenLockApp {
                     continue;
                 }
                 let operstate = entry.path().join("operstate");
-                if let Ok(state) = std::fs::read_to_string(operstate) {
-                    if state.trim() == "up" {
-                        if entry.path().join("wireless").exists() || name_str.starts_with("wl") {
-                            return NetworkState::Wifi;
-                        }
-                        has_ethernet = true;
+                if let Ok(state) = std::fs::read_to_string(operstate)
+                    && state.trim() == "up"
+                {
+                    if entry.path().join("wireless").exists() || name_str.starts_with("wl") {
+                        return NetworkState::Wifi;
                     }
+                    has_ethernet = true;
                 }
             }
         }
@@ -378,7 +379,10 @@ impl CortenLockApp {
                 secret.to_string()
             }
         } else if count > MAX_VISIBLE_PASSWORD_CHARS {
-            format!("… {}", "● ".repeat(MAX_VISIBLE_PASSWORD_CHARS - 1).trim_end())
+            format!(
+                "… {}",
+                "● ".repeat(MAX_VISIBLE_PASSWORD_CHARS - 1).trim_end()
+            )
         } else {
             "● ".repeat(count).trim_end().to_string()
         }
@@ -485,7 +489,12 @@ impl CortenLockApp {
                     alpha,
                 ))),
                 border: iced::Border {
-                    color: iced::Color::from_rgba(pal.warning.r, pal.warning.g, pal.warning.b, 0.45),
+                    color: iced::Color::from_rgba(
+                        pal.warning.r,
+                        pal.warning.g,
+                        pal.warning.b,
+                        0.45,
+                    ),
                     width: 1.0,
                     radius: iced::border::Radius::from(6.0),
                 },
@@ -535,16 +544,13 @@ impl CortenLockApp {
         ];
         let mut row3 = row![].spacing(4).align_y(Alignment::Center);
         let shift_active = self.virtual_shift;
-        let shift_btn = button(
-            text(Icon::ARROW_UP)
-                .font(LUCIDE_FONT)
-                .size(14.0)
-                .color(if shift_active {
-                    pal.primary.to_iced()
-                } else {
-                    pal.text_muted.to_iced()
-                }),
-        )
+        let shift_btn = button(text(Icon::ARROW_UP).font(LUCIDE_FONT).size(14.0).color(
+            if shift_active {
+                pal.primary.to_iced()
+            } else {
+                pal.text_muted.to_iced()
+            },
+        ))
         .width(Length::Fixed(46.0))
         .height(Length::Fixed(34.0))
         .style(move |_, status| {
@@ -558,7 +564,12 @@ impl CortenLockApp {
             button::Style {
                 background: Some(iced::Background::Color(bg)),
                 border: iced::Border {
-                    color: iced::Color::from_rgba(pal.primary.r, pal.primary.g, pal.primary.b, 0.45),
+                    color: iced::Color::from_rgba(
+                        pal.primary.r,
+                        pal.primary.g,
+                        pal.primary.b,
+                        0.45,
+                    ),
                     width: 1.0,
                     radius: iced::border::Radius::from(6.0),
                 },
@@ -620,63 +631,60 @@ impl CortenLockApp {
         for (n, s) in r4_chars {
             row4 = row4.push(make_key(n, s));
         }
-        let space_btn = button(
-            text("Boşluk")
-                .size(12.0)
-                .color(pal.text_primary.to_iced()),
-        )
-        .width(Length::Fixed(86.0))
-        .height(Length::Fixed(34.0))
-        .style(move |_, status| {
-            let alpha = match status {
-                button::Status::Pressed => 0.24,
-                button::Status::Hovered => 0.16,
-                _ => 0.10,
-            };
-            button::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    1.0, 1.0, 1.0, alpha,
-                ))),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.15),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(6.0),
-                },
-                ..Default::default()
-            }
-        })
-        .on_press(Message::VirtualKeySpace);
+        let space_btn = button(text("Boşluk").size(12.0).color(pal.text_primary.to_iced()))
+            .width(Length::Fixed(86.0))
+            .height(Length::Fixed(34.0))
+            .style(move |_, status| {
+                let alpha = match status {
+                    button::Status::Pressed => 0.24,
+                    button::Status::Hovered => 0.16,
+                    _ => 0.10,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        1.0, 1.0, 1.0, alpha,
+                    ))),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.15),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(6.0),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::VirtualKeySpace);
         row4 = row4.push(space_btn);
 
-        let clear_btn = button(
-            text("Temizle")
-                .size(11.0)
-                .color(pal.danger.to_iced()),
-        )
-        .width(Length::Fixed(58.0))
-        .height(Length::Fixed(34.0))
-        .style(move |_, status| {
-            let alpha = match status {
-                button::Status::Pressed => 0.28,
-                button::Status::Hovered => 0.20,
-                _ => 0.12,
-            };
-            button::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    pal.danger.r,
-                    pal.danger.g,
-                    pal.danger.b,
-                    alpha,
-                ))),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(pal.danger.r, pal.danger.g, pal.danger.b, 0.35),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(6.0),
-                },
-                ..Default::default()
-            }
-        })
-        .on_press(Message::VirtualKeyClear);
+        let clear_btn = button(text("Temizle").size(11.0).color(pal.danger.to_iced()))
+            .width(Length::Fixed(58.0))
+            .height(Length::Fixed(34.0))
+            .style(move |_, status| {
+                let alpha = match status {
+                    button::Status::Pressed => 0.28,
+                    button::Status::Hovered => 0.20,
+                    _ => 0.12,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        pal.danger.r,
+                        pal.danger.g,
+                        pal.danger.b,
+                        alpha,
+                    ))),
+                    border: iced::Border {
+                        color: iced::Color::from_rgba(
+                            pal.danger.r,
+                            pal.danger.g,
+                            pal.danger.b,
+                            0.35,
+                        ),
+                        width: 1.0,
+                        radius: iced::border::Radius::from(6.0),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::VirtualKeyClear);
         row4 = row4.push(clear_btn);
 
         container(
@@ -855,10 +863,10 @@ impl MultiApplication for CortenLockApp {
                 }
 
                 // Auto-dismiss power confirmation after timeout
-                if let Some((_, asked_at)) = self.pending_power_confirm {
-                    if asked_at.elapsed() >= POWER_CONFIRM_TIMEOUT {
-                        self.pending_power_confirm = None;
-                    }
+                if let Some((_, asked_at)) = self.pending_power_confirm
+                    && asked_at.elapsed() >= POWER_CONFIRM_TIMEOUT
+                {
+                    self.pending_power_confirm = None;
                 }
 
                 // Only update clock/caret on ~1s cadence (not every 16ms animation frame)
@@ -929,10 +937,7 @@ impl MultiApplication for CortenLockApp {
                     return Task::none();
                 };
                 self.auth_error_msg = None;
-                return Task::perform(
-                    PamAuth::authenticate_async(user, pass),
-                    Message::AuthResult,
-                );
+                return Task::perform(PamAuth::authenticate_async(user, pass), Message::AuthResult);
             }
             Message::AuthResult(outcome) => {
                 let success = outcome == AuthOutcome::Success;
@@ -1115,26 +1120,26 @@ impl MultiApplication for CortenLockApp {
         }
 
         // ==================== CENTER CARD: AVATAR & CREDENTIALS ====================
-        let avatar_content: Element<'_, Self::Message> = if let Some(ref handle) = self.avatar_handle
-        {
-            image(handle.clone())
-                .width(Length::Fixed(68.0))
-                .height(Length::Fixed(68.0))
-                .content_fit(iced::ContentFit::Cover)
-                .into()
-        } else {
-            let initial_char = self
-                .auth
-                .username()
-                .chars()
-                .next()
-                .unwrap_or('U')
-                .to_uppercase();
-            text(initial_char.to_string())
-                .size(32.0)
-                .color(palette.primary.to_iced())
-                .into()
-        };
+        let avatar_content: Element<'_, Self::Message> =
+            if let Some(ref handle) = self.avatar_handle {
+                image(handle.clone())
+                    .width(Length::Fixed(68.0))
+                    .height(Length::Fixed(68.0))
+                    .content_fit(iced::ContentFit::Cover)
+                    .into()
+            } else {
+                let initial_char = self
+                    .auth
+                    .username()
+                    .chars()
+                    .next()
+                    .unwrap_or('U')
+                    .to_uppercase();
+                text(initial_char.to_string())
+                    .size(32.0)
+                    .color(palette.primary.to_iced())
+                    .into()
+            };
 
         let avatar = container(avatar_content)
             .width(Length::Fixed(72.0))
@@ -1226,16 +1231,13 @@ impl MultiApplication for CortenLockApp {
         .on_press(Message::TogglePasswordReveal);
 
         let vkbd_open = self.show_virtual_keyboard;
-        let kbd_btn = button(
-            text(Icon::KEYBOARD)
-                .font(LUCIDE_FONT)
-                .size(15.0)
-                .color(if vkbd_open {
-                    palette.primary.to_iced()
-                } else {
-                    palette.text_muted.to_iced()
-                }),
-        )
+        let kbd_btn = button(text(Icon::KEYBOARD).font(LUCIDE_FONT).size(15.0).color(
+            if vkbd_open {
+                palette.primary.to_iced()
+            } else {
+                palette.text_muted.to_iced()
+            },
+        ))
         .padding([6, 8])
         .style(move |_, status| {
             let bg = match status {
@@ -1366,9 +1368,7 @@ impl MultiApplication for CortenLockApp {
                     .font(LUCIDE_FONT)
                     .size(13.0)
                     .color(palette.danger.to_iced()),
-                text(err_msg)
-                    .size(13.0)
-                    .color(palette.danger.to_iced()),
+                text(err_msg).size(13.0).color(palette.danger.to_iced()),
             ]
             .spacing(6)
             .align_y(Alignment::Center)
@@ -1607,12 +1607,7 @@ impl MultiApplication for CortenLockApp {
             NetworkState::Ethernet => (Icon::GLOBE, palette.text_primary.to_iced()),
             NetworkState::Offline => (Icon::GLOBE, iced::Color::from_rgba(0.6, 0.6, 0.65, 0.40)),
         };
-        status_row = status_row.push(
-            text(net_icon)
-                .font(LUCIDE_FONT)
-                .size(15.0)
-                .color(net_color),
-        );
+        status_row = status_row.push(text(net_icon).font(LUCIDE_FONT).size(15.0).color(net_color));
 
         // Power controls OR inline 2-step confirmation pill
         if let Some((action, _)) = self.pending_power_confirm {
@@ -1843,10 +1838,7 @@ mod tests {
             CortenLockApp::format_password_display("şğü", false),
             "● ● ●"
         );
-        assert_eq!(
-            CortenLockApp::format_password_display("şğü", true),
-            "şğü"
-        );
+        assert_eq!(CortenLockApp::format_password_display("şğü", true), "şğü");
 
         let long_pw = "a".repeat(30);
         let masked = CortenLockApp::format_password_display(&long_pw, false);
@@ -1887,7 +1879,10 @@ mod tests {
     #[test]
     fn test_turkish_date_formatting() {
         let d = NaiveDate::from_ymd_opt(2026, 11, 23).unwrap();
-        assert_eq!(CortenLockApp::format_turkish_date(&d), "Pazartesi, 23 Kasım");
+        assert_eq!(
+            CortenLockApp::format_turkish_date(&d),
+            "Pazartesi, 23 Kasım"
+        );
         let d2 = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
         assert_eq!(CortenLockApp::format_turkish_date(&d2), "Perşembe, 1 Ocak");
     }

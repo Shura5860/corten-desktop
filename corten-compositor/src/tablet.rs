@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 use smithay::backend::input::{
     ButtonState, TabletToolCapabilities, TabletToolDescriptor, TabletToolType,
 };
+use smithay::reexports::input::event::EventTrait;
 use smithay::reexports::input::event::tablet_tool::{
     TabletTool as LibinputTabletTool, TabletToolAxisEvent, TabletToolButtonEvent,
     TabletToolEventTrait, TabletToolProximityEvent, TabletToolTipEvent,
 };
-use smithay::reexports::input::event::EventTrait;
 use smithay::utils::{Logical, Point, Serial};
 use smithay::wayland::tablet_manager::{
     TabletDescriptor, TabletHandle, TabletSeatTrait, TabletToolHandle,
@@ -101,11 +101,7 @@ impl TabletState {
     }
 
     /// Gets or registers a tablet device on the compositor seat.
-    pub fn get_or_create_tablet(
-        &self,
-        state: &CortenCompositor,
-        name: &str,
-    ) -> TabletHandle {
+    pub fn get_or_create_tablet(&self, state: &CortenCompositor, name: &str) -> TabletHandle {
         let mut tablets = self.tablets.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(tablet) = tablets.get(name) {
             return tablet.clone();
@@ -122,7 +118,10 @@ impl TabletState {
             .tablet_seat()
             .add_tablet::<CortenCompositor>(&state.display_handle, &desc);
         tablets.insert(name.to_string(), tablet.clone());
-        tracing::info!(?name, "Registered graphics tablet with zwp_tablet_v2 protocol");
+        tracing::info!(
+            ?name,
+            "Registered graphics tablet with zwp_tablet_v2 protocol"
+        );
         tablet
     }
 
@@ -281,9 +280,7 @@ impl TabletState {
         let time = (btn.time_usec() / 1000) as u32;
 
         let button_state = match btn.button_state() {
-            smithay::reexports::input::event::pointer::ButtonState::Pressed => {
-                ButtonState::Pressed
-            }
+            smithay::reexports::input::event::pointer::ButtonState::Pressed => ButtonState::Pressed,
             smithay::reexports::input::event::pointer::ButtonState::Released => {
                 ButtonState::Released
             }

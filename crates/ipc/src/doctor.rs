@@ -74,7 +74,11 @@ impl SystemDoctor {
         let has_card = card0.exists() || card1.exists();
 
         if has_card {
-            let active_card = if card0.exists() { "/dev/dri/card0" } else { "/dev/dri/card1" };
+            let active_card = if card0.exists() {
+                "/dev/dri/card0"
+            } else {
+                "/dev/dri/card1"
+            };
             self.add_check(
                 "KMS / DRM Grafik",
                 "KMS Görüntüleme Aygıtı",
@@ -222,7 +226,10 @@ impl SystemDoctor {
                     "Wayland & Oturum",
                     "XDG_RUNTIME_DIR Soket Dizin Güvenliği",
                     CheckStatus::Fail,
-                    format!("XDG_RUNTIME_DIR belirtilmiş ancak dizin mevcut değil ({})", runtime_dir),
+                    format!(
+                        "XDG_RUNTIME_DIR belirtilmiş ancak dizin mevcut değil ({})",
+                        runtime_dir
+                    ),
                     Some("systemd logind yapılandırmasını kontrol edin."),
                     10,
                 );
@@ -266,7 +273,8 @@ impl SystemDoctor {
             u
         } else {
             let out = Command::new("id").arg("-u").output();
-            out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_else(|_| "1000".into())
+            out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|_| "1000".into())
         };
 
         let pipewire_sock = format!("/run/user/{}/pipewire-0", uid);
@@ -284,7 +292,8 @@ impl SystemDoctor {
                 "Ses & Ekran Paylaşımı (Portal)",
                 "PipeWire Ses & Video Sunucusu",
                 CheckStatus::Warn,
-                "PipeWire soketi bulunamadı. Ekran paylaşımı ve ses göstergesi sınırlı olabilir.".into(),
+                "PipeWire soketi bulunamadı. Ekran paylaşımı ve ses göstergesi sınırlı olabilir."
+                    .into(),
                 Some("systemctl --user enable --now pipewire pipewire-pulse wireplumber"),
                 10,
             );
@@ -317,9 +326,12 @@ impl SystemDoctor {
 
     // 5. Font & Bespoke Asset Verification
     fn check_font_and_assets(&mut self) {
-        let has_icons_system = Path::new("/usr/share/icons/hicolor/128x128/apps/corten-settings.png").exists()
-            || Path::new("/usr/local/share/icons/hicolor/128x128/apps/corten-settings.png").exists();
-        let has_icons_local = Path::new("assets/icons/hicolor/128x128/apps/corten-settings.png").exists();
+        let has_icons_system =
+            Path::new("/usr/share/icons/hicolor/128x128/apps/corten-settings.png").exists()
+                || Path::new("/usr/local/share/icons/hicolor/128x128/apps/corten-settings.png")
+                    .exists();
+        let has_icons_local =
+            Path::new("assets/icons/hicolor/128x128/apps/corten-settings.png").exists();
 
         if has_icons_system || has_icons_local {
             self.add_check(
@@ -335,7 +347,8 @@ impl SystemDoctor {
                 "Görsel Varlıklar & İkonlar",
                 "Paket A Çelik İkon Seti",
                 CheckStatus::Warn,
-                "Corten özgün ikonları kurulu değil; varsayılan jenerik ikonlar kullanılabilir.".into(),
+                "Corten özgün ikonları kurulu değil; varsayılan jenerik ikonlar kullanılabilir."
+                    .into(),
                 Some("./install.sh çalıştırarak ikonları /usr/share/icons/ dizinine kurun."),
                 10,
             );
@@ -377,7 +390,11 @@ impl SystemDoctor {
                 "Çekirdek İkililer",
                 "Corten Ekosistem Bütünlüğü",
                 CheckStatus::Pass,
-                format!("Tüm 14 çekirdek ikili dosya başarıyla tespit edildi ({}/{})", found_count, core_bins.len()),
+                format!(
+                    "Tüm 14 çekirdek ikili dosya başarıyla tespit edildi ({}/{})",
+                    found_count,
+                    core_bins.len()
+                ),
                 None,
                 15,
             );
@@ -386,7 +403,12 @@ impl SystemDoctor {
                 "Çekirdek İkililer",
                 "Corten Ekosistem Bütünlüğü",
                 CheckStatus::Warn,
-                format!("Eksik ikililer var ({}/{} bulundu): {:?}", found_count, core_bins.len(), missing),
+                format!(
+                    "Eksik ikililer var ({}/{} bulundu): {:?}",
+                    found_count,
+                    core_bins.len(),
+                    missing
+                ),
                 Some("cargo build --release --workspace veya ./install.sh çalıştırın."),
                 15,
             );
@@ -394,13 +416,18 @@ impl SystemDoctor {
     }
 
     fn find_bin(name: &str) -> Option<PathBuf> {
-        if let Ok(output) = Command::new("which").arg(name).output() {
-            if output.status.success() {
-                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                return Some(PathBuf::from(s));
-            }
+        if let Ok(output) = Command::new("which").arg(name).output()
+            && output.status.success()
+        {
+            let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return Some(PathBuf::from(s));
         }
-        for dir in ["target/release", "target/debug", "/usr/local/bin", "/usr/bin"] {
+        for dir in [
+            "target/release",
+            "target/debug",
+            "/usr/local/bin",
+            "/usr/bin",
+        ] {
             let p = Path::new(dir).join(name);
             if p.exists() {
                 return Some(p);
@@ -410,9 +437,7 @@ impl SystemDoctor {
     }
 
     pub fn print_report(&self, markdown: bool) {
-        let pct = (self.score * 100)
-            .checked_div(self.max_score)
-            .unwrap_or(0);
+        let pct = (self.score * 100).checked_div(self.max_score).unwrap_or(0);
 
         if markdown {
             self.print_markdown_report(pct);
@@ -426,7 +451,9 @@ impl SystemDoctor {
         println!("╔═══════════════════════════════════════════════════════════════════════╗");
         println!("║        CORTEN DESKTOP SYSTEM DOCTOR & HARDWARE DIAGNOSTICS            ║");
         println!("║        Forged Steel System Audit & Production Readiness Probe         ║");
-        println!("╚═══════════════════════════════════════════════════════════════════════╝\x1b[0m\n");
+        println!(
+            "╚═══════════════════════════════════════════════════════════════════════╝\x1b[0m\n"
+        );
 
         let mut current_cat = "";
         for item in &self.checks {
@@ -446,11 +473,16 @@ impl SystemDoctor {
                 color, badge, item.title, item.details
             );
             if let Some(remedy) = item.remedy {
-                println!("         \x1b[38;2;225;110;45m↳ Çözüm:\x1b[0m \x1b[90m{}\x1b[0m", remedy);
+                println!(
+                    "         \x1b[38;2;225;110;45m↳ Çözüm:\x1b[0m \x1b[90m{}\x1b[0m",
+                    remedy
+                );
             }
         }
 
-        println!("\n\x1b[1;37m-----------------------------------------------------------------------\x1b[0m");
+        println!(
+            "\n\x1b[1;37m-----------------------------------------------------------------------\x1b[0m"
+        );
         let (rating_text, rating_color) = if pct >= 90 {
             ("MÜKEMMEL · Üretime Hazır ve Kararlı", "\x1b[32m")
         } else if pct >= 70 {

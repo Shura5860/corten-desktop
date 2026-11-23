@@ -15,8 +15,8 @@ use std::borrow::BorrowMut;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::Instant;
 
@@ -35,22 +35,22 @@ use smithay::backend::input::{
 };
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+    WaylandSurfaceRenderElement, render_elements_from_surface_tree,
 };
-use smithay::backend::renderer::element::{render_elements, Id, Kind};
+use smithay::backend::renderer::element::{Id, Kind, render_elements};
 use smithay::backend::renderer::glow::GlowRenderer;
-use smithay::backend::renderer::utils::{draw_render_elements, CommitCounter};
+use smithay::backend::renderer::utils::{CommitCounter, draw_render_elements};
 use smithay::backend::renderer::{Color32F, Frame, Renderer};
 use smithay::backend::winit::{self, WinitEvent};
-use smithay::desktop::{layer_map_for_output, PopupManager, WindowSurfaceType};
-use smithay::input::keyboard::keysyms;
+use smithay::desktop::{PopupManager, WindowSurfaceType, layer_map_for_output};
 use smithay::input::keyboard::FilterResult;
+use smithay::input::keyboard::keysyms;
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent};
 use smithay::output::Mode;
 use smithay::reexports::winit::platform::pump_events::PumpStatus;
-use smithay::utils::{Point, Rectangle, Scale, Size, Transform, SERIAL_COUNTER};
+use smithay::utils::{Point, Rectangle, SERIAL_COUNTER, Scale, Size, Transform};
 use smithay::wayland::compositor::{
-    with_surface_tree_downward, SurfaceAttributes, TraversalAction,
+    SurfaceAttributes, TraversalAction, with_surface_tree_downward,
 };
 use smithay::wayland::shell::wlr_layer::Layer;
 use state::CortenCompositor;
@@ -77,7 +77,7 @@ extern "C" fn request_shutdown(_: nix::libc::c_int) {
 }
 
 fn install_signal_handlers() {
-    use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
+    use nix::sys::signal::{SaFlags, SigAction, SigHandler, SigSet, Signal, sigaction};
 
     let action = SigAction::new(
         SigHandler::Handler(request_shutdown),
@@ -91,12 +91,14 @@ fn install_signal_handlers() {
     }
 }
 
-use std::collections::HashMap;
+use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::element::memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement};
+use smithay::backend::renderer::element::memory::{
+    MemoryRenderBuffer, MemoryRenderBufferRenderElement,
+};
 use smithay::backend::renderer::gles::element::{PixelShaderElement, TextureShaderElement};
 use smithay::input::pointer::CursorIcon;
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
+use std::collections::HashMap;
 
 render_elements! {
     pub CustomRenderElement<=GlowRenderer>;
@@ -258,17 +260,15 @@ pub(crate) fn handle_media_keys(sym: u32) -> bool {
                 if let Ok(out) = Command::new("wpctl")
                     .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
                     .output()
-                {
-                    if let Some((pct, muted)) =
+                    && let Some((pct, muted)) =
                         parse_wpctl_volume(&String::from_utf8_lossy(&out.stdout))
-                    {
-                        let title = if muted {
-                            format!("Ses: %{pct} (Sessiz)")
-                        } else {
-                            format!("Ses Seviyesi: %{pct}")
-                        };
-                        send_osd_notification("volume", &title, "PipeWire Ses Çıkışı", pct);
-                    }
+                {
+                    let title = if muted {
+                        format!("Ses: %{pct} (Sessiz)")
+                    } else {
+                        format!("Ses Seviyesi: %{pct}")
+                    };
+                    send_osd_notification("volume", &title, "PipeWire Ses Çıkışı", pct);
                 }
             });
             true
@@ -281,17 +281,15 @@ pub(crate) fn handle_media_keys(sym: u32) -> bool {
                 if let Ok(out) = Command::new("wpctl")
                     .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
                     .output()
-                {
-                    if let Some((pct, muted)) =
+                    && let Some((pct, muted)) =
                         parse_wpctl_volume(&String::from_utf8_lossy(&out.stdout))
-                    {
-                        let title = if muted {
-                            format!("Ses: %{pct} (Sessiz)")
-                        } else {
-                            format!("Ses Seviyesi: %{pct}")
-                        };
-                        send_osd_notification("volume", &title, "PipeWire Ses Çıkışı", pct);
-                    }
+                {
+                    let title = if muted {
+                        format!("Ses: %{pct} (Sessiz)")
+                    } else {
+                        format!("Ses Seviyesi: %{pct}")
+                    };
+                    send_osd_notification("volume", &title, "PipeWire Ses Çıkışı", pct);
                 }
             });
             true
@@ -304,17 +302,15 @@ pub(crate) fn handle_media_keys(sym: u32) -> bool {
                 if let Ok(out) = Command::new("wpctl")
                     .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
                     .output()
-                {
-                    if let Some((pct, muted)) =
+                    && let Some((pct, muted)) =
                         parse_wpctl_volume(&String::from_utf8_lossy(&out.stdout))
-                    {
-                        let (title, bar_pct) = if muted {
-                            ("Ses Kapatıldı (Sessiz)".to_string(), 0)
-                        } else {
-                            (format!("Ses Açıldı: %{pct}"), pct)
-                        };
-                        send_osd_notification("volume", &title, "PipeWire Ses Çıkışı", bar_pct);
-                    }
+                {
+                    let (title, bar_pct) = if muted {
+                        ("Ses Kapatıldı (Sessiz)".to_string(), 0)
+                    } else {
+                        (format!("Ses Açıldı: %{pct}"), pct)
+                    };
+                    send_osd_notification("volume", &title, "PipeWire Ses Çıkışı", bar_pct);
                 }
             });
             true
@@ -322,17 +318,16 @@ pub(crate) fn handle_media_keys(sym: u32) -> bool {
         keysyms::KEY_XF86MonBrightnessUp => {
             std::thread::spawn(|| {
                 let _ = Command::new("brightnessctl").args(["set", "+5%"]).status();
-                if let Ok(out) = Command::new("brightnessctl").output() {
-                    if let Some(pct) =
+                if let Ok(out) = Command::new("brightnessctl").output()
+                    && let Some(pct) =
                         parse_brightnessctl_pct(&String::from_utf8_lossy(&out.stdout))
-                    {
-                        send_osd_notification(
-                            "brightness",
-                            &format!("Ekran Parlaklığı: %{pct}"),
-                            "Arka Işık Seviyesi",
-                            pct,
-                        );
-                    }
+                {
+                    send_osd_notification(
+                        "brightness",
+                        &format!("Ekran Parlaklığı: %{pct}"),
+                        "Arka Işık Seviyesi",
+                        pct,
+                    );
                 }
             });
             true
@@ -340,17 +335,16 @@ pub(crate) fn handle_media_keys(sym: u32) -> bool {
         keysyms::KEY_XF86MonBrightnessDown => {
             std::thread::spawn(|| {
                 let _ = Command::new("brightnessctl").args(["set", "5%-"]).status();
-                if let Ok(out) = Command::new("brightnessctl").output() {
-                    if let Some(pct) =
+                if let Ok(out) = Command::new("brightnessctl").output()
+                    && let Some(pct) =
                         parse_brightnessctl_pct(&String::from_utf8_lossy(&out.stdout))
-                    {
-                        send_osd_notification(
-                            "brightness",
-                            &format!("Ekran Parlaklığı: %{pct}"),
-                            "Arka Işık Seviyesi",
-                            pct,
-                        );
-                    }
+                {
+                    send_osd_notification(
+                        "brightness",
+                        &format!("Ekran Parlaklığı: %{pct}"),
+                        "Arka Işık Seviyesi",
+                        pct,
+                    );
                 }
             });
             true
@@ -471,14 +465,14 @@ pub(crate) fn apply_display_settings(state: &mut CortenCompositor) {
             "Compositor: HDR / Wide Gamut display pipeline active"
         );
     }
-    if let Some(ref icc_path) = display_config.icc_profile {
-        if let Ok(info) = corten_services::color_management::load_icc_profile_file(icc_path) {
-            info!(
-                profile = %info.description,
-                color_space = %info.color_space,
-                "Compositor: Loaded monitor ICC color profile"
-            );
-        }
+    if let Some(ref icc_path) = display_config.icc_profile
+        && let Ok(info) = corten_services::color_management::load_icc_profile_file(icc_path)
+    {
+        info!(
+            profile = %info.description,
+            color_space = %info.color_space,
+            "Compositor: Loaded monitor ICC color profile"
+        );
     }
     state.output.change_current_state(
         None,
@@ -608,7 +602,7 @@ mod tests {
 
     #[test]
     fn semantic_cursors_emit_cursor_kind_elements() {
-        use super::{draw_semantic_cursor, CommitCounter, CursorIcon, Id, Palette, ThemeMode};
+        use super::{CommitCounter, CursorIcon, Id, Palette, ThemeMode, draw_semantic_cursor};
         use smithay::backend::renderer::element::{Element, Kind};
 
         let palette = Palette::for_mode(ThemeMode::Dark);
@@ -687,7 +681,8 @@ mod tests {
     #[test]
     fn test_render_title_text_to_buffer_produces_crisp_opaque_glyphs() {
         use super::render_title_text_to_buffer;
-        let res = render_title_text_to_buffer("Corten Terminal — Pencere Başlığı", 1.0, [255, 255, 255]);
+        let res =
+            render_title_text_to_buffer("Corten Terminal — Pencere Başlığı", 1.0, [255, 255, 255]);
         assert!(res.is_some());
         let (_buf, w, h) = res.unwrap();
         assert!(w > 120);
@@ -725,7 +720,11 @@ mod tests {
 
         for (app_id, title) in test_apps {
             let res = render_titlebar_app_icon(app_id, title, 20, 1.0);
-            assert!(res.is_some(), "Failed to render titlebar icon for {}", app_id);
+            assert!(
+                res.is_some(),
+                "Failed to render titlebar icon for {}",
+                app_id
+            );
             let (_buf, w, h) = res.unwrap();
             assert_eq!(w, 20);
             assert_eq!(h, 20);
@@ -745,10 +744,18 @@ fn spawn_first_terminal() -> std::io::Result<()> {
             return Ok(());
         }
     }
-    if Command::new("konsole").args(["--profile", "Corten"]).spawn().is_ok() {
+    if Command::new("konsole")
+        .args(["--profile", "Corten"])
+        .spawn()
+        .is_ok()
+    {
         return Ok(());
     }
-    if Command::new("/var/lib/flatpak/exports/bin/org.kde.konsole").args(["--profile", "Corten"]).spawn().is_ok() {
+    if Command::new("/var/lib/flatpak/exports/bin/org.kde.konsole")
+        .args(["--profile", "Corten"])
+        .spawn()
+        .is_ok()
+    {
         return Ok(());
     }
     for program in ["foot", "alacritty", "kitty", "konsole", "xterm", "pterm"] {
@@ -842,7 +849,9 @@ fn main() -> anyhow::Result<()> {
     }));
     let server_snapshot = Arc::clone(&shared_ipc_snapshot);
 
-    let shared_a11y_tree = Arc::new(std::sync::RwLock::new(corten_services::a11y::AccessibleTree::new("Corten Desktop")));
+    let shared_a11y_tree = Arc::new(std::sync::RwLock::new(
+        corten_services::a11y::AccessibleTree::new("Corten Desktop"),
+    ));
     let server_a11y_tree = Arc::clone(&shared_a11y_tree);
     let udev_a11y_tree = Arc::clone(&shared_a11y_tree);
     let winit_a11y_tree = Arc::clone(&shared_a11y_tree);
@@ -881,7 +890,11 @@ fn main() -> anyhow::Result<()> {
                             tokio::spawn(async move {
                                 use tokio::io::AsyncWriteExt;
                                 while let Ok(event) = rx.recv().await {
-                                    if stream.write_all(format!("{}\n", event).as_bytes()).await.is_err() {
+                                    if stream
+                                        .write_all(format!("{}\n", event).as_bytes())
+                                        .await
+                                        .is_err()
+                                    {
                                         break;
                                     }
                                 }
@@ -937,7 +950,9 @@ fn main() -> anyhow::Result<()> {
 
                 async fn dispatch_action(&self, action: String) -> String {
                     info!(action = %action, "D-Bus: Compositor dispatch_action received");
-                    let _ = self.tx.send(CompositorIpcCommand::CustomAction(action.clone()));
+                    let _ = self
+                        .tx
+                        .send(CompositorIpcCommand::CustomAction(action.clone()));
                     format!("Dispatched action: {}", action)
                 }
 
@@ -958,8 +973,8 @@ fn main() -> anyhow::Result<()> {
                                 Ok(out) if out.status.success() => {
                                     let text = String::from_utf8_lossy(&out.stdout);
                                     if let Some(rect) = parse_slurp_geometry(&text) {
-                                        let _ =
-                                            tx.send(CompositorIpcCommand::TakeScreenshot(Some(rect)));
+                                        let _ = tx
+                                            .send(CompositorIpcCommand::TakeScreenshot(Some(rect)));
                                     }
                                 }
                                 Ok(_) => {}
@@ -1090,30 +1105,26 @@ fn main() -> anyhow::Result<()> {
 
             let sleep_tx = ipc_tx.clone();
             tokio::spawn(async move {
-                if let Ok(sys_conn) = zbus::Connection::system().await {
-                    if let Ok(proxy) = zbus::Proxy::new(
+                if let Ok(sys_conn) = zbus::Connection::system().await
+                    && let Ok(proxy) = zbus::Proxy::new(
                         &sys_conn,
                         "org.freedesktop.login1",
                         "/org/freedesktop/login1",
                         "org.freedesktop.login1.Manager",
                     )
                     .await
-                    {
-                        if let Ok(mut stream) = proxy.receive_signal("PrepareForSleep").await {
-                            use zbus::export::ordered_stream::OrderedStreamExt;
-                            while let Some(msg) = stream.next().await {
-                                let going_to_sleep =
-                                    msg.body().deserialize::<bool>().unwrap_or(false);
-                                let action = if going_to_sleep {
-                                    "prepare-sleep"
-                                } else {
-                                    "resume-wake"
-                                };
-                                let _ = sleep_tx.send(CompositorIpcCommand::CustomAction(
-                                    action.to_string(),
-                                ));
-                            }
-                        }
+                    && let Ok(mut stream) = proxy.receive_signal("PrepareForSleep").await
+                {
+                    use zbus::export::ordered_stream::OrderedStreamExt;
+                    while let Some(msg) = stream.next().await {
+                        let going_to_sleep = msg.body().deserialize::<bool>().unwrap_or(false);
+                        let action = if going_to_sleep {
+                            "prepare-sleep"
+                        } else {
+                            "resume-wake"
+                        };
+                        let _ =
+                            sleep_tx.send(CompositorIpcCommand::CustomAction(action.to_string()));
                     }
                 }
             });
@@ -1125,17 +1136,18 @@ fn main() -> anyhow::Result<()> {
             let a11y_server = corten_services::a11y::AtspiAccessibleServer {
                 tree: server_a11y_tree,
             };
-            if let Ok(b) = zbus::connection::Builder::session() {
-                if let Ok(b) = b.name("org.corten.Compositor") {
-                    if let Ok(b) = b.serve_at("/org/corten/Compositor", server) {
-                        if let Ok(b) = b.serve_at("/org/a11y/atspi/accessible/root", a11y_server) {
-                            if let Ok(_conn) = b.build().await {
-                                info!("Compositor D-Bus service registered on org.corten.Compositor");
-                                std::future::pending::<()>().await;
-                            } else {
-                                tracing::warn!("Failed to build org.corten.Compositor D-Bus connection");
-                            }
-                        }
+            if let Ok(b) = zbus::connection::Builder::session()
+                && let Ok(b) = b.name("org.corten.Compositor")
+                && let Ok(b) = b.serve_at("/org/corten/Compositor", server)
+                && let Ok(b) = b.serve_at("/org/a11y/atspi/accessible/root", a11y_server)
+            {
+                match b.build().await {
+                    Ok(_conn) => {
+                        info!("Compositor D-Bus service registered on org.corten.Compositor");
+                        std::future::pending::<()>().await;
+                    }
+                    _ => {
+                        tracing::warn!("Failed to build org.corten.Compositor D-Bus connection");
                     }
                 }
             }
@@ -1148,9 +1160,18 @@ fn main() -> anyhow::Result<()> {
             .context("Failed to initialize DRM/KMS hardware backend in TTY mode")?;
         info!(
             "DRM Hardware Backend successfully initialized on {:?} ({:?}) - Discovered {} secondary GPU(s) for PRIME offload",
-            drm_state.primary_gpu, drm_state.dev_path, drm_state.secondary_gpus.len()
+            drm_state.primary_gpu,
+            drm_state.dev_path,
+            drm_state.secondary_gpus.len()
         );
-        return udev::run_drm(drm_state, ipc_rx, hotkey_ipc_tx, shared_ipc_snapshot, udev_a11y_tree, drm_event_tx);
+        return udev::run_drm(
+            drm_state,
+            ipc_rx,
+            hotkey_ipc_tx,
+            shared_ipc_snapshot,
+            udev_a11y_tree,
+            drm_event_tx,
+        );
     }
 
     info!("Corten Compositor: Running in Nested Window preview mode (Winit Backend).");
@@ -1189,7 +1210,12 @@ fn main() -> anyhow::Result<()> {
         .read(true)
         .write(true)
         .open("/dev/dri/renderD128")
-        .or_else(|_| std::fs::File::options().read(true).write(true).open("/dev/dri/card0"))
+        .or_else(|_| {
+            std::fs::File::options()
+                .read(true)
+                .write(true)
+                .open("/dev/dri/card0")
+        })
     {
         use std::os::fd::OwnedFd;
         let owned_fd: OwnedFd = file.into();
@@ -1239,7 +1265,8 @@ fn main() -> anyhow::Result<()> {
         "Corten Compositor listening on Wayland socket: {}",
         socket_name
     );
-    std::env::set_var("WAYLAND_DISPLAY", &socket_name);
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("WAYLAND_DISPLAY", &socket_name) };
 
     let mut clients = Vec::new();
     let start_time = Instant::now();
@@ -1259,19 +1286,28 @@ fn main() -> anyhow::Result<()> {
     }
     let mut cursor_theme_manager = cursor::CursorThemeManager::new();
 
-    if let Ok(a11y_cfg) = ConfigManager::<corten_config::AccessibilityConfig>::load_or_default("accessibility") {
+    if let Ok(a11y_cfg) =
+        ConfigManager::<corten_config::AccessibilityConfig>::load_or_default("accessibility")
+    {
         state.accessibility = a11y_cfg.get().clone();
-        cursor_theme_manager.set_target_size(if state.accessibility.large_cursor { 48 } else { 24 });
+        cursor_theme_manager.set_target_size(if state.accessibility.large_cursor {
+            48
+        } else {
+            24
+        });
     }
 
     let mut palette = if state.accessibility.high_contrast {
         Palette::high_contrast_dark()
     } else {
         Palette::for_mode(theme_mode).with_patina(active_patina)
-    }.with_color_filter(match state.accessibility.color_filter {
+    }
+    .with_color_filter(match state.accessibility.color_filter {
         corten_config::ColorFilterChoice::None => corten_theme::ColorFilterMode::None,
         corten_config::ColorFilterChoice::Protanopia => corten_theme::ColorFilterMode::Protanopia,
-        corten_config::ColorFilterChoice::Deuteranopia => corten_theme::ColorFilterMode::Deuteranopia,
+        corten_config::ColorFilterChoice::Deuteranopia => {
+            corten_theme::ColorFilterMode::Deuteranopia
+        }
         corten_config::ColorFilterChoice::Tritanopia => corten_theme::ColorFilterMode::Tritanopia,
         corten_config::ColorFilterChoice::Monochrome => corten_theme::ColorFilterMode::Monochrome,
     });
@@ -1363,9 +1399,17 @@ fn main() -> anyhow::Result<()> {
                 palette_dirty = true;
                 info!("Compositor: Theme and Patina updated: {:?}", active_patina);
             }
-            if let Ok(a11y_cfg) = ConfigManager::<corten_config::AccessibilityConfig>::load_or_default("accessibility") {
+            if let Ok(a11y_cfg) =
+                ConfigManager::<corten_config::AccessibilityConfig>::load_or_default(
+                    "accessibility",
+                )
+            {
                 state.accessibility = a11y_cfg.get().clone();
-                cursor_theme_manager.set_target_size(if state.accessibility.large_cursor { 48 } else { 24 });
+                cursor_theme_manager.set_target_size(if state.accessibility.large_cursor {
+                    48
+                } else {
+                    24
+                });
                 palette_dirty = true;
             }
             if palette_dirty {
@@ -1373,12 +1417,21 @@ fn main() -> anyhow::Result<()> {
                     Palette::high_contrast_dark()
                 } else {
                     Palette::for_mode(theme_mode).with_patina(active_patina)
-                }.with_color_filter(match state.accessibility.color_filter {
+                }
+                .with_color_filter(match state.accessibility.color_filter {
                     corten_config::ColorFilterChoice::None => corten_theme::ColorFilterMode::None,
-                    corten_config::ColorFilterChoice::Protanopia => corten_theme::ColorFilterMode::Protanopia,
-                    corten_config::ColorFilterChoice::Deuteranopia => corten_theme::ColorFilterMode::Deuteranopia,
-                    corten_config::ColorFilterChoice::Tritanopia => corten_theme::ColorFilterMode::Tritanopia,
-                    corten_config::ColorFilterChoice::Monochrome => corten_theme::ColorFilterMode::Monochrome,
+                    corten_config::ColorFilterChoice::Protanopia => {
+                        corten_theme::ColorFilterMode::Protanopia
+                    }
+                    corten_config::ColorFilterChoice::Deuteranopia => {
+                        corten_theme::ColorFilterMode::Deuteranopia
+                    }
+                    corten_config::ColorFilterChoice::Tritanopia => {
+                        corten_theme::ColorFilterMode::Tritanopia
+                    }
+                    corten_config::ColorFilterChoice::Monochrome => {
+                        corten_theme::ColorFilterMode::Monochrome
+                    }
                 });
                 bg_color = Color32F::new(
                     palette.background.r,
@@ -1796,11 +1849,10 @@ fn main() -> anyhow::Result<()> {
                                             if let Some(x11) = next.x11_surface() {
                                                 let _ = x11.set_activated(true);
                                             }
-                                            if let Some(surface) = layout::window_wl_surface(&next) {
-                                                if let Some(kb) = state.seat.get_keyboard() {
+                                            if let Some(surface) = layout::window_wl_surface(&next)
+                                                && let Some(kb) = state.seat.get_keyboard() {
                                                     kb.set_focus(state, Some(surface), serial);
                                                 }
-                                            }
                                         }
                                         return FilterResult::Intercept(());
                                     }
@@ -1835,11 +1887,10 @@ fn main() -> anyhow::Result<()> {
                                             if let Some(x11) = prev.x11_surface() {
                                                 let _ = x11.set_activated(true);
                                             }
-                                            if let Some(surface) = layout::window_wl_surface(&prev) {
-                                                if let Some(kb) = state.seat.get_keyboard() {
+                                            if let Some(surface) = layout::window_wl_surface(&prev)
+                                                && let Some(kb) = state.seat.get_keyboard() {
                                                     kb.set_focus(state, Some(surface), serial);
                                                 }
-                                            }
                                         }
                                         return FilterResult::Intercept(());
                                     }
@@ -1978,11 +2029,10 @@ fn main() -> anyhow::Result<()> {
                                         if let Some(x11) = target.x11_surface() {
                                             let _ = x11.set_activated(true);
                                         }
-                                        if let Some(surface) = layout::window_wl_surface(&target) {
-                                            if let Some(kb) = state.seat.get_keyboard() {
+                                        if let Some(surface) = layout::window_wl_surface(&target)
+                                            && let Some(kb) = state.seat.get_keyboard() {
                                                 kb.set_focus(state, Some(surface), serial);
                                             }
-                                        }
                                     }
                                     let _ = Command::new("busctl")
                                         .args(["--user", "call", "org.corten.Panel", "/org/corten/Panel", "org.corten.Panel", "TriggerModule", "s", "osd:switcher"])
@@ -2022,20 +2072,19 @@ fn main() -> anyhow::Result<()> {
                     // Detect surface under pointer
                     let mut focused_surface = None;
 
-                    if state.session_locked {
-                        if let Some((lock_surface, _)) = state.lock_surfaces.first() {
+                    if state.session_locked
+                        && let Some((lock_surface, _)) = state.lock_surfaces.first() {
                             focused_surface =
                                 Some((lock_surface.wl_surface().clone(), Point::from((0.0, 0.0))));
                         }
-                    }
 
                     // 1. Check Top-level Layer Surfaces first (Overlay/Top)
                     if focused_surface.is_none() {
                         let layer_map = layer_map_for_output(&state.output);
                         'top_layers: for layer in [Layer::Overlay, Layer::Top] {
                             for layer_surface in layer_map.layers_on(layer).rev() {
-                                if let Some(geo) = layer_map.layer_geometry(layer_surface) {
-                                    if geo.to_f64().contains(loc) {
+                                if let Some(geo) = layer_map.layer_geometry(layer_surface)
+                                    && geo.to_f64().contains(loc) {
                                         let rel_point = loc - geo.loc.to_f64();
                                         if let Some((surface, sub_loc)) = layer_surface.surface_under(rel_point, WindowSurfaceType::all()) {
                                             let surface_origin = (geo.loc + sub_loc).to_f64();
@@ -2043,7 +2092,6 @@ fn main() -> anyhow::Result<()> {
                                             break 'top_layers;
                                         }
                                     }
-                                }
                             }
                         }
                     }
@@ -2085,17 +2133,17 @@ fn main() -> anyhow::Result<()> {
                                     (rect.loc.y - csd_offset.y) as f64 + titlebar_h,
                                 ));
                                 let rel_point = loc - origin;
-                                if let Some((surface, sub_loc)) = window.surface_under(rel_point, WindowSurfaceType::all()) {
+                                match window.surface_under(rel_point, WindowSurfaceType::all()) { Some((surface, sub_loc)) => {
                                     let surface_origin = Point::from((
                                         origin.x + sub_loc.x as f64,
                                         origin.y + sub_loc.y as f64,
                                     ));
                                     focused_surface = Some((surface, surface_origin));
                                     break;
-                                } else if let Some(surface) = layout::window_wl_surface(&window) {
+                                } _ => { if let Some(surface) = layout::window_wl_surface(&window) {
                                     focused_surface = Some((surface, origin));
                                     break;
-                                }
+                                }}}
                             }
                         }
                     }
@@ -2105,8 +2153,8 @@ fn main() -> anyhow::Result<()> {
                         let layer_map = layer_map_for_output(&state.output);
                         'bottom_layers: for layer in [Layer::Bottom, Layer::Background] {
                             for layer_surface in layer_map.layers_on(layer).rev() {
-                                if let Some(geo) = layer_map.layer_geometry(layer_surface) {
-                                    if geo.to_f64().contains(loc) {
+                                if let Some(geo) = layer_map.layer_geometry(layer_surface)
+                                    && geo.to_f64().contains(loc) {
                                         let rel_point = loc - geo.loc.to_f64();
                                         if let Some((surface, sub_loc)) = layer_surface.surface_under(rel_point, WindowSurfaceType::all()) {
                                             let surface_origin = (geo.loc + sub_loc).to_f64();
@@ -2114,7 +2162,6 @@ fn main() -> anyhow::Result<()> {
                                             break 'bottom_layers;
                                         }
                                     }
-                                }
                             }
                         }
                     }
@@ -2129,7 +2176,7 @@ fn main() -> anyhow::Result<()> {
                         let delta_x = (loc.x - drag_start.x) as f32;
                         let new_ratio = initial_ratio + delta_x / (usable_area.size.w.max(1) as f32);
                         state.layout.set_master_ratio(new_ratio);
-                    } else if let Some((ref window, drag_start_cursor, initial_rect)) = state.dragged_window.clone() {
+                    } else { match state.dragged_window.clone() { Some((ref window, drag_start_cursor, initial_rect)) => {
                         // If currently dragging or resizing a window, update its floating geometry smoothly
                         let delta_x = (loc.x - drag_start_cursor.x).round() as i32;
                         let delta_y = (loc.y - drag_start_cursor.y).round() as i32;
@@ -2222,22 +2269,20 @@ fn main() -> anyhow::Result<()> {
                             state.drag_split_target = None;
                         } else {
                             let window_rects = state.layout.arrange_animated(usable_area);
-                            if let Some((_tab_win, tab_rect)) =
-                                crate::layout::detect_drag_tab_target(loc, &window_rects, window)
-                            {
+                            match crate::layout::detect_drag_tab_target(loc, &window_rects, window)
+                            { Some((_tab_win, tab_rect)) => {
                                 state.snap_preview = Some(tab_rect);
                                 state.drag_split_target = None;
-                            } else if let Some((target_win, dir, new_on_first, preview_rect)) =
-                                crate::layout::detect_drag_split_target(loc, &window_rects, window)
-                            {
+                            } _ => { match crate::layout::detect_drag_split_target(loc, &window_rects, window)
+                            { Some((target_win, dir, new_on_first, preview_rect)) => {
                                 state.snap_preview = Some(preview_rect);
                                 state.drag_split_target = Some((target_win, dir, new_on_first, preview_rect));
-                            } else {
+                            } _ => {
                                 state.snap_preview = None;
                                 state.drag_split_target = None;
-                            }
+                            }}}}
                         }
-                    } else if let Some((ref window, resize_start_cursor, initial_rect, resize_edge)) = state.resized_window.clone() {
+                    } _ => { match state.resized_window.clone() { Some((ref window, resize_start_cursor, initial_rect, resize_edge)) => {
                         let delta = Point::from((
                             loc.x - resize_start_cursor.x,
                             loc.y - resize_start_cursor.y,
@@ -2280,7 +2325,7 @@ fn main() -> anyhow::Result<()> {
                         );
                         state.layout.set_floating_geometry(window, snapped_rect);
                         layout::configure_window_geometry(window, snapped_rect);
-                    } else {
+                    } _ => {
                         if let Some((_, ref mut end_pt)) = state.selection_box {
                             *end_pt = loc;
                         }
@@ -2291,7 +2336,7 @@ fn main() -> anyhow::Result<()> {
                             map.non_exclusive_zone()
                         };
                         let window_rects = state.layout.arrange_animated(usable_area);
-                        if let Some((_, rect)) = window_rects.into_iter().rev().find(|(_, r)| r.to_f64().contains(loc)) {
+                        match window_rects.into_iter().rev().find(|(_, r)| r.to_f64().contains(loc)) { Some((_, rect)) => {
                             if let Some(zone) = crate::layout::hit_test_snap_flyout(rect, loc) {
                                 state.snap_preview = Some(crate::layout::compute_snap_zone_rect(
                                     usable_area,
@@ -2322,10 +2367,10 @@ fn main() -> anyhow::Result<()> {
                                     smithay::input::pointer::CursorIcon::NsResize,
                                 );
                             }
-                        } else {
+                        } _ => {
                             state.snap_preview = None;
-                            if let Some(sx) = state.layout.split_x(usable_area) {
-                                if (loc.x as i32 - sx).abs() <= 8
+                            if let Some(sx) = state.layout.split_x(usable_area)
+                                && (loc.x as i32 - sx).abs() <= 8
                                     && loc.y >= usable_area.loc.y as f64
                                     && loc.y <= (usable_area.loc.y + usable_area.size.h) as f64
                                 {
@@ -2333,9 +2378,8 @@ fn main() -> anyhow::Result<()> {
                                         smithay::input::pointer::CursorIcon::EwResize,
                                     );
                                 }
-                            }
-                        }
-                    }
+                        }}
+                    }}}}}
 
                     let rel_event = RelativeMotionEvent {
                         delta: (dx, dy).into(),
@@ -2384,14 +2428,13 @@ fn main() -> anyhow::Result<()> {
                                 map.arrange();
                                 map.non_exclusive_zone()
                             };
-                            if let Some(sx) = state.layout.split_x(usable_area) {
-                                if (state.cursor_location.x as i32 - sx).abs() <= 6
+                            if let Some(sx) = state.layout.split_x(usable_area)
+                                && (state.cursor_location.x as i32 - sx).abs() <= 6
                                     && state.cursor_location.y >= (usable_area.loc.y + 36) as f64
                                     && state.cursor_location.y <= (usable_area.loc.y + usable_area.size.h) as f64
                                 {
                                     state.split_drag = Some((state.cursor_location, state.layout.master_ratio()));
                                 }
-                            }
                         }
 
                         // 1. Check if clicking on an interactive layer shell surface (Lock screen, Widgets, Dock)
@@ -2399,15 +2442,14 @@ fn main() -> anyhow::Result<()> {
                             let layer_map = layer_map_for_output(&state.output);
                             let mut found = None;
                             for layer_surface in layer_map.layers().rev() {
-                                if let Some(geo) = layer_map.layer_geometry(layer_surface) {
-                                    if geo.to_f64().contains(state.cursor_location) {
+                                if let Some(geo) = layer_map.layer_geometry(layer_surface)
+                                    && geo.to_f64().contains(state.cursor_location) {
                                         let rel_point = state.cursor_location - geo.loc.to_f64();
                                         if let Some((surface, _)) = layer_surface.surface_under(rel_point, WindowSurfaceType::all()) {
                                             found = Some(surface);
                                             break;
                                         }
                                     }
-                                }
                             }
                             found
                         };
@@ -2443,11 +2485,10 @@ fn main() -> anyhow::Result<()> {
                                 if let Some(x11) = window.x11_surface() {
                                     let _ = x11.set_activated(true);
                                 }
-                                if let Some(surface) = layout::window_wl_surface(&window) {
-                                    if let Some(kb) = state.seat.get_keyboard() {
+                                if let Some(surface) = layout::window_wl_surface(&window)
+                                    && let Some(kb) = state.seat.get_keyboard() {
                                         kb.set_focus(&mut state, Some(surface), serial);
                                     }
-                                }
                                 state.sync_ipc_snapshot();
 
                                 let rel_win_x = state.cursor_location.x - rect.loc.x as f64;
@@ -2490,13 +2531,10 @@ fn main() -> anyhow::Result<()> {
                                             let target_tab_id = tabs[tab_idx].0;
                                             if let Some((_, focused_win)) =
                                                 state.layout.focus_window_by_id(target_tab_id)
-                                            {
-                                                if let Some(surface) = layout::window_wl_surface(&focused_win) {
-                                                    if let Some(kb) = state.seat.get_keyboard() {
+                                                && let Some(surface) = layout::window_wl_surface(&focused_win)
+                                                    && let Some(kb) = state.seat.get_keyboard() {
                                                         kb.set_focus(&mut state, Some(surface), serial);
                                                     }
-                                                }
-                                            }
                                             state.sync_ipc_snapshot();
                                             return;
                                         }
@@ -2520,15 +2558,14 @@ fn main() -> anyhow::Result<()> {
                                             return;
                                         } else {
                                             // Check double click to maximize / restore
-                                            if let Some((prev_win, prev_instant)) = state.last_titlebar_click.take() {
-                                                if prev_win == window && prev_instant.elapsed().as_millis() < 320 {
+                                            if let Some((prev_win, prev_instant)) = state.last_titlebar_click.take()
+                                                && prev_win == window && prev_instant.elapsed().as_millis() < 320 {
                                                     let usable_area = state.usable_area_for_window(&window);
                                                     info!("Window Titlebar: Double-click maximize toggle on {:?}", window);
                                                     state.layout.toggle_maximize(&window, usable_area);
                                                     state.sync_ipc_snapshot();
                                                     return;
                                                 }
-                                            }
                                             state.last_titlebar_click = Some((window.clone(), std::time::Instant::now()));
 
                                             // Dragging anywhere else on the titlebar moves the window
@@ -2546,12 +2583,11 @@ fn main() -> anyhow::Result<()> {
                                             state.dragged_window = Some((window.clone(), state.cursor_location, drag_rect));
                                             return;
                                         }
-                                    } else if titlebar_h > 0.0 {
-                                        if let Some(edge) = layout::hit_test_resize_edge(rect, state.cursor_location, 8.0) {
+                                    } else if titlebar_h > 0.0
+                                        && let Some(edge) = layout::hit_test_resize_edge(rect, state.cursor_location, 8.0) {
                                             info!("Main: Edge/Corner click ({:?}) initiating resize on {:?}", edge, window);
                                             state.resized_window = Some((window.clone(), state.cursor_location, rect, edge));
                                         }
-                                    }
                                 } else if logo_held && (button_code == 1 || button_code == 272) {
                                     state.dragged_window =
                                         Some((window.clone(), state.cursor_location, rect));
@@ -2576,11 +2612,11 @@ fn main() -> anyhow::Result<()> {
                                 map.non_exclusive_zone()
                             };
                             let window_rects = state.layout.arrange_animated(usable_area);
-                            if let Some((target_win, target_rect)) = crate::layout::detect_drag_tab_target(
+                            match crate::layout::detect_drag_tab_target(
                                 state.cursor_location,
                                 &window_rects,
                                 &window,
-                            ) {
+                            ) { Some((target_win, target_rect)) => {
                                 let host_id = crate::layout::window_stable_id(&target_win);
                                 let guest_id = crate::layout::window_stable_id(&window);
                                 state.layout.merge_windows_into_tab_group(host_id, guest_id);
@@ -2588,19 +2624,19 @@ fn main() -> anyhow::Result<()> {
                                 state.layout.set_floating_geometry(&window, target_rect);
                                 layout::configure_window_geometry(&window, target_rect);
                                 state.snap_preview = None;
-                            } else if let Some((target_win, dir, new_on_first, _)) = state.drag_split_target.take() {
+                            } _ => { match state.drag_split_target.take() { Some((target_win, dir, new_on_first, _)) => {
                                 state.layout.set_fullscreen(&window, false);
                                 state.layout.set_floating(&window, false);
                                 state.layout.set_mode(corten_config::LayoutMode::Bsp);
                                 state.layout.drag_split_window(window.clone(), target_win, dir, new_on_first);
                                 state.snap_preview = None;
-                            } else if let Some(snap_rect) = state.snap_preview.take() {
+                            } _ => if let Some(snap_rect) = state.snap_preview.take() {
                                 state.layout.set_fullscreen(&window, false);
                                 state.layout.set_floating_geometry(&window, snap_rect);
                                 layout::configure_window_geometry(&window, snap_rect);
                             } else if let Some(geo) = state.layout.floating_geometry(&window) {
                                 layout::configure_window_geometry(&window, geo);
-                            }
+                            }}}}
                         }
                         state.dragged_window = None;
                         state.resized_window = None;
@@ -2711,7 +2747,8 @@ fn main() -> anyhow::Result<()> {
                 for layer in [Layer::Background, Layer::Bottom] {
                     for layer_surface in layer_map.layers_on(layer) {
                         if let Some(geo) = layer_map.layer_geometry(layer_surface) {
-                            let loc = geo.loc.to_physical_precise_round(fractional_scale) + zoom_pan;
+                            let loc =
+                                geo.loc.to_physical_precise_round(fractional_scale) + zoom_pan;
                             let surface_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                                 render_elements_from_surface_tree(
                                     renderer,
@@ -2747,10 +2784,14 @@ fn main() -> anyhow::Result<()> {
                 let mut win_glass_regions = Vec::new();
                 for (window, geo) in layouts.iter() {
                     let win_alpha = state.layout.window_alpha(window);
-                    let is_blur = crate::layout::is_window_blur_eligible(window, &state.window_rules)
-                        || win_alpha < 0.99;
+                    let is_blur =
+                        crate::layout::is_window_blur_eligible(window, &state.window_rules)
+                            || win_alpha < 0.99;
                     if is_blur {
-                        let titlebar_h = layout::window_titlebar_height(window, state.layout.is_fullscreen(window));
+                        let titlebar_h = layout::window_titlebar_height(
+                            window,
+                            state.layout.is_fullscreen(window),
+                        );
                         let body_rect = Rectangle::new(
                             geo.loc + Point::from((0, titlebar_h)),
                             Size::from((geo.size.w.max(10), (geo.size.h - titlebar_h).max(10))),
@@ -2769,19 +2810,19 @@ fn main() -> anyhow::Result<()> {
                     );
                     win_glass_regions.push(GlassRegion::snap_preview(inset_rect));
                 }
-                if !win_glass_regions.is_empty() {
-                    if let Some(pipeline) = blur_pipeline.as_mut() {
-                        let backdrops = pipeline.generate_glass_backdrops(
-                            renderer,
-                            &elements,
-                            false,
-                            size,
-                            fractional_scale,
-                            bg_color,
-                            &win_glass_regions,
-                        );
-                        elements.extend(backdrops.into_iter().map(CustomRenderElement::from));
-                    }
+                if !win_glass_regions.is_empty()
+                    && let Some(pipeline) = blur_pipeline.as_mut()
+                {
+                    let backdrops = pipeline.generate_glass_backdrops(
+                        renderer,
+                        &elements,
+                        false,
+                        size,
+                        fractional_scale,
+                        bg_color,
+                        &win_glass_regions,
+                    );
+                    elements.extend(backdrops.into_iter().map(CustomRenderElement::from));
                 }
             }
 
@@ -2934,9 +2975,11 @@ fn main() -> anyhow::Result<()> {
 
                     // Render window surface content (both Wayland toplevels and XWayland surfaces)
                     if let Some(surface) = layout::window_wl_surface(window) {
-                        let client_logical_loc = shifted_rect.loc - csd_offset + Point::from((0, titlebar_h));
+                        let client_logical_loc =
+                            shifted_rect.loc - csd_offset + Point::from((0, titlebar_h));
                         let client_phys_loc = client_logical_loc
-                            .to_physical_precise_round(fractional_scale) + zoom_pan;
+                            .to_physical_precise_round(fractional_scale)
+                            + zoom_pan;
                         let win_alpha = state.layout.window_alpha(window);
                         let window_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                             render_elements_from_surface_tree(
@@ -2948,7 +2991,8 @@ fn main() -> anyhow::Result<()> {
                                 Kind::Unspecified,
                             );
                         if is_fs || titlebar_h == 0 {
-                            elements.extend(window_elements.into_iter().map(CustomRenderElement::from));
+                            elements
+                                .extend(window_elements.into_iter().map(CustomRenderElement::from));
                         } else {
                             let body = Rectangle::new(
                                 client_phys_loc,
@@ -2961,7 +3005,8 @@ fn main() -> anyhow::Result<()> {
                         // Render any popups (context menus, dropdowns)
                         for (popup, popup_offset) in PopupManager::popups_for_surface(&surface) {
                             let popup_loc = (client_logical_loc + popup_offset)
-                                .to_physical_precise_round(fractional_scale) + zoom_pan;
+                                .to_physical_precise_round(fractional_scale)
+                                + zoom_pan;
                             let popup_elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
                                 render_elements_from_surface_tree(
                                     renderer,
@@ -3058,8 +3103,12 @@ fn main() -> anyhow::Result<()> {
             if fullscreen_win.is_none() {
                 if let Some(snap_rect) = state.snap_preview {
                     let snap_margin = 10;
-                    let inset_loc = Point::from((snap_rect.loc.x + snap_margin, snap_rect.loc.y + snap_margin));
-                    let inset_size = Size::from(((snap_rect.size.w - snap_margin * 2).max(50), (snap_rect.size.h - snap_margin * 2).max(50)));
+                    let inset_loc =
+                        Point::from((snap_rect.loc.x + snap_margin, snap_rect.loc.y + snap_margin));
+                    let inset_size = Size::from((
+                        (snap_rect.size.w - snap_margin * 2).max(50),
+                        (snap_rect.size.h - snap_margin * 2).max(50),
+                    ));
                     let inset_log = Rectangle::new(inset_loc, inset_size);
                     if let Some(manager) = glow_shader.as_ref() {
                         let mist_elem = manager.create_snap_preview_element(
@@ -3172,40 +3221,40 @@ fn main() -> anyhow::Result<()> {
                                 continue;
                             }
                             for layer_surface in layer_map.layers_on(layer) {
-                                if layer_surface.namespace() == "corten-panel" {
-                                    if let Some(geo) = layer_map.layer_geometry(layer_surface) {
-                                        let capsule_w = (geo.size.w - 116).max(0);
-                                        if capsule_w > 60 && geo.size.h >= 68 {
-                                            let capsule_x = geo.loc.x + 96;
-                                            let capsule_y = if geo.loc.y <= 30 {
-                                                geo.loc.y + 12
-                                            } else {
-                                                geo.loc.y + geo.size.h - 62
-                                            };
-                                            let inset_geo = Rectangle::new(
-                                                Point::from((capsule_x, capsule_y)),
-                                                Size::from((capsule_w, 44)),
-                                            );
-                                            glass_regions.push(GlassRegion::panel(inset_geo));
-                                        }
+                                if layer_surface.namespace() == "corten-panel"
+                                    && let Some(geo) = layer_map.layer_geometry(layer_surface)
+                                {
+                                    let capsule_w = (geo.size.w - 116).max(0);
+                                    if capsule_w > 60 && geo.size.h >= 68 {
+                                        let capsule_x = geo.loc.x + 96;
+                                        let capsule_y = if geo.loc.y <= 30 {
+                                            geo.loc.y + 12
+                                        } else {
+                                            geo.loc.y + geo.size.h - 62
+                                        };
+                                        let inset_geo = Rectangle::new(
+                                            Point::from((capsule_x, capsule_y)),
+                                            Size::from((capsule_w, 44)),
+                                        );
+                                        glass_regions.push(GlassRegion::panel(inset_geo));
                                     }
                                 }
                             }
                         }
                     }
-                    if !glass_regions.is_empty() {
-                        if let Some(pipeline) = blur_pipeline.as_mut() {
-                            let backdrops = pipeline.generate_glass_backdrops(
-                                renderer,
-                                &elements,
-                                false,
-                                size,
-                                fractional_scale,
-                                bg_color,
-                                &glass_regions,
-                            );
-                            elements.extend(backdrops.into_iter().map(CustomRenderElement::from));
-                        }
+                    if !glass_regions.is_empty()
+                        && let Some(pipeline) = blur_pipeline.as_mut()
+                    {
+                        let backdrops = pipeline.generate_glass_backdrops(
+                            renderer,
+                            &elements,
+                            false,
+                            size,
+                            fractional_scale,
+                            bg_color,
+                            &glass_regions,
+                        );
+                        elements.extend(backdrops.into_iter().map(CustomRenderElement::from));
                     }
                 }
 
@@ -3336,7 +3385,7 @@ fn main() -> anyhow::Result<()> {
                 elements.push(screen_sleep_overlay(size));
             } else if state.night_light_enabled {
                 if let Some(pipeline) = blur_pipeline.as_mut() {
-                    if let Some(nl_elem) = pipeline.generate_night_light_element(
+                    match pipeline.generate_night_light_element(
                         renderer,
                         &elements,
                         false,
@@ -3344,9 +3393,12 @@ fn main() -> anyhow::Result<()> {
                         fractional_scale,
                         bg_color,
                     ) {
-                        elements.push(CustomRenderElement::from(nl_elem));
-                    } else {
-                        elements.push(night_light_overlay(size));
+                        Some(nl_elem) => {
+                            elements.push(CustomRenderElement::from(nl_elem));
+                        }
+                        _ => {
+                            elements.push(night_light_overlay(size));
+                        }
                     }
                 } else {
                     elements.push(night_light_overlay(size));
@@ -3550,7 +3602,10 @@ pub(crate) fn draw_glow_ring(
     if total_h > t * 2 {
         elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
             Id::new(),
-            Rectangle::new(Point::from((left_x, top_y + t)), (t, total_h - t * 2).into()),
+            Rectangle::new(
+                Point::from((left_x, top_y + t)),
+                (t, total_h - t * 2).into(),
+            ),
             CommitCounter::default(),
             color,
             Kind::Unspecified,
@@ -3561,7 +3616,10 @@ pub(crate) fn draw_glow_ring(
     if total_h > t * 2 {
         elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
             Id::new(),
-            Rectangle::new(Point::from((right_x, top_y + t)), (t, total_h - t * 2).into()),
+            Rectangle::new(
+                Point::from((right_x, top_y + t)),
+                (t, total_h - t * 2).into(),
+            ),
             CommitCounter::default(),
             color,
             Kind::Unspecified,
@@ -3637,10 +3695,10 @@ pub(crate) fn render_title_text_to_buffer(
         if out_a > 0 {
             let idx = i * 4;
             // Premultiplied ARGB8888 (little-endian BGRA bytes) for Smithay GlowRenderer
-            pixels[idx] = (color[2] as u32 * out_a as u32 / 255) as u8;     // B
+            pixels[idx] = (color[2] as u32 * out_a as u32 / 255) as u8; // B
             pixels[idx + 1] = (color[1] as u32 * out_a as u32 / 255) as u8; // G
             pixels[idx + 2] = (color[0] as u32 * out_a as u32 / 255) as u8; // R
-            pixels[idx + 3] = out_a;                                        // A
+            pixels[idx + 3] = out_a; // A
         }
     }
 
@@ -3653,7 +3711,9 @@ pub(crate) fn render_title_text_to_buffer(
     );
     let draw_res = buffer.render().draw(|buf| {
         buf.copy_from_slice(&pixels);
-        Result::<_, ()>::Ok(vec![smithay::utils::Rectangle::from_size((total_w, total_h).into())])
+        Result::<_, ()>::Ok(vec![smithay::utils::Rectangle::from_size(
+            (total_w, total_h).into(),
+        )])
     });
 
     if draw_res.is_ok() {
@@ -3942,13 +4002,7 @@ fn decode_png_rgba(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
     }
 }
 
-fn resample_rgba(
-    src_rgba: &[u8],
-    src_w: u32,
-    src_h: u32,
-    dst_w: u32,
-    dst_h: u32,
-) -> Vec<u8> {
+fn resample_rgba(src_rgba: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
     let mut dst = vec![0u8; (dst_w * dst_h * 4) as usize];
     if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 {
         return dst;
@@ -3999,17 +4053,99 @@ fn resolve_app_icon_png(app_id: &str, title: &str) -> Option<PathBuf> {
     let combined = format!("{} {}", clean_id, lower_title);
 
     let corten_candidates: &[(&str, &[&str])] = &[
-        ("corten-terminal", &["corten-terminal", "alacritty", "kitty", "foot", "konsole", "terminal", "bash", "zsh"]),
-        ("corten-files", &["corten-files", "nautilus", "dolphin", "thunar", "file", "dosya"]),
-        ("corten-settings", &["corten-settings", "setting", "config", "control", "ayar", "preferences"]),
-        ("corten-forge", &["corten-forge", "forge", "store", "software", "package", "flathub", "discover"]),
-        ("corten-ai", &["corten-ai", "ai", "assistant", "intelligence", "gemini"]),
-        ("corten-monitor", &["corten-monitor", "system-monitor", "htop", "btop", "monitor"]),
+        (
+            "corten-terminal",
+            &[
+                "corten-terminal",
+                "alacritty",
+                "kitty",
+                "foot",
+                "konsole",
+                "terminal",
+                "bash",
+                "zsh",
+            ],
+        ),
+        (
+            "corten-files",
+            &[
+                "corten-files",
+                "nautilus",
+                "dolphin",
+                "thunar",
+                "file",
+                "dosya",
+            ],
+        ),
+        (
+            "corten-settings",
+            &[
+                "corten-settings",
+                "setting",
+                "config",
+                "control",
+                "ayar",
+                "preferences",
+            ],
+        ),
+        (
+            "corten-forge",
+            &[
+                "corten-forge",
+                "forge",
+                "store",
+                "software",
+                "package",
+                "flathub",
+                "discover",
+            ],
+        ),
+        (
+            "corten-ai",
+            &["corten-ai", "ai", "assistant", "intelligence", "gemini"],
+        ),
+        (
+            "corten-monitor",
+            &[
+                "corten-monitor",
+                "system-monitor",
+                "htop",
+                "btop",
+                "monitor",
+            ],
+        ),
         ("corten-welcome", &["corten-welcome", "welcome", "tour"]),
-        ("corten-snipper", &["corten-snipper", "snipper", "screenshot", "capture"]),
+        (
+            "corten-snipper",
+            &["corten-snipper", "snipper", "screenshot", "capture"],
+        ),
         ("corten-lock", &["corten-lock", "lock", "screenlock"]),
-        ("corten-browser", &["corten-browser", "firefox", "chromium", "chrome", "brave", "zen", "browser", "web"]),
-        ("corten-editor", &["corten-editor", "code", "nvim", "rust", "text", "kate", "gedit", "editor"]),
+        (
+            "corten-browser",
+            &[
+                "corten-browser",
+                "firefox",
+                "chromium",
+                "chrome",
+                "brave",
+                "zen",
+                "browser",
+                "web",
+            ],
+        ),
+        (
+            "corten-editor",
+            &[
+                "corten-editor",
+                "code",
+                "nvim",
+                "rust",
+                "text",
+                "kate",
+                "gedit",
+                "editor",
+            ],
+        ),
     ];
 
     let mut icon_roots: Vec<PathBuf> = vec![
@@ -4020,11 +4156,11 @@ fn resolve_app_icon_png(app_id: &str, title: &str) -> Option<PathBuf> {
     if let Ok(home) = std::env::var("HOME") {
         icon_roots.push(PathBuf::from(&home).join(".local/share/icons/hicolor"));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            icon_roots.push(dir.join("assets/icons/hicolor"));
-            icon_roots.push(dir.join("../../assets/icons/hicolor"));
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        icon_roots.push(dir.join("assets/icons/hicolor"));
+        icon_roots.push(dir.join("../../assets/icons/hicolor"));
     }
 
     for (target_app, keywords) in corten_candidates {
@@ -4058,7 +4194,10 @@ fn resolve_app_icon_png(app_id: &str, title: &str) -> Option<PathBuf> {
         format!("/usr/share/icons/hicolor/64x64/apps/{}.png", clean_id),
         format!("/usr/share/pixmaps/{}.png", clean_id),
         format!("/usr/share/icons/oxygen/base/48x48/apps/{}.png", clean_id),
-        format!("/usr/share/icons/AdwaitaLegacy/48x48/legacy/{}.png", clean_id),
+        format!(
+            "/usr/share/icons/AdwaitaLegacy/48x48/legacy/{}.png",
+            clean_id
+        ),
     ];
     for sp in &sys_paths {
         let p = PathBuf::from(sp);
@@ -4070,11 +4209,7 @@ fn resolve_app_icon_png(app_id: &str, title: &str) -> Option<PathBuf> {
     None
 }
 
-fn render_fallback_squircle_icon(
-    _app_id: &str,
-    total_sz: i32,
-    scale: f64,
-) -> Option<Vec<u8>> {
+fn render_fallback_squircle_icon(_app_id: &str, total_sz: i32, scale: f64) -> Option<Vec<u8>> {
     let s = scale as f32;
     let radius = (total_sz as f32) * 0.28;
     let cx = (total_sz as f32 - 1.0) * 0.5;
@@ -4092,9 +4227,8 @@ fn render_fallback_squircle_icon(
             let dy = (py as f32 - cy).abs();
             let qx = dx - (box_s - radius);
             let qy = dy - (box_s - radius);
-            let d_box = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt()
-                + qx.max(qy).min(0.0)
-                - radius;
+            let d_box =
+                (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - radius;
 
             let cov = (0.5 - d_box).clamp(0.0, 1.0);
             if cov <= 0.0 {
@@ -4139,7 +4273,8 @@ pub(crate) fn render_titlebar_app_icon(
 
     let pixels = if let Some(png_path) = resolve_app_icon_png(app_id, title) {
         if let Some((src_w, src_h, src_rgba)) = decode_png_rgba(&png_path) {
-            let resampled = resample_rgba(&src_rgba, src_w, src_h, total_sz as u32, total_sz as u32);
+            let resampled =
+                resample_rgba(&src_rgba, src_w, src_h, total_sz as u32, total_sz as u32);
             let mut px = vec![0u8; (total_sz * total_sz * 4) as usize];
             for i in 0..(total_sz * total_sz) as usize {
                 let s_idx = i * 4;
@@ -4207,12 +4342,7 @@ pub(crate) fn draw_window_titlebar(
     let mut tb_elements: Vec<CustomRenderElement> = Vec::with_capacity(96);
 
     let accent = if is_active {
-        Color32F::new(
-            palette.primary.r,
-            palette.primary.g,
-            palette.primary.b,
-            1.0,
-        )
+        Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, 1.0)
     } else {
         Color32F::new(palette.border.r, palette.border.g, palette.border.b, 0.25)
     };
@@ -4225,7 +4355,8 @@ pub(crate) fn draw_window_titlebar(
         } else {
             // Software fallback solid header bar
             let header_bar = Rectangle::new(rect.loc, (rect.size.w, header_h).into());
-            let (header_bg, _, _) = crate::render::compute_titlebar_colors(palette, is_active, false);
+            let (header_bg, _, _) =
+                crate::render::compute_titlebar_colors(palette, is_active, false);
             tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                 Id::new(),
                 header_bar,
@@ -4258,7 +4389,12 @@ pub(crate) fn draw_window_titlebar(
             Id::new(),
             bottom_line,
             CommitCounter::default(),
-            Color32F::new(palette.border.r, palette.border.g, palette.border.b, sep_alpha),
+            Color32F::new(
+                palette.border.r,
+                palette.border.g,
+                palette.border.b,
+                sep_alpha,
+            ),
             Kind::Unspecified,
         )));
 
@@ -4267,17 +4403,23 @@ pub(crate) fn draw_window_titlebar(
         let icon_x = rect.loc.x + (10.0 * scale).round() as i32;
 
         let scale_key = (scale * 100.0).round() as i32;
-        let icon_key = format!("__corten_titlebar_icon:{}:{}:{}", app_id, icon_size, scale_key);
+        let icon_key = format!(
+            "__corten_titlebar_icon:{}:{}:{}",
+            app_id, icon_size, scale_key
+        );
         let cached_icon = if let Some(found) = title_cache.get(&icon_key) {
             Some(found.clone())
-        } else if let Some((buf, iw, ih)) = render_titlebar_app_icon(app_id, title, icon_size, scale) {
-            if title_cache.len() > 256 {
-                title_cache.clear();
-            }
-            title_cache.insert(icon_key, (buf.clone(), iw, ih));
-            Some((buf, iw, ih))
         } else {
-            None
+            match render_titlebar_app_icon(app_id, title, icon_size, scale) {
+                Some((buf, iw, ih)) => {
+                    if title_cache.len() > 256 {
+                        title_cache.clear();
+                    }
+                    title_cache.insert(icon_key, (buf.clone(), iw, ih));
+                    Some((buf, iw, ih))
+                }
+                _ => None,
+            }
         };
 
         if let Some((buf, _iw, ih)) = cached_icon {
@@ -4358,20 +4500,27 @@ pub(crate) fn draw_window_titlebar(
             "Corten Window"
         };
 
-        let text_color = if is_active { [255, 255, 255] } else { [225, 230, 240] };
+        let text_color = if is_active {
+            [255, 255, 255]
+        } else {
+            [225, 230, 240]
+        };
         let scale_key = (scale * 100.0).round() as i32;
         let cache_key = format!("{}:{}:{}", display_title, scale_key, is_active);
 
         let cached = if let Some(found) = title_cache.get(&cache_key) {
             Some(found.clone())
-        } else if let Some((buf, tw, th)) = render_title_text_to_buffer(display_title, scale, text_color) {
-            if title_cache.len() > 256 {
-                title_cache.clear();
-            }
-            title_cache.insert(cache_key, (buf.clone(), tw, th));
-            Some((buf, tw, th))
         } else {
-            None
+            match render_title_text_to_buffer(display_title, scale, text_color) {
+                Some((buf, tw, th)) => {
+                    if title_cache.len() > 256 {
+                        title_cache.clear();
+                    }
+                    title_cache.insert(cache_key, (buf.clone(), tw, th));
+                    Some((buf, tw, th))
+                }
+                _ => None,
+            }
         };
 
         if let Some((buf, _tw, th)) = cached {
@@ -4467,13 +4616,18 @@ pub(crate) fn draw_window_titlebar(
             let rel_cy = cursor_loc.y - log_rect.loc.y as f64;
             let w_log = log_rect.size.w as f64;
 
-            let flyout_hovered =
-                show_snap_flyout && crate::layout::is_maximize_or_flyout_hovered(log_rect, cursor_loc);
+            let flyout_hovered = show_snap_flyout
+                && crate::layout::is_maximize_or_flyout_hovered(log_rect, cursor_loc);
 
-            let hover_close = (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 32.0) && rel_cx <= w_log;
-            let hover_max = ((0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 60.0) && rel_cx < (w_log - 32.0))
+            let hover_close =
+                (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 32.0) && rel_cx <= w_log;
+            let hover_max = ((0.0..=36.0).contains(&rel_cy)
+                && rel_cx >= (w_log - 60.0)
+                && rel_cx < (w_log - 32.0))
                 || flyout_hovered;
-            let hover_min = (0.0..=36.0).contains(&rel_cy) && rel_cx >= (w_log - 88.0) && rel_cx < (w_log - 60.0);
+            let hover_min = (0.0..=36.0).contains(&rel_cy)
+                && rel_cx >= (w_log - 88.0)
+                && rel_cx < (w_log - 60.0);
 
             let close_x = rect.loc.x + rect.size.w - (31.0 * scale).round() as i32;
             let max_x = rect.loc.x + rect.size.w - (59.0 * scale).round() as i32;
@@ -4493,16 +4647,17 @@ pub(crate) fn draw_window_titlebar(
                 );
                 let cached_btn = if let Some(found) = title_cache.get(&btn_key) {
                     Some(found.clone())
-                } else if let Some((buf, bw, bh)) =
-                    render_circular_button_to_buffer(kind, is_active, is_btn_hovered, scale)
-                {
-                    if title_cache.len() > 256 {
-                        title_cache.clear();
-                    }
-                    title_cache.insert(btn_key, (buf.clone(), bw, bh));
-                    Some((buf, bw, bh))
                 } else {
-                    None
+                    match render_circular_button_to_buffer(kind, is_active, is_btn_hovered, scale) {
+                        Some((buf, bw, bh)) => {
+                            if title_cache.len() > 256 {
+                                title_cache.clear();
+                            }
+                            title_cache.insert(btn_key, (buf.clone(), bw, bh));
+                            Some((buf, bw, bh))
+                        }
+                        _ => None,
+                    }
                 };
 
                 if let Some((buf, _bw, bh)) = cached_btn {
@@ -4550,7 +4705,12 @@ pub(crate) fn draw_window_titlebar(
 
                 let tile_color = |zone: crate::layout::SnapZone| {
                     if hovered_zone == Some(zone) {
-                        Color32F::new(palette.primary.r, palette.primary.g, palette.primary.b, 0.95)
+                        Color32F::new(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.95,
+                        )
                     } else {
                         Color32F::new(0.22, 0.26, 0.34, 0.92)
                     }
@@ -4568,7 +4728,10 @@ pub(crate) fn draw_window_titlebar(
                 )));
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
-                    Rectangle::new(Point::from((g1_x + half_gw + gap, gy)), (group_w - half_gw - gap, group_h).into()),
+                    Rectangle::new(
+                        Point::from((g1_x + half_gw + gap, gy)),
+                        (group_w - half_gw - gap, group_h).into(),
+                    ),
                     CommitCounter::default(),
                     tile_color(crate::layout::SnapZone::RightHalf),
                     Kind::Unspecified,
@@ -4586,7 +4749,10 @@ pub(crate) fn draw_window_titlebar(
                 )));
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
-                    Rectangle::new(Point::from((g2_x + two_thirds_gw + gap, gy)), (group_w - two_thirds_gw - gap, group_h).into()),
+                    Rectangle::new(
+                        Point::from((g2_x + two_thirds_gw + gap, gy)),
+                        (group_w - two_thirds_gw - gap, group_h).into(),
+                    ),
                     CommitCounter::default(),
                     tile_color(crate::layout::SnapZone::RightOneThird),
                     Kind::Unspecified,
@@ -4604,7 +4770,10 @@ pub(crate) fn draw_window_titlebar(
                 )));
                 tb_elements.push(CustomRenderElement::from(SolidColorRenderElement::new(
                     Id::new(),
-                    Rectangle::new(Point::from((g3_x, gy + half_gh + gap)), (group_w, group_h - half_gh - gap).into()),
+                    Rectangle::new(
+                        Point::from((g3_x, gy + half_gh + gap)),
+                        (group_w, group_h - half_gh - gap).into(),
+                    ),
                     CommitCounter::default(),
                     tile_color(crate::layout::SnapZone::BottomRightQuarter),
                     Kind::Unspecified,

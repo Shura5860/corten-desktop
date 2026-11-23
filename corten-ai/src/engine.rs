@@ -1,6 +1,6 @@
 use crate::actions::{ActionExecutor, DesktopAction};
 use crate::aura::{
-    extract_math_candidate, AuraMemoryEngine, AuraReActAgent, AuraToolRegistry, AuraWorkspaceRag,
+    AuraMemoryEngine, AuraReActAgent, AuraToolRegistry, AuraWorkspaceRag, extract_math_candidate,
 };
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -132,13 +132,16 @@ fn parse_url_host_port(url_str: &str) -> Option<(String, u16)> {
 impl AiEngine {
     /// Detect which local AI backend is running, respecting user settings from `ai.toml`
     pub async fn auto_detect() -> BackendType {
-        let cfg = corten_config::ConfigManager::<corten_config::AiSettingsConfig>::load_or_default("ai")
-            .map(|c| c.get().clone())
-            .unwrap_or_default();
+        let cfg =
+            corten_config::ConfigManager::<corten_config::AiSettingsConfig>::load_or_default("ai")
+                .map(|c| c.get().clone())
+                .unwrap_or_default();
         Self::auto_detect_with_config(Some(&cfg)).await
     }
 
-    pub async fn auto_detect_with_config(config: Option<&corten_config::AiSettingsConfig>) -> BackendType {
+    pub async fn auto_detect_with_config(
+        config: Option<&corten_config::AiSettingsConfig>,
+    ) -> BackendType {
         let (enabled, target_tier, custom_path, backend_url) = if let Some(c) = config {
             (
                 c.enabled,
@@ -180,7 +183,10 @@ impl AiEngine {
                 .and_then(|s| s.to_str())
                 .unwrap_or("local-gguf")
                 .to_string();
-            info!("Corten AI: Discovered Native Rust GGUF model '{}'", model_name);
+            info!(
+                "Corten AI: Discovered Native Rust GGUF model '{}'",
+                model_name
+            );
             return BackendType::NativeGguf {
                 model_path: first_gguf.clone(),
                 model_name,
@@ -197,10 +203,10 @@ impl AiEngine {
                 if let Ok(info) = Self::probe_ollama(&host, port, Some(target_tier)).await {
                     return info;
                 }
-            } else if port == 8080 {
-                if let Ok(info) = Self::probe_llama_cpp(&host, port).await {
-                    return info;
-                }
+            } else if port == 8080
+                && let Ok(info) = Self::probe_llama_cpp(&host, port).await
+            {
+                return info;
             }
         }
 
@@ -270,54 +276,54 @@ impl AiEngine {
         let resp = String::from_utf8_lossy(&buf);
         if let Some(pos) = resp.find("\r\n\r\n") {
             let body = &resp[pos + 4..];
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-                if let Some(models) = json.get("models").and_then(|m| m.as_array()) {
-                    let mut names = Vec::new();
-                    let mut has_vision = false;
-                    for m in models {
-                        if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
-                            let lower = name.to_lowercase();
-                            if lower.contains("llava")
-                                || lower.contains("moondream")
-                                || lower.contains("vision")
-                                || lower.contains("minicpm")
-                                || lower.contains("qwen2-vl")
-                            {
-                                has_vision = true;
-                            }
-                            names.push(name.to_string());
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(body)
+                && let Some(models) = json.get("models").and_then(|m| m.as_array())
+            {
+                let mut names = Vec::new();
+                let mut has_vision = false;
+                for m in models {
+                    if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
+                        let lower = name.to_lowercase();
+                        if lower.contains("llava")
+                            || lower.contains("moondream")
+                            || lower.contains("vision")
+                            || lower.contains("minicpm")
+                            || lower.contains("qwen2-vl")
+                        {
+                            has_vision = true;
                         }
+                        names.push(name.to_string());
                     }
-                    if !names.is_empty() {
-                        let desired = target_tier.unwrap_or("eco");
-                        let chosen_idx = names
-                            .iter()
-                            .position(|n| {
-                                let tier_str = Self::classify_model_tier(n);
-                                match desired {
-                                    "eco" => tier_str.contains("Eco"),
-                                    "balanced" => tier_str.contains("Dengeli"),
-                                    "pro" => tier_str.contains("Pro"),
-                                    _ => false,
-                                }
-                            })
-                            .unwrap_or(0);
+                }
+                if !names.is_empty() {
+                    let desired = target_tier.unwrap_or("eco");
+                    let chosen_idx = names
+                        .iter()
+                        .position(|n| {
+                            let tier_str = Self::classify_model_tier(n);
+                            match desired {
+                                "eco" => tier_str.contains("Eco"),
+                                "balanced" => tier_str.contains("Dengeli"),
+                                "pro" => tier_str.contains("Pro"),
+                                _ => false,
+                            }
+                        })
+                        .unwrap_or(0);
 
-                        let active = names[chosen_idx].clone();
-                        let tier_label = Self::classify_model_tier(&active).to_string();
-                        info!(
-                            "Corten AI: Found Ollama backend with model '{}' [{}] (requested tier: {})",
-                            active, tier_label, desired
-                        );
-                        return Ok(BackendType::Ollama {
-                            host: host.to_string(),
-                            port,
-                            model: active,
-                            tier_label,
-                            all_models: names,
-                            has_vision,
-                        });
-                    }
+                    let active = names[chosen_idx].clone();
+                    let tier_label = Self::classify_model_tier(&active).to_string();
+                    info!(
+                        "Corten AI: Found Ollama backend with model '{}' [{}] (requested tier: {})",
+                        active, tier_label, desired
+                    );
+                    return Ok(BackendType::Ollama {
+                        host: host.to_string(),
+                        port,
+                        model: active,
+                        tier_label,
+                        all_models: names,
+                        has_vision,
+                    });
                 }
             }
         }
@@ -387,7 +393,9 @@ impl AiEngine {
     ) {
         let trimmed = query.trim().to_string();
         if trimmed.is_empty() {
-            let _ = tx.send(StreamChunk::Error("Lütfen bir komut veya soru girin.".into()));
+            let _ = tx.send(StreamChunk::Error(
+                "Lütfen bir komut veya soru girin.".into(),
+            ));
             let _ = tx.send(StreamChunk::Done);
             return;
         }
@@ -448,13 +456,13 @@ impl AiEngine {
 
         // 1. Reflex Action Interceptor
         let intent = ActionExecutor::parse_intent(&trimmed);
-        if intent != DesktopAction::None {
-            if let Some(feedback) = ActionExecutor::execute(intent).await {
-                let _ = tx.send(StreamChunk::ActionExecuted(feedback.clone()));
-                let _ = tx.send(StreamChunk::Token(feedback));
-                let _ = tx.send(StreamChunk::Done);
-                return;
-            }
+        if intent != DesktopAction::None
+            && let Some(feedback) = ActionExecutor::execute(intent).await
+        {
+            let _ = tx.send(StreamChunk::ActionExecuted(feedback.clone()));
+            let _ = tx.send(StreamChunk::Token(feedback));
+            let _ = tx.send(StreamChunk::Done);
+            return;
         }
 
         // 2. Local Heuristic Static Security Sentinel
@@ -700,7 +708,14 @@ impl AiEngine {
             "content": sys_prompt
         }));
 
-        for h in history.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev() {
+        for h in history
+            .iter()
+            .rev()
+            .take(6)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
             let role_str = match h.role {
                 MessageRole::User => "user",
                 MessageRole::Assistant => "assistant",
@@ -782,15 +797,14 @@ impl AiEngine {
                     .get("message")
                     .and_then(|m| m.get("content"))
                     .and_then(|c| c.as_str())
+                    && !token.is_empty()
                 {
-                    if !token.is_empty() {
-                        filter.process(token, &tx);
-                    }
+                    filter.process(token, &tx);
                 }
-                if let Some(done) = val.get("done").and_then(|d| d.as_bool()) {
-                    if done {
-                        break;
-                    }
+                if let Some(done) = val.get("done").and_then(|d| d.as_bool())
+                    && done
+                {
+                    break;
                 }
             }
         }
@@ -810,7 +824,9 @@ impl AiEngine {
         let stream = match timeout(Duration::from_millis(1500), TcpStream::connect(&addr)).await {
             Ok(Ok(s)) => s,
             _ => {
-                let _ = tx.send(StreamChunk::Error("llama-server bağlantısı kurulamadı.".into()));
+                let _ = tx.send(StreamChunk::Error(
+                    "llama-server bağlantısı kurulamadı.".into(),
+                ));
                 let _ = tx.send(StreamChunk::Done);
                 return;
             }
@@ -829,7 +845,14 @@ impl AiEngine {
             "content": sys_prompt
         }));
 
-        for h in history.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev() {
+        for h in history
+            .iter()
+            .rev()
+            .take(6)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
             let role_str = match h.role {
                 MessageRole::User => "user",
                 MessageRole::Assistant => "assistant",
@@ -902,21 +925,18 @@ impl AiEngine {
                 continue;
             }
 
-            if let Some(json_str) = trimmed.strip_prefix("data: ") {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    if let Some(token) = val
-                        .get("choices")
-                        .and_then(|c| c.as_array())
-                        .and_then(|arr| arr.first())
-                        .and_then(|choice| choice.get("delta"))
-                        .and_then(|delta| delta.get("content"))
-                        .and_then(|content| content.as_str())
-                    {
-                        if !token.is_empty() {
-                            filter.process(token, &tx);
-                        }
-                    }
-                }
+            if let Some(json_str) = trimmed.strip_prefix("data: ")
+                && let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str)
+                && let Some(token) = val
+                    .get("choices")
+                    .and_then(|c| c.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|choice| choice.get("delta"))
+                    .and_then(|delta| delta.get("content"))
+                    .and_then(|content| content.as_str())
+                && !token.is_empty()
+            {
+                filter.process(token, &tx);
             }
         }
 
@@ -948,7 +968,10 @@ impl AiEngine {
                 Connection: close\r\n\
                 \r\n\
                 {}",
-                host, port, body.len(), body
+                host,
+                port,
+                body.len(),
+                body
             );
 
             if stream.write_all(req.as_bytes()).await.is_ok() {
@@ -978,15 +1001,13 @@ impl AiEngine {
                         continue;
                     }
 
-                    if let Some(json_str) = trimmed.strip_prefix("data: ") {
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
-                            if let Some(token) = val.get("token").and_then(|t| t.as_str()) {
-                                if !token.is_empty() {
-                                    got_stream_token = true;
-                                    filter.process(token, &tx);
-                                }
-                            }
-                        }
+                    if let Some(json_str) = trimmed.strip_prefix("data: ")
+                        && let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str)
+                        && let Some(token) = val.get("token").and_then(|t| t.as_str())
+                        && !token.is_empty()
+                    {
+                        got_stream_token = true;
+                        filter.process(token, &tx);
                     }
                 }
 
@@ -1014,23 +1035,34 @@ impl AiEngine {
                 Connection: close\r\n\
                 \r\n\
                 {}",
-                host, port, body.len(), body
+                host,
+                port,
+                body.len(),
+                body
             );
 
             if stream.write_all(req.as_bytes()).await.is_ok() {
                 let mut buffer = Vec::new();
-                if timeout(Duration::from_secs(15), stream.read_to_end(&mut buffer)).await.is_ok() {
+                if timeout(Duration::from_secs(15), stream.read_to_end(&mut buffer))
+                    .await
+                    .is_ok()
+                {
                     let raw = String::from_utf8_lossy(&buffer);
                     if let Some(pos) = raw.find("\r\n\r\n") {
                         let body_json = &raw[pos + 4..];
                         if let Ok(val) = serde_json::from_str::<serde_json::Value>(body_json) {
                             // Format tool execution if used
                             if let Some(tool) = val.get("tool_used").and_then(|t| t.as_object()) {
-                                let tool_name = tool.get("name").and_then(|n| n.as_str()).unwrap_or("tool");
-                                let tool_res = val.get("tool_result")
+                                let tool_name =
+                                    tool.get("name").and_then(|n| n.as_str()).unwrap_or("tool");
+                                let tool_res = val
+                                    .get("tool_result")
                                     .map(|r| r.to_string().trim_matches('"').to_string())
                                     .unwrap_or_default();
-                                let tool_msg = format!("🛠️ AURA-CORE Ajan Eylemi: `{}`\n📊 Çıktı: {}\n\n", tool_name, tool_res);
+                                let tool_msg = format!(
+                                    "🛠️ AURA-CORE Ajan Eylemi: `{}`\n📊 Çıktı: {}\n\n",
+                                    tool_name, tool_res
+                                );
                                 let _ = tx.send(StreamChunk::Token(tool_msg));
                             }
                             if let Some(ans) = val.get("answer").and_then(|a| a.as_str()) {
@@ -1062,12 +1094,18 @@ impl AiEngine {
                 Connection: close\r\n\
                 \r\n\
                 {}",
-                host, port, body.len(), body
+                host,
+                port,
+                body.len(),
+                body
             );
 
             if stream.write_all(req.as_bytes()).await.is_ok() {
                 let mut buffer = Vec::new();
-                if timeout(Duration::from_secs(12), stream.read_to_end(&mut buffer)).await.is_ok() {
+                if timeout(Duration::from_secs(12), stream.read_to_end(&mut buffer))
+                    .await
+                    .is_ok()
+                {
                     let raw = String::from_utf8_lossy(&buffer);
                     if let Some(pos) = raw.find("\r\n\r\n") {
                         let body = &raw[pos + 4..];
@@ -1103,29 +1141,25 @@ impl AiEngine {
         let _ = std::fs::remove_file(&tmp_path);
 
         // Try grim first (actual Wayland wlr-screencopy PNG capture)
-        if let Ok(status) = std::process::Command::new("grim").arg(&tmp_str).status() {
-            if status.success() {
-                if let Ok(bytes) = std::fs::read(&tmp_path) {
-                    let _ = std::fs::remove_file(&tmp_path);
-                    return Some(base64_encode(&bytes));
-                }
-            }
+        if let Ok(status) = std::process::Command::new("grim").arg(&tmp_str).status()
+            && status.success()
+            && let Ok(bytes) = std::fs::read(&tmp_path)
+        {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Some(base64_encode(&bytes));
         }
 
         // Try corten-snipper fullscreen capture if available
         let snipper = crate::actions::resolve_corten_bin("corten-snipper");
-        if snipper.exists() {
-            if let Ok(status) = std::process::Command::new(snipper)
+        if snipper.exists()
+            && let Ok(status) = std::process::Command::new(snipper)
                 .args(["--fullscreen", "--output", &tmp_str])
                 .status()
-            {
-                if status.success() {
-                    if let Ok(bytes) = std::fs::read(&tmp_path) {
-                        let _ = std::fs::remove_file(&tmp_path);
-                        return Some(base64_encode(&bytes));
-                    }
-                }
-            }
+            && status.success()
+            && let Ok(bytes) = std::fs::read(&tmp_path)
+        {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Some(base64_encode(&bytes));
         }
 
         None
@@ -1142,40 +1176,30 @@ impl AiEngine {
             || lower.contains("http://")
             || lower.contains("https://")
         {
-            findings.push("⚠️ Ağ İletişimi: İnternet üzerinden dış sunuculara HTTP/ağ isteği gönderiyor.");
+            findings.push(
+                "⚠️ Ağ İletişimi: İnternet üzerinden dış sunuculara HTTP/ağ isteği gönderiyor.",
+            );
             risk_score += 1;
         }
-        if lower.contains(".ssh")
-            || lower.contains("id_rsa")
-            || lower.contains("authorized_keys")
-        {
+        if lower.contains(".ssh") || lower.contains("id_rsa") || lower.contains("authorized_keys") {
             findings.push("🚨 Hassas Dizin: SSH anahtarlarına erişim teşebbüsü tespit edildi!");
             risk_score += 3;
         }
-        if lower.contains("sudo ")
-            || lower.contains("pkexec ")
-            || lower.contains("doas ")
-        {
+        if lower.contains("sudo ") || lower.contains("pkexec ") || lower.contains("doas ") {
             findings.push("⚠️ Yetki Yükseltme: Root / yönetici hakları talep ediyor.");
             risk_score += 2;
         }
-        if lower.contains("base64")
-            && (lower.contains("-d") || lower.contains("--decode"))
-        {
-            findings.push("🚨 Gizli Yük: Base64 ile gizlenmiş (obfuscated) kod yürütme tespit edildi!");
+        if lower.contains("base64") && (lower.contains("-d") || lower.contains("--decode")) {
+            findings
+                .push("🚨 Gizli Yük: Base64 ile gizlenmiş (obfuscated) kod yürütme tespit edildi!");
             risk_score += 3;
         }
-        if lower.contains("systemd/user")
-            || lower.contains(".bashrc")
-            || lower.contains(".profile")
+        if lower.contains("systemd/user") || lower.contains(".bashrc") || lower.contains(".profile")
         {
             findings.push("⚠️ Kalıcılık (Persistence): Oturum başlangıç dosyalarına kalıcılık eklemeye çalışıyor.");
             risk_score += 2;
         }
-        if lower.contains("rm -rf")
-            || lower.contains("mkfs")
-            || lower.contains("dd if=")
-        {
+        if lower.contains("rm -rf") || lower.contains("mkfs") || lower.contains("dd if=") {
             findings.push("🚨 Yıkıcı Eylem: Dosya sistemi silme veya disk yazma komutu!");
             risk_score += 4;
         }

@@ -92,4 +92,3 @@ impl PomodoroTimer {
         1.0 - (left / total).clamp(0.0, 1.0)
     }
 }
-

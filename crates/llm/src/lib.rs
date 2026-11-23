@@ -7,8 +7,8 @@ pub mod quant;
 pub mod tokenizer;
 
 pub use engine::{InferenceMessage, KVCache, LayerWeights, ModelRunner, TransformerBlock};
-pub use gguf::{GgufHeader, GgufValue, TensorInfo, GGUF_MAGIC};
-pub use ops::{rms_norm_into, apply_rope, sample_token, SamplerParams};
+pub use gguf::{GGUF_MAGIC, GgufHeader, GgufValue, TensorInfo};
+pub use ops::{SamplerParams, apply_rope, rms_norm_into, sample_token};
 pub use tokenizer::SimpleTokenizer;
 
 /// Scans standard XDG and Corten model directories for local `.gguf` files
@@ -80,4 +80,3 @@ mod tests {
         assert_eq!(decoded, "merhaba corten");
     }
 }
-

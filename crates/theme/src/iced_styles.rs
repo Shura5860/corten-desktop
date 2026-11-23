@@ -1,5 +1,5 @@
 use iced::widget::{button, container, text_input};
-use iced::{border, Background, Border, Shadow};
+use iced::{Background, Border, Shadow, border};
 
 use crate::color::Palette;
 use crate::radius::Radius;
@@ -189,26 +189,21 @@ pub fn input_style(palette: Palette) -> container::Style {
 /// hover highlight, and warm accent focus ring.
 pub fn corten_text_input_style(palette: Palette, status: text_input::Status) -> text_input::Style {
     let (bg, border_color, border_width) = match status {
-        text_input::Status::Active => (
-            palette.background.to_iced(),
-            palette.border.to_iced(),
-            1.0,
-        ),
+        text_input::Status::Active => (palette.background.to_iced(), palette.border.to_iced(), 1.0),
         text_input::Status::Hovered => (
             palette.surface_hover.to_iced(),
-            iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.55),
+            iced::Color::from_rgba(
+                palette.primary.r,
+                palette.primary.g,
+                palette.primary.b,
+                0.55,
+            ),
             1.0,
         ),
-        text_input::Status::Focused => (
-            palette.background.to_iced(),
-            palette.primary.to_iced(),
-            1.5,
-        ),
-        text_input::Status::Disabled => (
-            palette.surface.to_iced(),
-            palette.border.to_iced(),
-            1.0,
-        ),
+        text_input::Status::Focused => {
+            (palette.background.to_iced(), palette.primary.to_iced(), 1.5)
+        }
+        text_input::Status::Disabled => (palette.surface.to_iced(), palette.border.to_iced(), 1.0),
     };
     text_input::Style {
         background: Background::Color(bg),
@@ -344,21 +339,19 @@ pub fn kbd_style(palette: Palette) -> container::Style {
 }
 
 /// Fluid capsule slider style with filled patina rail and glowing thumb (macOS/iOS inspired)
-pub fn capsule_slider_style(palette: Palette) -> impl Fn(&iced::Theme, iced::widget::slider::Status) -> iced::widget::slider::Style {
+pub fn capsule_slider_style(
+    palette: Palette,
+) -> impl Fn(&iced::Theme, iced::widget::slider::Status) -> iced::widget::slider::Style {
     move |_theme, status| {
         let (handle_color, rail_active) = match status {
             iced::widget::slider::Status::Hovered => (
                 palette.primary_hover.to_iced(),
                 palette.primary_hover.to_iced(),
             ),
-            iced::widget::slider::Status::Dragged => (
-                iced::Color::WHITE,
-                palette.primary.to_iced(),
-            ),
-            _ => (
-                palette.primary.to_iced(),
-                palette.primary.to_iced(),
-            ),
+            iced::widget::slider::Status::Dragged => {
+                (iced::Color::WHITE, palette.primary.to_iced())
+            }
+            _ => (palette.primary.to_iced(), palette.primary.to_iced()),
         };
 
         iced::widget::slider::Style {
@@ -466,9 +459,7 @@ pub fn empty_state_card<'a, Message: 'a>(
                 .font(LUCIDE_FONT)
                 .size(28.0)
                 .color(palette.text_muted.to_iced()),
-            text(title)
-                .size(14.0)
-                .color(palette.text_primary.to_iced()),
+            text(title).size(14.0).color(palette.text_primary.to_iced()),
             text(subtitle)
                 .size(12.0)
                 .color(palette.text_muted.to_iced()),
@@ -490,8 +481,8 @@ pub fn toast_banner<'a, Message: 'a>(
     palette: Palette,
 ) -> iced::Element<'a, Message> {
     use crate::icons::LUCIDE_FONT;
-    use iced::widget::{row, text};
     use iced::Alignment;
+    use iced::widget::{row, text};
 
     container(
         row![

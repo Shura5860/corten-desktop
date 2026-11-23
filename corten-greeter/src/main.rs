@@ -8,8 +8,8 @@ use chrono::Local;
 use corten_auth::AuthController;
 use corten_config::{AppearanceConfig, ConfigManager};
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, ThemeMode, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS,
-    NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, ThemeMode,
 };
 use iced::widget::{button, container, row, text, text_input};
 use iced::{Alignment, Element, Length, Subscription, Task};
@@ -79,7 +79,8 @@ impl CortenGreeterApp {
                 if new_time != self.current_time {
                     self.current_time = new_time;
                     self.current_date = now.format("%A, %d %B").to_string();
-                    if let Ok(c) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
+                    if let Ok(c) = ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                    {
                         let pat = PatinaVariant::from_code(&c.get().patina);
                         if pat != self.active_patina {
                             self.active_patina = pat;
@@ -136,7 +137,10 @@ impl CortenGreeterApp {
                     return Task::perform(
                         async move {
                             tokio::time::sleep(Duration::from_millis(500)).await;
-                            info!("Running in preview/test mode (GREETD_SOCK unset). Simulating login success for user '{}'", user);
+                            info!(
+                                "Running in preview/test mode (GREETD_SOCK unset). Simulating login success for user '{}'",
+                                user
+                            );
                             Ok(())
                         },
                         Message::LoginResult,
@@ -279,7 +283,9 @@ impl CortenGreeterApp {
         let user_input = text_input("Kullanıcı Adı", self.auth.username())
             .size(16.0)
             .padding([14, 20])
-            .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status))
+            .style(move |_, status| {
+                corten_theme::iced_styles::corten_text_input_style(palette, status)
+            })
             .on_input(Message::UsernameChanged)
             .on_submit(Message::SubmitLogin);
 
@@ -287,7 +293,9 @@ impl CortenGreeterApp {
             .size(16.0)
             .secure(true)
             .padding([14, 20])
-            .style(move |_, status| corten_theme::iced_styles::corten_text_input_style(palette, status))
+            .style(move |_, status| {
+                corten_theme::iced_styles::corten_text_input_style(palette, status)
+            })
             .on_input(Message::PasswordChanged)
             .on_submit(Message::SubmitLogin);
 
@@ -449,7 +457,9 @@ mod tests {
         let _ = app.update(Message::PasswordChanged("my_secret".into()));
         assert_eq!(app.auth.secret(), "my_secret");
 
-        let _ = app.update(Message::LoginResult(Err("Kimlik doğrulama başarısız".into())));
+        let _ = app.update(Message::LoginResult(Err(
+            "Kimlik doğrulama başarısız".into()
+        )));
         assert_eq!(app.auth.secret(), "");
         assert!(app.error_message.is_some());
     }

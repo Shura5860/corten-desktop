@@ -1,5 +1,5 @@
-use crate::types::{embed_text, normalize_vector, VectorPoint};
-use crate::wal::{append_wal, WalEntry};
+use crate::types::{VectorPoint, embed_text, normalize_vector};
+use crate::wal::{WalEntry, append_wal};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -99,12 +99,7 @@ impl VectorIndex {
         }
     }
 
-    pub fn add_vector(
-        &self,
-        id: usize,
-        vector: &[f32],
-        metadata: HashMap<String, String>,
-    ) {
+    pub fn add_vector(&self, id: usize, vector: &[f32], metadata: HashMap<String, String>) {
         let normalized_vec = normalize_vector(vector);
         // Consistent lock order: state FIRST, then wal_path (prevents AB-BA deadlocks)
         let Ok(mut state) = self.state.write() else {
@@ -123,12 +118,7 @@ impl VectorIndex {
         state.upsert_vector(id, normalized_vec, metadata);
     }
 
-    pub fn add_document_text(
-        &self,
-        id: usize,
-        text: &str,
-        metadata: HashMap<String, String>,
-    ) {
+    pub fn add_document_text(&self, id: usize, text: &str, metadata: HashMap<String, String>) {
         let vec = embed_text(text, DEFAULT_EMBEDDING_DIM);
         self.add_vector(id, &vec, metadata);
     }
@@ -186,7 +176,11 @@ impl VectorIndex {
                     .map(|j| (j, pt.distance(&vectors[j])))
                     .collect();
                 dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                dists.into_iter().take(m_neighbors).map(|(j, _)| j).collect()
+                dists
+                    .into_iter()
+                    .take(m_neighbors)
+                    .map(|(j, _)| j)
+                    .collect()
             })
             .collect();
 
@@ -279,25 +273,25 @@ impl VectorIndex {
         let op = operator.unwrap_or("==");
         let mut allowed_ids: Option<HashSet<usize>> = None;
 
-        if let (Some(k), Some(v)) = (filter_key, filter_value) {
-            if op == "==" {
-                if let Some(val_map) = state.inverted_index.get(k) {
-                    if let Some(id_set) = val_map.get(v) {
-                        let valid: HashSet<usize> = id_set
-                            .iter()
-                            .copied()
-                            .filter(|id| !state.tombstone_ids.contains(id))
-                            .collect();
-                        if valid.is_empty() {
-                            return Vec::new();
-                        }
-                        allowed_ids = Some(valid);
-                    } else {
+        if let (Some(k), Some(v)) = (filter_key, filter_value)
+            && op == "=="
+        {
+            if let Some(val_map) = state.inverted_index.get(k) {
+                if let Some(id_set) = val_map.get(v) {
+                    let valid: HashSet<usize> = id_set
+                        .iter()
+                        .copied()
+                        .filter(|id| !state.tombstone_ids.contains(id))
+                        .collect();
+                    if valid.is_empty() {
                         return Vec::new();
                     }
+                    allowed_ids = Some(valid);
                 } else {
                     return Vec::new();
                 }
+            } else {
+                return Vec::new();
             }
         }
 
@@ -310,10 +304,10 @@ impl VectorIndex {
                 if state.tombstone_ids.contains(&id) {
                     return None;
                 }
-                if let Some(ref valid_set) = allowed_ids {
-                    if !valid_set.contains(&id) {
-                        return None;
-                    }
+                if let Some(ref valid_set) = allowed_ids
+                    && !valid_set.contains(&id)
+                {
+                    return None;
                 }
                 let dist = query_point.distance(pt);
                 let sim = query_point.cosine_similarity(pt);
@@ -336,32 +330,32 @@ impl VectorIndex {
 
             let meta = state.metadata_store.get(&id).unwrap_or(&empty_meta);
 
-            if let (Some(k), Some(v)) = (filter_key, filter_value) {
-                if op != "==" {
-                    if let Some(actual_val) = meta.get(k) {
-                        if op == "!=" {
-                            if actual_val == v {
-                                continue;
-                            }
-                        } else if let (Ok(actual_num), Ok(target_num)) =
-                            (actual_val.parse::<f64>(), v.parse::<f64>())
-                        {
-                            let is_match = match op {
-                                ">" => actual_num > target_num,
-                                "<" => actual_num < target_num,
-                                ">=" => actual_num >= target_num,
-                                "<=" => actual_num <= target_num,
-                                _ => false,
-                            };
-                            if !is_match {
-                                continue;
-                            }
-                        } else {
+            if let (Some(k), Some(v)) = (filter_key, filter_value)
+                && op != "=="
+            {
+                if let Some(actual_val) = meta.get(k) {
+                    if op == "!=" {
+                        if actual_val == v {
+                            continue;
+                        }
+                    } else if let (Ok(actual_num), Ok(target_num)) =
+                        (actual_val.parse::<f64>(), v.parse::<f64>())
+                    {
+                        let is_match = match op {
+                            ">" => actual_num > target_num,
+                            "<" => actual_num < target_num,
+                            ">=" => actual_num >= target_num,
+                            "<=" => actual_num <= target_num,
+                            _ => false,
+                        };
+                        if !is_match {
                             continue;
                         }
                     } else {
                         continue;
                     }
+                } else {
+                    continue;
                 }
             }
 
@@ -387,10 +381,10 @@ impl VectorIndex {
         let mut file = File::create(file_path).map_err(|e| e.to_string())?;
         file.write_all(&serialized).map_err(|e| e.to_string())?;
 
-        if let Ok(wal_lock) = self.wal_path.read() {
-            if let Some(ref path) = *wal_lock {
-                let _ = File::create(path);
-            }
+        if let Ok(wal_lock) = self.wal_path.read()
+            && let Some(ref path) = *wal_lock
+        {
+            let _ = File::create(path);
         }
 
         Ok(())
@@ -401,55 +395,53 @@ impl VectorIndex {
 
         if let Ok(mut file) = File::open(file_path) {
             let mut buffer = Vec::new();
-            if file.read_to_end(&mut buffer).is_ok() {
-                if let Ok(loaded) = serde_json::from_slice::<InnerState>(&buffer) {
-                    *state = loaded;
-                }
+            if file.read_to_end(&mut buffer).is_ok()
+                && let Ok(loaded) = serde_json::from_slice::<InnerState>(&buffer)
+            {
+                *state = loaded;
             }
         }
 
         // Replay WAL if configured
-        if let Ok(wal_lock) = self.wal_path.read() {
-            if let Some(ref path) = *wal_lock {
-                if let Ok(wal_file) = File::open(path) {
-                    let reader = BufReader::new(wal_file);
-                    for line in reader.lines().map_while(Result::ok) {
-                        if let Ok(entry) = serde_json::from_str::<WalEntry>(&line) {
-                            match entry {
-                                WalEntry::Insert {
-                                    id,
-                                    vector,
-                                    metadata,
-                                } => {
-                                    state.raw_vectors.push(VectorPoint(vector));
-                                    state.ids.push(id);
-                                    state.metadata_store.insert(id, metadata.clone());
+        if let Ok(wal_lock) = self.wal_path.read()
+            && let Some(ref path) = *wal_lock
+            && let Ok(wal_file) = File::open(path)
+        {
+            let reader = BufReader::new(wal_file);
+            for line in reader.lines().map_while(Result::ok) {
+                if let Ok(entry) = serde_json::from_str::<WalEntry>(&line) {
+                    match entry {
+                        WalEntry::Insert {
+                            id,
+                            vector,
+                            metadata,
+                        } => {
+                            state.raw_vectors.push(VectorPoint(vector));
+                            state.ids.push(id);
+                            state.metadata_store.insert(id, metadata.clone());
 
-                                    for (k, v) in &metadata {
-                                        state
-                                            .inverted_index
-                                            .entry(k.clone())
-                                            .or_default()
-                                            .entry(v.clone())
-                                            .or_default()
-                                            .insert(id);
+                            for (k, v) in &metadata {
+                                state
+                                    .inverted_index
+                                    .entry(k.clone())
+                                    .or_default()
+                                    .entry(v.clone())
+                                    .or_default()
+                                    .insert(id);
+                            }
+                            state.tombstone_ids.remove(&id);
+                        }
+                        WalEntry::Delete { id } => {
+                            if let Some(meta) = state.metadata_store.remove(&id) {
+                                for (k, v) in meta {
+                                    if let Some(val_map) = state.inverted_index.get_mut(&k)
+                                        && let Some(id_set) = val_map.get_mut(&v)
+                                    {
+                                        id_set.remove(&id);
                                     }
-                                    state.tombstone_ids.remove(&id);
-                                }
-                                WalEntry::Delete { id } => {
-                                    if let Some(meta) = state.metadata_store.remove(&id) {
-                                        for (k, v) in meta {
-                                            if let Some(val_map) = state.inverted_index.get_mut(&k)
-                                            {
-                                                if let Some(id_set) = val_map.get_mut(&v) {
-                                                    id_set.remove(&id);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    state.tombstone_ids.insert(id);
                                 }
                             }
+                            state.tombstone_ids.insert(id);
                         }
                     }
                 }
@@ -470,4 +462,3 @@ impl VectorIndex {
         self.len() == 0
     }
 }
-

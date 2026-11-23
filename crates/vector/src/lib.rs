@@ -2,8 +2,8 @@ pub mod index;
 pub mod types;
 pub mod wal;
 
-pub use index::{SearchResult, VectorIndex, DEFAULT_EMBEDDING_DIM};
-pub use types::{embed_text, normalize_vector, VectorPoint};
+pub use index::{DEFAULT_EMBEDDING_DIM, SearchResult, VectorIndex};
+pub use types::{VectorPoint, embed_text, normalize_vector};
 pub use wal::WalEntry;
 
 #[cfg(test)]
@@ -62,11 +62,18 @@ mod tests {
         index.add_vector(10, &[1.0, 0.0, 0.0], m1);
         index.add_vector(20, &[0.9, 0.1, 0.0], m2);
 
-        let eq_res = index.search_filtered(&[1.0, 0.0, 0.0], 5, Some("category"), Some("code"), Some("=="));
+        let eq_res = index.search_filtered(
+            &[1.0, 0.0, 0.0],
+            5,
+            Some("category"),
+            Some("code"),
+            Some("=="),
+        );
         assert_eq!(eq_res.len(), 1);
         assert_eq!(eq_res[0].id, 20);
 
-        let gt_res = index.search_filtered(&[1.0, 0.0, 0.0], 5, Some("score"), Some("50"), Some(">"));
+        let gt_res =
+            index.search_filtered(&[1.0, 0.0, 0.0], 5, Some("score"), Some("50"), Some(">"));
         assert_eq!(gt_res.len(), 1);
         assert_eq!(gt_res[0].id, 10);
 
@@ -102,4 +109,3 @@ mod tests {
         let _ = std::fs::remove_file(wal_path);
     }
 }
-

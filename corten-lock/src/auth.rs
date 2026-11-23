@@ -65,11 +65,9 @@ impl PamAuth {
                             }
                             PamReturnCode::Service_Err
                             | PamReturnCode::System_Err
-                            | PamReturnCode::Perm_Denied => {
-                                AuthOutcome::ServiceUnavailable(format!(
-                                    "PAM servis hatası ({service}: {code:?})"
-                                ))
-                            }
+                            | PamReturnCode::Perm_Denied => AuthOutcome::ServiceUnavailable(
+                                format!("PAM servis hatası ({service}: {code:?})"),
+                            ),
                             _ => AuthOutcome::InvalidCredentials,
                         }
                     }

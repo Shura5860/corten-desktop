@@ -3,15 +3,15 @@ use std::time::Duration;
 
 use corten_config::{AppearanceConfig, ConfigManager};
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, ThemeMode, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS,
-    NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, ThemeMode,
 };
 use iced::widget::{button, container, horizontal_space, row, scrollable, text};
 use iced::{Alignment, Element, Length, Subscription};
+use iced_layershell::Application;
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use iced_runtime::Task;
 
 use crate::config::WidgetsConfig;
@@ -67,7 +67,9 @@ struct WidgetCatalogEntry {
 }
 
 impl CortenWidgetDrawerApp {
-    pub fn run_drawer(config_manager: ConfigManager<WidgetsConfig>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn run_drawer(
+        config_manager: ConfigManager<WidgetsConfig>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let flags = DrawerFlags { config_manager };
 
         CortenWidgetDrawerApp::run(Settings {
@@ -79,7 +81,7 @@ impl CortenWidgetDrawerApp {
             ],
             layer_settings: LayerShellSettings {
                 anchor: Anchor::Bottom | Anchor::Left | Anchor::Right,
-                layer: Layer::Top, // Appears above open windows
+                layer: Layer::Top,       // Appears above open windows
                 margin: (0, 32, 74, 32), // Floats gracefully above the panel dock
                 exclusive_zone: 0,
                 size: Some((0, 360)),
@@ -125,14 +127,24 @@ impl CortenWidgetDrawerApp {
         .padding([4, 12])
         .style(move |_, status| {
             let bg = if is_active {
-                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.16)
+                iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.16,
+                )
             } else if status == button::Status::Hovered {
                 iced::Color::from_rgba(1.0, 1.0, 1.0, 0.07)
             } else {
                 iced::Color::from_rgba(0.0, 0.0, 0.0, 0.20)
             };
             let border_color = if is_active {
-                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.50)
+                iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.50,
+                )
             } else {
                 iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06)
             };
@@ -174,14 +186,24 @@ impl CortenWidgetDrawerApp {
         .padding([5, 12])
         .style(move |_, status| {
             let bg = if is_enabled {
-                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.20)
+                iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.20,
+                )
             } else if status == button::Status::Hovered {
                 iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10)
             } else {
                 iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25)
             };
             let border_color = if is_enabled {
-                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.50)
+                iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.50,
+                )
             } else {
                 iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
             };
@@ -210,7 +232,9 @@ impl CortenWidgetDrawerApp {
             )
             .padding(6)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.0, 0.0, 0.0, 0.25
+                ))),
                 border: iced::Border {
                     color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                     width: 1.0,
@@ -250,7 +274,12 @@ impl CortenWidgetDrawerApp {
             })),
             border: iced::Border {
                 color: if is_enabled {
-                    iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.40)
+                    iced::Color::from_rgba(
+                        palette.primary.r,
+                        palette.primary.g,
+                        palette.primary.b,
+                        0.40,
+                    )
                 } else {
                     iced::Color::from_rgba(1.0, 1.0, 1.0, 0.07)
                 },
@@ -272,16 +301,17 @@ impl Application for CortenWidgetDrawerApp {
     fn new(flags: Self::Flags) -> (Self, Task<Self::Message>) {
         let config = flags.config_manager.get().clone();
 
-        let (active_patina, theme_mode) = ConfigManager::<AppearanceConfig>::load_or_default("appearance")
-            .map(|c| {
-                let p = PatinaVariant::from_code(&c.get().patina);
-                let m = match c.get().theme_mode {
-                    corten_config::ThemeModeChoice::Light => ThemeMode::Light,
-                    corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
-                };
-                (p, m)
-            })
-            .unwrap_or_else(|_| (PatinaVariant::Rust, ThemeMode::Dark));
+        let (active_patina, theme_mode) =
+            ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                .map(|c| {
+                    let p = PatinaVariant::from_code(&c.get().patina);
+                    let m = match c.get().theme_mode {
+                        corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                        corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
+                    };
+                    (p, m)
+                })
+                .unwrap_or_else(|_| (PatinaVariant::Rust, ThemeMode::Dark));
 
         let load_font_task = iced::font::load(LUCIDE_FONT_BYTES).map(|_| DrawerMessage::Tick);
 
@@ -322,12 +352,18 @@ impl Application for CortenWidgetDrawerApp {
                     "clock" => self.config.clock_enabled = !self.config.clock_enabled,
                     "gpu" => self.config.gpu_enabled = !self.config.gpu_enabled,
                     "weather" => self.config.weather_enabled = !self.config.weather_enabled,
-                    "weather_forecast" => self.config.weather_forecast_enabled = !self.config.weather_forecast_enabled,
-                    "quick_actions" => self.config.quick_actions_enabled = !self.config.quick_actions_enabled,
+                    "weather_forecast" => {
+                        self.config.weather_forecast_enabled = !self.config.weather_forecast_enabled
+                    }
+                    "quick_actions" => {
+                        self.config.quick_actions_enabled = !self.config.quick_actions_enabled
+                    }
                     "disk" => self.config.disk_enabled = !self.config.disk_enabled,
                     "pomodoro" => self.config.pomodoro_enabled = !self.config.pomodoro_enabled,
                     "music" => self.config.music_enabled = !self.config.music_enabled,
-                    "scratchpad" => self.config.scratchpad_enabled = !self.config.scratchpad_enabled,
+                    "scratchpad" => {
+                        self.config.scratchpad_enabled = !self.config.scratchpad_enabled
+                    }
                     _ => {}
                 }
                 self.save_config_changes();
@@ -458,10 +494,18 @@ impl Application for CortenWidgetDrawerApp {
         .padding([4, 10])
         .style(move |_| container::Style {
             background: Some(iced::Background::Color(iced::Color::from_rgba(
-                palette.primary.r, palette.primary.g, palette.primary.b, 0.15,
+                palette.primary.r,
+                palette.primary.g,
+                palette.primary.b,
+                0.15,
             ))),
             border: iced::Border {
-                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.35),
+                color: iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.35,
+                ),
                 width: 1.0,
                 radius: iced::border::Radius::from(Radius::SM),
             },
@@ -509,7 +553,8 @@ impl Application for CortenWidgetDrawerApp {
         let mut cards_row = row![].spacing(12).padding([4, 4]);
 
         for entry in entries.iter() {
-            if self.active_category != DrawerCategory::All && entry.category != self.active_category {
+            if self.active_category != DrawerCategory::All && entry.category != self.active_category
+            {
                 continue;
             }
 
@@ -518,7 +563,9 @@ impl Application for CortenWidgetDrawerApp {
         }
 
         let scrollable_deck = scrollable(cards_row)
-            .direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::default()))
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::default(),
+            ))
             .width(Length::Fill);
 
         let drawer_container = container(
@@ -534,7 +581,12 @@ impl Application for CortenWidgetDrawerApp {
                 0.08, 0.09, 0.11, 0.95,
             ))),
             border: iced::Border {
-                color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.40),
+                color: iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.40,
+                ),
                 width: 1.0,
                 radius: iced::border::Radius::from(20.0),
             },

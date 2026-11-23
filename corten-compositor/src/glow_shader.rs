@@ -196,11 +196,13 @@ impl DualKawaseBlurPipeline {
         let quarter_size: Size<i32, BufferCoord> = ((out_w / 4).max(1), (out_h / 4).max(1)).into();
 
         if self.scene_tex.as_ref().map(|(s, _)| *s) != Some(full_size) {
-            let tex = Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, full_size)?;
+            let tex =
+                Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, full_size)?;
             self.scene_tex = Some((full_size, tex));
         }
         if self.half_tex.as_ref().map(|(s, _)| *s) != Some(half_size) {
-            let tex = Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, half_size)?;
+            let tex =
+                Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, half_size)?;
             self.half_tex = Some((half_size, tex));
         }
         if self.quarter_tex.as_ref().map(|(s, _)| *s) != Some(quarter_size) {
@@ -279,7 +281,8 @@ impl DualKawaseBlurPipeline {
             // 2. Downsample 1: `scene_tex` -> `half_tex`
             {
                 let half_phys = Size::from((half_buf_size.w, half_buf_size.h));
-                let half_logical = Rectangle::from_size(Size::from((half_buf_size.w, half_buf_size.h)));
+                let half_logical =
+                    Rectangle::from_size(Size::from((half_buf_size.w, half_buf_size.h)));
                 let elem = TextureShaderElement::new(
                     smithay::backend::renderer::element::texture::TextureRenderElement::from_static_texture(
                         smithay::backend::renderer::element::Id::new(),
@@ -306,14 +309,22 @@ impl DualKawaseBlurPipeline {
                 let mut frame = gles.render(&mut target, half_phys, Transform::Flipped180)?;
                 let src = elem.src();
                 let dst = elem.geometry(1.0.into());
-                <TextureShaderElement as RenderElement<GlesRenderer>>::draw(&elem, &mut frame, src, dst, &dmg, &[])?;
+                <TextureShaderElement as RenderElement<GlesRenderer>>::draw(
+                    &elem,
+                    &mut frame,
+                    src,
+                    dst,
+                    &dmg,
+                    &[],
+                )?;
                 let _ = frame.finish()?;
             }
 
             // 3. Downsample 2: `half_tex` -> `quarter_tex`
             {
                 let q_phys = Size::from((quarter_buf_size.w, quarter_buf_size.h));
-                let q_logical = Rectangle::from_size(Size::from((quarter_buf_size.w, quarter_buf_size.h)));
+                let q_logical =
+                    Rectangle::from_size(Size::from((quarter_buf_size.w, quarter_buf_size.h)));
                 let elem = TextureShaderElement::new(
                     smithay::backend::renderer::element::texture::TextureRenderElement::from_static_texture(
                         smithay::backend::renderer::element::Id::new(),
@@ -343,7 +354,14 @@ impl DualKawaseBlurPipeline {
                 let mut frame = gles.render(&mut target, q_phys, Transform::Flipped180)?;
                 let src = elem.src();
                 let dst = elem.geometry(1.0.into());
-                <TextureShaderElement as RenderElement<GlesRenderer>>::draw(&elem, &mut frame, src, dst, &dmg, &[])?;
+                <TextureShaderElement as RenderElement<GlesRenderer>>::draw(
+                    &elem,
+                    &mut frame,
+                    src,
+                    dst,
+                    &dmg,
+                    &[],
+                )?;
                 let _ = frame.finish()?;
             }
             Ok(())
@@ -360,10 +378,14 @@ impl DualKawaseBlurPipeline {
                 if region.rect.size.w <= 0 || region.rect.size.h <= 0 {
                     continue;
                 }
-                let sx = ((region.rect.loc.x as f64 / log_out_w) * qw).clamp(0.0, (qw - 1.0).max(0.0));
-                let sy = ((region.rect.loc.y as f64 / log_out_h) * qh).clamp(0.0, (qh - 1.0).max(0.0));
-                let sw = ((region.rect.size.w as f64 / log_out_w) * qw).clamp(1.0, (qw - sx).max(1.0));
-                let sh = ((region.rect.size.h as f64 / log_out_h) * qh).clamp(1.0, (qh - sy).max(1.0));
+                let sx =
+                    ((region.rect.loc.x as f64 / log_out_w) * qw).clamp(0.0, (qw - 1.0).max(0.0));
+                let sy =
+                    ((region.rect.loc.y as f64 / log_out_h) * qh).clamp(0.0, (qh - 1.0).max(0.0));
+                let sw =
+                    ((region.rect.size.w as f64 / log_out_w) * qw).clamp(1.0, (qw - sx).max(1.0));
+                let sh =
+                    ((region.rect.size.h as f64 / log_out_h) * qh).clamp(1.0, (qh - sy).max(1.0));
 
                 let phys_w = (region.rect.size.w as f64 * scale) as f32;
                 let phys_h = (region.rect.size.h as f64 * scale) as f32;

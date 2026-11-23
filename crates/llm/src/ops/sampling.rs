@@ -44,7 +44,8 @@ pub fn apply_repetition_penalty(logits: &mut [f32], generated_tokens: &[usize], 
     }
     let penalty_window = 64;
     let start_window = generated_tokens.len().saturating_sub(penalty_window);
-    let recent_unique_tokens: HashSet<usize> = generated_tokens[start_window..].iter().cloned().collect();
+    let recent_unique_tokens: HashSet<usize> =
+        generated_tokens[start_window..].iter().cloned().collect();
 
     for &prev_token in &recent_unique_tokens {
         if prev_token < logits.len() {
@@ -57,7 +58,12 @@ pub fn apply_repetition_penalty(logits: &mut [f32], generated_tokens: &[usize], 
     }
 }
 
-pub fn sample_top_p(logits: &mut [f32], temperature: f32, top_p: f32, stop_token_ids: &HashSet<usize>) -> usize {
+pub fn sample_top_p(
+    logits: &mut [f32],
+    temperature: f32,
+    top_p: f32,
+    stop_token_ids: &HashSet<usize>,
+) -> usize {
     let params = SamplerParams {
         temperature,
         top_k: 40,
@@ -87,12 +93,19 @@ pub fn sample_token(
     let k_cutoff = params.top_k.min(indexed.len());
     indexed.truncate(k_cutoff);
 
-    let max_logit = indexed.iter().map(|(_, val)| *val).fold(f32::NEG_INFINITY, f32::max);
+    let max_logit = indexed
+        .iter()
+        .map(|(_, val)| *val)
+        .fold(f32::NEG_INFINITY, f32::max);
     let mut sum_probs = 0.0f32;
     let mut probs: Vec<(usize, f32)> = indexed
         .into_iter()
         .map(|(idx, val)| {
-            let p = if val == f32::NEG_INFINITY { 0.0 } else { (val - max_logit).exp() };
+            let p = if val == f32::NEG_INFINITY {
+                0.0
+            } else {
+                (val - max_logit).exp()
+            };
             sum_probs += p;
             (idx, p)
         })
@@ -118,7 +131,7 @@ pub fn sample_token(
     let filtered_sum: f32 = filtered_probs.iter().map(|&(_, p)| p).sum();
 
     let mut rng = rand::thread_rng();
-    let r: f32 = rng.gen::<f32>() * filtered_sum;
+    let r: f32 = rng.r#gen::<f32>() * filtered_sum;
     let mut current_p = 0.0;
 
     for &(idx, p) in filtered_probs {

@@ -5,7 +5,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -333,7 +333,8 @@ pub struct WindowRuleConfig {
 
 impl WindowRuleConfig {
     pub fn opacity_float(&self) -> Option<f32> {
-        self.opacity_percent.map(|p| (p.clamp(10, 100) as f32) / 100.0)
+        self.opacity_percent
+            .map(|p| (p.clamp(10, 100) as f32) / 100.0)
     }
 }
 

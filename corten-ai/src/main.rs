@@ -6,22 +6,22 @@ use tracing::info;
 use corten_config::{AiSettingsConfig, AppearanceConfig, ConfigManager};
 use corten_theme::iced_styles::input_style;
 use corten_theme::{
-    Icon, Palette, PatinaVariant, Radius, Spacing, ThemeMode, Typography, LUCIDE_FONT,
-    LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
+    Radius, Spacing, ThemeMode, Typography,
 };
-use iced::keyboard::key::Named;
 use iced::keyboard::Key;
+use iced::keyboard::key::Named;
 use iced::widget::{
     button, column, container, horizontal_space, row, scrollable, text, text_input, vertical_space,
 };
-use iced::{event, Alignment, Element, Event, Length, Subscription};
+use iced::{Alignment, Element, Event, Length, Subscription, event};
+use iced_layershell::Application;
 use iced_layershell::actions::LayershellCustomActions;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use iced_runtime::Task;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 mod actions;
 mod aura;
@@ -36,13 +36,25 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() > 1 {
         match args[1].as_str() {
             "--help" | "-h" => {
-                println!("Corten AI (AURA-CORE v0.2.0) — Saf Rust Yerel Yapay Zekâ & Masaüstü Ajanı");
+                println!(
+                    "Corten AI (AURA-CORE v0.2.0) — Saf Rust Yerel Yapay Zekâ & Masaüstü Ajanı"
+                );
                 println!("Kullanım:");
-                println!("  corten-ai                        Masaüstü HUD arayüzünü başlatır (Wayland)");
-                println!("  corten-ai --ask <SORGU>          Terminal üzerinden doğrudan AURA-CORE sorgusu çalıştırır");
-                println!("  corten-ai --prompt <SORGU>       HUD arayüzünü belirtilen sorguyla açar");
-                println!("  corten-ai --audit <DOSYA>        Belirtilen dosyayı güvenlik denetimiyle HUD'da açar");
-                println!("  corten-ai --daemon               Arka plan indeksleme ve bellek servisini çalıştırır");
+                println!(
+                    "  corten-ai                        Masaüstü HUD arayüzünü başlatır (Wayland)"
+                );
+                println!(
+                    "  corten-ai --ask <SORGU>          Terminal üzerinden doğrudan AURA-CORE sorgusu çalıştırır"
+                );
+                println!(
+                    "  corten-ai --prompt <SORGU>       HUD arayüzünü belirtilen sorguyla açar"
+                );
+                println!(
+                    "  corten-ai --audit <DOSYA>        Belirtilen dosyayı güvenlik denetimiyle HUD'da açar"
+                );
+                println!(
+                    "  corten-ai --daemon               Arka plan indeksleme ve bellek servisini çalıştırır"
+                );
                 return Ok(());
             }
             "--version" | "-V" => {
@@ -439,56 +451,56 @@ impl Application for CortenAiApp {
                 self.active_stream_thought.clear();
                 self.stream_rx = Some(rx_arc);
             }
-            Message::StreamChunkReceived(chunk) => {
-                match chunk {
-                    StreamChunk::Thought(t) => {
-                        self.active_stream_thought.push_str(&t);
-                    }
-                    StreamChunk::Token(token) => {
-                        self.active_stream_content.push_str(&token);
-                    }
-                    StreamChunk::ActionExecuted(feedback) => {
-                        self.active_stream_content.push_str(&format!("\n\n{}", feedback));
-                    }
-                    StreamChunk::Error(err) => {
-                        self.active_stream_content.push_str(&format!("\n\n⚠️ Hata: {}", err));
-                        self.is_loading = false;
-                        self.stream_rx = None;
-                        let thought = if self.active_stream_thought.trim().is_empty() {
-                            None
-                        } else {
-                            Some(self.active_stream_thought.clone())
-                        };
-                        if !self.active_stream_content.trim().is_empty() {
-                            self.history.push(ChatMessage {
-                                role: MessageRole::Assistant,
-                                content: self.active_stream_content.clone(),
-                                thought,
-                            });
-                        }
-                        self.active_stream_content.clear();
-                        self.active_stream_thought.clear();
-                    }
-                    StreamChunk::Done => {
-                        self.is_loading = false;
-                        self.stream_rx = None;
-                        let thought = if self.active_stream_thought.trim().is_empty() {
-                            None
-                        } else {
-                            Some(self.active_stream_thought.clone())
-                        };
-                        if !self.active_stream_content.trim().is_empty() {
-                            self.history.push(ChatMessage {
-                                role: MessageRole::Assistant,
-                                content: self.active_stream_content.clone(),
-                                thought,
-                            });
-                        }
-                        self.active_stream_content.clear();
-                        self.active_stream_thought.clear();
-                    }
+            Message::StreamChunkReceived(chunk) => match chunk {
+                StreamChunk::Thought(t) => {
+                    self.active_stream_thought.push_str(&t);
                 }
-            }
+                StreamChunk::Token(token) => {
+                    self.active_stream_content.push_str(&token);
+                }
+                StreamChunk::ActionExecuted(feedback) => {
+                    self.active_stream_content
+                        .push_str(&format!("\n\n{}", feedback));
+                }
+                StreamChunk::Error(err) => {
+                    self.active_stream_content
+                        .push_str(&format!("\n\n⚠️ Hata: {}", err));
+                    self.is_loading = false;
+                    self.stream_rx = None;
+                    let thought = if self.active_stream_thought.trim().is_empty() {
+                        None
+                    } else {
+                        Some(self.active_stream_thought.clone())
+                    };
+                    if !self.active_stream_content.trim().is_empty() {
+                        self.history.push(ChatMessage {
+                            role: MessageRole::Assistant,
+                            content: self.active_stream_content.clone(),
+                            thought,
+                        });
+                    }
+                    self.active_stream_content.clear();
+                    self.active_stream_thought.clear();
+                }
+                StreamChunk::Done => {
+                    self.is_loading = false;
+                    self.stream_rx = None;
+                    let thought = if self.active_stream_thought.trim().is_empty() {
+                        None
+                    } else {
+                        Some(self.active_stream_thought.clone())
+                    };
+                    if !self.active_stream_content.trim().is_empty() {
+                        self.history.push(ChatMessage {
+                            role: MessageRole::Assistant,
+                            content: self.active_stream_content.clone(),
+                            thought,
+                        });
+                    }
+                    self.active_stream_content.clear();
+                    self.active_stream_thought.clear();
+                }
+            },
             Message::CopyCode(code, idx) => {
                 self.copied_index = Some(idx);
                 let code_to_copy = code;
@@ -497,10 +509,9 @@ impl Application for CortenAiApp {
                     if let Ok(mut child) = std::process::Command::new("wl-copy")
                         .stdin(std::process::Stdio::piped())
                         .spawn()
+                        && let Some(mut stdin) = child.stdin.take()
                     {
-                        if let Some(mut stdin) = child.stdin.take() {
-                            let _ = stdin.write_all(code_to_copy.as_bytes());
-                        }
+                        let _ = stdin.write_all(code_to_copy.as_bytes());
                     }
                 });
                 return Task::perform(
@@ -515,7 +526,9 @@ impl Application for CortenAiApp {
             }
             Message::CursorTick => {
                 self.cursor_blink = !self.cursor_blink;
-                if let Ok(app_cfg) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
+                if let Ok(app_cfg) =
+                    ConfigManager::<AppearanceConfig>::load_or_default("appearance")
+                {
                     let new_patina = PatinaVariant::from_code(&app_cfg.get().patina);
                     if new_patina != self.active_patina {
                         self.active_patina = new_patina;
@@ -570,7 +583,9 @@ impl Application for CortenAiApp {
                 )
                 .padding([2, 6])
                 .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.05
+                    ))),
                     border: iced::Border {
                         radius: iced::border::Radius::from(Radius::SM),
                         ..Default::default()
@@ -587,9 +602,13 @@ impl Application for CortenAiApp {
                         .font(LUCIDE_FONT)
                         .size(11.0)
                         .color(palette.text_primary.to_iced()),
-                    text(if self.layout_mode == DeckLayoutMode::SideDeck { " Yüzen Mod" } else { " Kenar Deck" })
-                        .size(11.0)
-                        .color(palette.text_primary.to_iced()),
+                    text(if self.layout_mode == DeckLayoutMode::SideDeck {
+                        " Yüzen Mod"
+                    } else {
+                        " Kenar Deck"
+                    })
+                    .size(11.0)
+                    .color(palette.text_primary.to_iced()),
                 ]
                 .align_y(Alignment::Center),
             )
@@ -645,9 +664,7 @@ impl Application for CortenAiApp {
                         .font(LUCIDE_FONT)
                         .size(11.0)
                         .color(palette.text_muted.to_iced()),
-                    text(" ESC")
-                        .size(11.0)
-                        .color(palette.text_muted.to_iced()),
+                    text(" ESC").size(11.0).color(palette.text_muted.to_iced()),
                 ]
                 .align_y(Alignment::Center),
             )
@@ -691,14 +708,12 @@ impl Application for CortenAiApp {
                     "Aktif Motor • 11434"
                 },
             ),
-            BackendType::LlamaCpp { model, .. } => (
-                format!("llama-server: {}", model),
-                "Aktif Motor • 8080",
-            ),
-            BackendType::AuraCore { .. } => (
-                "AURA-CORE (8000)".to_string(),
-                "Yüksek Başarım Motoru",
-            ),
+            BackendType::LlamaCpp { model, .. } => {
+                (format!("llama-server: {}", model), "Aktif Motor • 8080")
+            }
+            BackendType::AuraCore { .. } => {
+                ("AURA-CORE (8000)".to_string(), "Yüksek Başarım Motoru")
+            }
             BackendType::Offline => (
                 "Çevrimdışı (Masaüstü Eylem Modu)".to_string(),
                 "Yerel Araçlar • Çevrimdışı",
@@ -714,7 +729,10 @@ impl Application for CortenAiApp {
                 row![
                     button(
                         row![
-                            text(Icon::CPU).font(LUCIDE_FONT).size(13.0).color(palette.primary.to_iced()),
+                            text(Icon::CPU)
+                                .font(LUCIDE_FONT)
+                                .size(13.0)
+                                .color(palette.primary.to_iced()),
                             text(if self.is_loading {
                                 "Düşünüyor / Üretiyor...".to_string()
                             } else {
@@ -751,7 +769,9 @@ impl Application for CortenAiApp {
         .padding([8, 12])
         .width(Length::Fill)
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.025))),
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                1.0, 1.0, 1.0, 0.025,
+            ))),
             border: iced::Border {
                 color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                 width: 1.0,
@@ -762,7 +782,12 @@ impl Application for CortenAiApp {
 
         // 3. Bento Quick Action Strip
         let chips_row = row![
-            Self::chip_button(Icon::CAMERA, "Ekran Analizi", palette, Message::AnalyzeScreenRequested),
+            Self::chip_button(
+                Icon::CAMERA,
+                "Ekran Analizi",
+                palette,
+                Message::AnalyzeScreenRequested
+            ),
             Self::chip_button(
                 Icon::ZAP,
                 "Sistem Durumu",
@@ -781,7 +806,12 @@ impl Application for CortenAiApp {
                 palette,
                 Message::QuickAction("vektör ara: wayland".into())
             ),
-            Self::chip_button(Icon::ACTIVITY, "Hafıza", palette, Message::QuickAction("hafıza".into())),
+            Self::chip_button(
+                Icon::ACTIVITY,
+                "Hafıza",
+                palette,
+                Message::QuickAction("hafıza".into())
+            ),
         ]
         .spacing(Spacing::XS);
 
@@ -803,9 +833,11 @@ impl Application for CortenAiApp {
                             text("Corten Executive Copilot")
                                 .size(Typography::BODY)
                                 .color(palette.text_primary.to_iced()),
-                            text("Saf Rust mimarili, yerel ve tam gizlilik odaklı masaüstü asistanı.")
-                                .size(Typography::CAPTION)
-                                .color(palette.text_muted.to_iced()),
+                            text(
+                                "Saf Rust mimarili, yerel ve tam gizlilik odaklı masaüstü asistanı."
+                            )
+                            .size(Typography::CAPTION)
+                            .color(palette.text_muted.to_iced()),
                         ]
                         .spacing(2),
                     ]
@@ -857,7 +889,9 @@ impl Application for CortenAiApp {
             .padding(Spacing::MD)
             .width(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.02,
+                ))),
                 border: iced::Border {
                     color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05),
                     width: 1.0,
@@ -944,9 +978,7 @@ impl Application for CortenAiApp {
                             column![
                                 toggle_btn,
                                 container(
-                                    text(thought)
-                                        .size(11.0)
-                                        .color(palette.text_muted.to_iced())
+                                    text(thought).size(11.0).color(palette.text_muted.to_iced())
                                 )
                                 .padding([8, 10])
                                 .width(Length::Fill)
@@ -1365,11 +1397,7 @@ fn parse_response(raw: &str) -> Vec<ResponseSegment> {
                 None => ("KOD".to_string(), part.trim()),
             };
             segments.push(ResponseSegment::Code {
-                lang: if lang.is_empty() {
-                    "KOD".into()
-                } else {
-                    lang
-                },
+                lang: if lang.is_empty() { "KOD".into() } else { lang },
                 code: code_content.to_string(),
             });
         }
@@ -1392,21 +1420,30 @@ impl CortenAiApp {
                 text(title)
                     .size(11.0)
                     .font(iced::Font {
-                        weight: if is_active { iced::font::Weight::Bold } else { iced::font::Weight::Normal },
+                        weight: if is_active {
+                            iced::font::Weight::Bold
+                        } else {
+                            iced::font::Weight::Normal
+                        },
                         ..Default::default()
                     })
                     .color(if is_active {
                         palette.primary.to_iced()
                     } else {
                         palette.text_muted.to_iced()
-                    })
+                    }),
             )
             .padding([4, 10]),
         )
         .padding(0)
         .style(move |_, status| {
             let bg = if is_active {
-                iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.22)
+                iced::Color::from_rgba(
+                    palette.primary.r,
+                    palette.primary.g,
+                    palette.primary.b,
+                    0.22,
+                )
             } else {
                 match status {
                     button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
@@ -1444,9 +1481,7 @@ impl CortenAiApp {
                     .font(LUCIDE_FONT)
                     .size(11.0)
                     .color(palette.primary.to_iced()),
-                text(label)
-                    .size(11.0)
-                    .color(palette.text_muted.to_iced()),
+                text(label).size(11.0).color(palette.text_muted.to_iced()),
             ]
             .spacing(5)
             .align_y(Alignment::Center),
@@ -1484,9 +1519,7 @@ impl CortenAiApp {
                         .font(LUCIDE_FONT)
                         .size(13.0)
                         .color(palette.primary.to_iced()),
-                    text(title)
-                        .size(11.5)
-                        .color(palette.primary.to_iced()),
+                    text(title).size(11.5).color(palette.primary.to_iced()),
                 ]
                 .spacing(5)
                 .align_y(Alignment::Center),
