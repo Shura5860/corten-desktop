@@ -7,8 +7,8 @@
 **A purpose-built, process-isolated Wayland desktop ecosystem forged in pure Rust.**  
 *Zero C display wrappers (`wlroots`), zero Electron/WebKit runtimes, and zero fragile glue scripts.*
 
-[![Version](https://img.shields.io/badge/Release-v0.5.8-d96b43.svg?style=flat-square)](https://github.com/Shura5860/corten-desktop/releases/tag/v0.5.8)
-[![Language](https://img.shields.io/badge/Language-Rust%202021-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
+[![Version](https://img.shields.io/badge/Release-v0.6.0-d96b43.svg?style=flat-square)](https://github.com/Shura5860/corten-desktop/releases/tag/v0.6.0)
+[![Language](https://img.shields.io/badge/Language-Rust%202024-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Display Protocol](https://img.shields.io/badge/Protocol-Wayland-blue.svg?style=flat-square&logo=wayland)](https://wayland.freedesktop.org/)
 [![Compositor Engine](https://img.shields.io/badge/Engine-Smithay%200.7-red.svg?style=flat-square)](https://github.com/Smithay/smithay)
 [![UI Toolkit](https://img.shields.io/badge/Shell%20Toolkit-Iced%200.13%20(tiny--skia)-blueviolet.svg?style=flat-square)](https://github.com/iced-rs/iced)
@@ -240,7 +240,7 @@ For Arch-based systems, Corten can be installed in a single automated step:
 
 ---
 
-### Distribution Packages (`v0.5.8`)
+### Distribution Packages (`v0.6.0`)
 
 * **Arch Linux (PKGBUILD):**
   ```bash
@@ -260,8 +260,8 @@ For Arch-based systems, Corten can be installed in a single automated step:
   ```
 * **Debian / Ubuntu (`.deb` builder):**
   ```bash
-  ./packaging/debian/build-deb.sh 0.5.8
-  sudo dpkg -i target/debian/corten-desktop_0.5.8_*.deb
+  ./packaging/debian/build-deb.sh 0.6.0
+  sudo dpkg -i target/debian/corten-desktop_0.6.0_*.deb
   ```
 * **Fedora / RHEL (RPM Spec):**
   ```bash
@@ -327,7 +327,7 @@ Keybindings are configured via TOML in `~/.config/corten/corten.toml`:
 | <kbd>PrtScn</kbd> | Fullscreen capture (saved to `~/Pictures/` & copied to clipboard) |
 | <kbd>Super</kbd> + <kbd>1</kbd> .. <kbd>9</kbd> | Switch to workspace `1..9` |
 | <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>1</kbd> .. <kbd>9</kbd> | Move active window to workspace `1..9` |
-| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>Escape</kbd> | Emergency session shutdown and return to TTY |
+| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Backspace</kbd> | Emergency session shutdown and return to TTY (when unlocked) |
 
 ---
 
