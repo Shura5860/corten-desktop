@@ -2,29 +2,27 @@
 
 <img src="assets/logo_256.png" alt="Corten Desktop Logo" width="128" />
 
-# Corten Desktop Environment
+# Corten Desktop
 
-**A purpose-built, process-isolated Wayland desktop ecosystem forged in pure Rust.**  
-*Zero C display wrappers (`wlroots`), zero Electron/WebKit runtimes, and zero fragile glue scripts.*
+**A lightweight Wayland desktop environment and compositor written in Rust (Smithay + Iced).**
 
 [![Version](https://img.shields.io/badge/Release-v0.6.0-d96b43.svg?style=flat-square)](https://github.com/Shura5860/corten-desktop/releases/tag/v0.6.0)
 [![Language](https://img.shields.io/badge/Language-Rust%202024-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Display Protocol](https://img.shields.io/badge/Protocol-Wayland-blue.svg?style=flat-square&logo=wayland)](https://wayland.freedesktop.org/)
 [![Compositor Engine](https://img.shields.io/badge/Engine-Smithay%200.7-red.svg?style=flat-square)](https://github.com/Smithay/smithay)
 [![UI Toolkit](https://img.shields.io/badge/Shell%20Toolkit-Iced%200.13%20(tiny--skia)-blueviolet.svg?style=flat-square)](https://github.com/iced-rs/iced)
-[![Clippy](https://img.shields.io/badge/Clippy-Zero%20Warnings-brightgreen.svg?style=flat-square)](#-verifying--building-from-source)
+[![Clippy](https://img.shields.io/badge/Clippy-Zero%20Warnings-brightgreen.svg?style=flat-square)](#-building-from-source)
 [![License](https://img.shields.io/badge/License-GPL--3.0-green.svg?style=flat-square)](LICENSE)
 
 <br />
 
 <p align="center">
-  <a href="#-the-corten-thesis">The Thesis</a> •
-  <a href="#-visual-showcase">Visual Showcase</a> •
-  <a href="#-engineering-architecture">Architecture</a> •
-  <a href="#-in-process-ai--vector-subsystem">Local AI Subsystem</a> •
-  <a href="#-autonomous-ota--package-management">Forge & OTA</a> •
-  <a href="#-hardware-diagnostics-probe">System Doctor</a> •
-  <a href="#-verifying--building-from-source">Build & Install</a>
+  <a href="#-overview">Overview</a> •
+  <a href="#-screenshots">Screenshots</a> •
+  <a href="#-workspace-components">Components</a> •
+  <a href="#-installation">Installation</a> •
+  <a href="#-building-from-source">Build</a> •
+  <a href="#-keyboard-shortcuts">Shortcuts</a>
 </p>
 
 ---
@@ -37,179 +35,90 @@
 
 <br />
 
-## 1. The Corten Thesis
+## Overview
 
-For over a decade, Linux desktop environments have oscillated between two extremes:
+Corten Desktop is a full Wayland desktop environment built inside a single Rust Cargo workspace.
 
-1. **The Heavyweight Monoliths:** Traditional desktop environments that ship with millions of lines of legacy C/C++ code, deep external dependencies, and background JavaScript/QML runtimes.
-2. **The Fragile Window Manager Rigs:** Tiling setups stitched together with dozens of uncoordinated tools—a compositor from one project, a bar from another, a notification daemon from a third, all bound together by custom Python and Bash glue scripts that break on library updates.
+The goal of the project is simple: provide a lightweight desktop session where the compositor, panel/dock, lock screen, file manager, settings app, notifications, and desktop utilities all work together out of the box without high resource usage or needing to manually wire together a dozen separate tools and scripts.
 
-**Corten is the architectural rejection of both compromises.**
-
-It is an integrated, cohesive desktop environment engineered from the kernel DRM/KMS layer up to the desktop widgets as a single, strongly-typed Cargo workspace. Every component—the compositor, the floating capsule dock, the notification server, the package manager, the file navigator, and the local AI copilot—speaks the same IPC protocol, shares the same memory-safe foundation, and adheres to a singular industrial design language (**Forged Steel & Glowing Copper**).
+* **Compositor (`corten-compositor`):** Built on `Smithay 0.7` with DRM/KMS direct scanout, XWayland support, Dual-Kawase blur shaders, VRR, tearing control, and both floating and tiling window layouts (Master-Stack, BSP, Monocle, and Scrollable strip).
+* **Desktop Shell & Apps (`Iced 0.13`):** Shell surfaces and built-in applications use `Iced` with the `tiny-skia` software renderer so background desktop utilities stay light on system VRAM.
+* **Unified IPC (`corten-ipc`):** Components communicate over D-Bus (`zbus`) and a Unix domain socket controllable via `cortenctl`.
 
 ---
 
-## 2. Visual Showcase
+## Screenshots
 
-### Clean Desktop & Modular HUD
-> *A low-latency desktop surface featuring hardware-accelerated GLSL ES Dual-Kawase glass shaders, a floating capsule dock, and real-time telemetry widgets.*
-
+### Desktop, Floating Dock & Widgets
 ![Corten Clean Desktop](assets/screenshots/corten-desktop.jpg)
 
----
-
-### Corten Forge & AURA Copilot
-> *Left: **Corten Forge**, a unified package manager with live Flathub API v2 browsing & search, Arch repositories, sandbox inspection, and Corten Core OTA releases.  
-> Right: **Corten AURA**, an embedded, zero-cloud desktop copilot powered by pure-Rust GGUF tensor inference and a 23-tool ReAct automation engine with Dynamic Semantic Tool Pruning.*
-
+### Package Manager (`corten-forge`) & Local Assistant (`corten-ai`)
 ![Corten Forge & AURA](assets/screenshots/corten-forge-aura.jpg)
 
----
-
-### Corten Files & System Settings
-> *Left: **Corten Files**, a dual-pane file manager with spacebar Quick Look, inline terminal drawer, and AI safety inspection.  
-> Right: **Corten Settings**, featuring an interactive multi-monitor topology canvas, 7-language UI switcher, hardware audio/display management, and custom Patina theme accents.*
-
+### File Manager (`corten-files`) & System Settings (`corten-settings`)
 ![Corten Files & Settings](assets/screenshots/corten-files-settings.jpg)
 
 ---
 
-## 3. Engineering Architecture
+## Workspace Components
 
-Corten is designed around strict separation of concerns, process isolation, and asynchronous IPC. A failure in a shell applet or UI client cannot compromise compositor stability.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                   SHELL & USER SPACE (Iced)                                     │
-│   corten-panel   •   corten-launcher   •   corten-files   •   corten-settings   •   corten-ai   │
-│   corten-forge   •   corten-widgets    •   corten-lock    •   corten-notify     •   cortenctl   │
-└───────────────────┬─────────────────────────────────────────────┬───────────────────────────────┘
-                    │ D-Bus (`zbus`) / Unix JSON-RPC              │ In-Process Linkage
-                    │ (`corten-ipc`)                              ▼
-                    │                              ┌──────────────────────────────────────────────┐
-                    │                              │      EMBEDDED AI & VECTOR SUBSYSTEM          │
-                    │                              │ • `corten-vector`: HNSW Graph + JSONL WAL    │
-                    │                              │ • `corten-llm`: `mmap` GGUF + SIMD Quant     │
-                    │                              │ • `aura.rs`: ReAct Engine + HITL Security    │
-                    ▼                              └──────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                              COMPOSITOR CORE (`corten-compositor`)                              │
-│  • Window Management (`layout.rs`): Floating, Master-Stack, BSP, Monocle & Scrollable Strip     │
-│  • Power Features: Scratchpad, Sticky/PiP, One-Click Game Mode, GPU Magnifier Zoom, Session     │
-│  • GLSL ES Pipeline (`glow_shader.rs`): SDF-Masked Dual-Kawase Blur, Active Halo Glow           │
-│  • KMS / DRM Core (`udev.rs`): Direct Scanout, Hardware Overlay Planes, VRR, Async Tearing      │
-│  • Protocols: `drm-syncobj-v1`, `idle-notify-v1`, `xdg-foreign-v2`, `foreign-toplevel-list-v1`  │
-└───────────────────┬─────────────────────────────────────────────────────────────────────────────┘
-                    │ DRM ioctl / GBM / EGL / libinput / libseat / PipeWire
-                    ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                       LINUX KERNEL                                              │
-└─────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Architectural Principles
-
-* **No C Display Wrappers:** Built natively on `Smithay 0.7` using modern Rust primitives instead of binding to C `wlroots` libraries.
-* **Deterministic Low-VRAM Shell Rendering:** Shell clients render through `Iced 0.13` with the `tiny-skia` software rasterizer. By avoiding separate OpenGL/EGL contexts for background utilities, system VRAM remains fully dedicated to user workloads, games, and creative software.
-* **Direct Hardware Scanout:** Fullscreen applications and video surfaces automatically leverage `FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY` and `ALLOW_OVERLAY_PLANE_SCANOUT`, bypassing the compositor's rendering pass to minimize display latency.
-* **Explicit Synchronization:** Implements `linux-drm-syncobj-v1` with eventfd fences, synchronizing GPU buffers directly with DRM KMS display commits without CPU stalls.
-* **Adaptive Tearing:** Supports `wp_tearing_control_v1` to allow tearing on designated fullscreen gaming surfaces when requested by the application.
+| Crate | Role |
+| :--- | :--- |
+| `corten-compositor` | Wayland compositor (DRM/KMS + winit nested mode, XWayland, floating & tiling layouts) |
+| `corten-session` | Session supervisor and environment launcher |
+| `corten-panel` | Floating capsule dock, upward app drawer, system tray (SNI), and quick controls |
+| `corten-launcher` | Application launcher, calculator, clipboard history, and file search |
+| `corten-lock` | `ext-session-lock-v1` lock screen with PAM authentication |
+| `corten-greeter` | `greetd` login screen |
+| `corten-files` | Dual-pane file manager with quick preview and integrated terminal drawer |
+| `corten-settings` | System settings (display topology, audio, network, Bluetooth, themes, keybindings) |
+| `corten-notify` | Desktop notification daemon (`org.freedesktop.Notifications`) |
+| `corten-widgets` | Desktop widgets (clock, weather, media player, GPU/system monitor, pomodoro) |
+| `corten-wallpaper` | Wallpaper daemon with multi-monitor support |
+| `corten-snipper` | Region screenshot and annotation tool |
+| `corten-monitor` | Process and system resource monitor |
+| `corten-forge` | Package manager front-end for Flatpak, Arch packages, and updates |
+| `corten-portal` / `corten-polkit` | XDG Desktop Portal backend and Polkit authentication agent |
+| `corten-ai` / `crates/llm` / `crates/vector` | Optional local assistant and GGUF inference helpers |
+| `crates/ipc` (`cortenctl`) | CLI tool for controlling the compositor, querying windows, and running `cortenctl doctor` |
 
 ---
 
-## 4. In-Process AI & Vector Subsystem
+## Installation
 
-Corten integrates an embedded, privacy-first local intelligence engine directly into the desktop environment. It does not depend on remote cloud APIs or external Python microservices.
-
-```
-                    User Intent (Natural Language or Reflex Hotkey)
-                                          │
-                                          ▼
-                         ┌─────────────────────────────────┐
-                         │   Corten AURA Executive HUD     │
-                         └────────────────┬────────────────┘
-                                          │
-                  ┌───────────────────────┴───────────────────────┐
-                  ▼                                               ▼
-   ┌─────────────────────────────┐                 ┌─────────────────────────────┐
-   │     Tensor Inference        │                 │    Semantic Vector Engine   │
-   │      (`corten-llm`)         │                 │      (`corten-vector`)      │
-   │ • Zero-copy `memmap2` GGUF  │                 │ • Navigable Small-World     │
-   │ • SIMD Quantized Dot-Prod   │                 │ • Append-Only JSONL WAL     │
-   │ • Dynamic Loopback Fallback │                 │ • Deterministic LSH Hash    │
-   └──────────────┬──────────────┘                 └──────────────┬──────────────┘
-                  │                                               │
-                  └───────────────────────┬───────────────────────┘
-                                          │ Context & Tool Selection
-                                          ▼
-                         ┌─────────────────────────────────┐
-                         │    ReAct Automation Engine      │
-                         │    (23 Desktop & System Tools)  │
-                         └────────────────┬────────────────┘
-                                          │ Destructive Action Check
-                                          ▼
-                         ┌─────────────────────────────────┐
-                         │     HITL Security Audit Gate    │
-                         │     (Audit Log + Confirmation)  │
-                         └─────────────────────────────────┘
-```
-
-1. **`corten-vector`:** A concurrent, thread-safe vector engine utilizing an append-only Write-Ahead Log (`wal.rs`) for crash safety. For built-in file search and application indexing, it utilizes deterministic Locality-Sensitive Hashing (LSH) to project token n-grams into normalized vector spaces with minimal memory overhead.
-2. **`corten-llm`:** A pure-Rust tensor execution engine that maps `.gguf` quantized weights directly into virtual memory via zero-copy memory maps (`memmap2`). Supports standard quantization formats (`Q4_K`, `Q6_K`, `Q5_0`, `Q8_0`, `F16`) on CPU via Rayon thread pools, with automatic transparent fallback to loopback GPU backends (`Ollama` or `llama-server`) when dedicated VRAM offloading is available.
-3. **`aura.rs` ReAct Agent (AURA-CORE v2.4.1):** A multi-step reasoning orchestrator equipped with a 23-tool registry and Dynamic Semantic Tool Pruning capable of managing workspaces, adjusting audio/brightness, capturing screenshots, inspecting git diffs, and querying hardware state.
-4. **Human-In-The-Loop (`HITL`) Gate:** Any potentially destructive system command (such as bulk file deletions, disk format operations, or elevated privileges) is intercepted by a security gate requiring explicit user authorization before execution.
-
----
-
-## 5. Autonomous OTA & Package Management
-
-Software distribution and system updates in Corten are managed through two specialized native crates:
-
-### Corten Forge (`corten-forge`)
-A native, unified package center providing a singular interface for software discovery and maintenance:
-* **Multi-Source Orchestration:** Concurrently queries and manages packages from **Flatpak**, native **Arch Linux repositories**, and official **Corten OTA** releases.
-* **Sandbox Permissions Inspector:** Visualizes filesystem access, network privileges, PipeWire access, and D-Bus communications before installation.
-* **Vector-Driven Search:** Instantaneous application filtering across categories (Development, Creative, Gaming, Audio/Video, System).
-
-### Corten Update Daemon (`corten-update`)
-An autonomous, background OTA update service:
-* **Version Verification:** Monitors upstream release manifests over secure channels and evaluates Semantic Versioning boundaries.
-* **Atomic Binaries Deployment:** Downloads release tarballs, verifies SHA256 checksums, and atomically updates workspace binaries with rollback preservation.
-* **Systemd Timers:** Ships with native systemd user timers (`corten-update.timer`) for scheduled maintenance without user intervention.
-
----
-
-## 6. Hardware Diagnostics Probe (`cortenctl doctor`)
-
-Corten includes an automated system health and hardware diagnostics suite built directly into `cortenctl`. It evaluates the operating environment against production Wayland requirements:
+### Quick Install (Arch Linux)
 
 ```bash
-cortenctl doctor
+./scripts/quick-install.sh
 ```
 
-```
-╔═══════════════════════════════════════════════════════════════════════╗
-║        CORTEN DESKTOP SYSTEM DOCTOR & HARDWARE DIAGNOSTICS            ║
-║        Forged Steel System Audit & Production Readiness Probe         ║
-╚═══════════════════════════════════════════════════════════════════════╝
+### Distribution Packages (`v0.6.0`)
 
-[✓] Linux Kernel Version        : Linux 6.x (Meets >= 5.15 standard)
-[✓] DRM & KMS Driver Interface  : Direct Rendering Manager active
-[✓] Graphics Acceleration       : Hardware accelerated device node found
-[✓] NVIDIA DRM Modeset          : Parameter confirmed (nvidia-drm.modeset=1)
-[✓] Critical Wayland Libraries  : libwayland-client, libxkbcommon, libseat verified
-[✓] Session Daemon Suite        : All 18 workspace binaries present and executable
-[✓] System Assets & Fonts       : Lucide vector icons, Noto Sans, Wallpapers verified
-[✓] Audio Architecture          : PipeWire & WirePlumber daemon operational
-[✓] D-Bus Session Bus           : Active user session connection verified
-
->> PRODUCTION READINESS: 100% HEALTH SCORE [PRODUCTION READY]
-```
+* **Arch Linux (PKGBUILD):**
+  ```bash
+  cd packaging/arch && makepkg -si
+  ```
+* **NixOS / Nix Flake:**
+  ```bash
+  nix build github:Shura5860/corten-desktop
+  ```
+* **Precompiled Binary Install:**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/Shura5860/corten-desktop/main/scripts/install-release-bin.sh | sudo bash
+  ```
+* **Debian / Ubuntu (`.deb` builder):**
+  ```bash
+  ./packaging/debian/build-deb.sh 0.6.0
+  sudo dpkg -i target/debian/corten-desktop_0.6.0_*.deb
+  ```
+* **Fedora / RHEL (RPM Spec):**
+  ```bash
+  rpmbuild -ba packaging/rpm/corten-desktop.spec
+  ```
 
 ---
 
-## 7. Verifying & Building from Source
+## Building from Source
 
 ### System Prerequisites
 
@@ -228,130 +137,60 @@ cortenctl doctor
   sudo dnf install @development-tools rust cargo clang clang-devel wayland-devel libxkbcommon-devel libseat-devel systemd-devel mesa-libEGL-devel mesa-libGLES-devel libinput-devel pam-devel pipewire-devel wl-clipboard
   ```
 
----
-
-### One-Line Quick Installer
-
-For Arch-based systems, Corten can be installed in a single automated step:
+### Compile & Install
 
 ```bash
-./scripts/quick-install.sh
-```
-
----
-
-### Distribution Packages (`v0.6.0`)
-
-* **Arch Linux (PKGBUILD):**
-  ```bash
-  cd packaging/arch && makepkg -si
-  ```
-* **NixOS / Nix Flake:**
-  ```bash
-  nix build github:Shura5860/corten-desktop
-  ```
-* **One-Line Fresh Arch Linux ISO Install (`archinstall` Profile):**
-  ```bash
-  archinstall --config https://raw.githubusercontent.com/Shura5860/corten-desktop/main/packaging/arch/archinstall-corten.json
-  ```
-* **One-Line Precompiled Binary Install (Existing Linux Systems):**
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/Shura5860/corten-desktop/main/scripts/install-release-bin.sh | sudo bash
-  ```
-* **Debian / Ubuntu (`.deb` builder):**
-  ```bash
-  ./packaging/debian/build-deb.sh 0.6.0
-  sudo dpkg -i target/debian/corten-desktop_0.6.0_*.deb
-  ```
-* **Fedora / RHEL (RPM Spec):**
-  ```bash
-  rpmbuild -ba packaging/rpm/corten-desktop.spec
-  ```
-
----
-
-### Manual Compilation & Verification
-
-```bash
-# 1. Clone the repository
 git clone https://github.com/Shura5860/corten-desktop.git
 cd corten-desktop
 
-# 2. Run the full unit test suite across all 30 workspace crates
+# Run tests and clippy checks
 cargo test --workspace
-
-# 3. Enforce strict static analysis (Zero Warnings Policy)
 cargo clippy --workspace --all-targets -- -D warnings
 
-# 4. Compile optimized release binaries
+# Build release binaries and install session files
 cargo build --release --workspace
-
-# 5. Install binaries, assets, portals, and Wayland session entry
 sudo ./install.sh
 ```
 
-Once installed, enable the built-in **Corten Greeter** login screen with one command (`greetd` + `cage`), select **Corten Desktop** from any display manager, or launch directly from a TTY:
+Once installed, you can select **Corten Desktop** from your display manager, enable the built-in greeter with `sudo corten-enable-greeter`, or launch directly from a TTY with `corten-session`.
+
+You can also verify system dependencies and hardware setup anytime with:
 
 ```bash
-# Optional: enable Corten Greeter login screen automatically
-sudo corten-enable-greeter
-
-# Or launch directly from a TTY
-corten-session
-```
-
----
-
-## 8. Default Keyboard Shortcuts
-
-Keybindings are configured via TOML in `~/.config/corten/corten.toml`:
-
-| Shortcut | Description |
-| :--- | :--- |
-| <kbd>Super</kbd> + <kbd>Return</kbd> | Launch default terminal (`alacritty`, `foot`, `kitty`) |
-| <kbd>Super</kbd> + <kbd>Space</kbd> | Open application launcher and semantic search (`corten-launcher`) |
-| <kbd>Super</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> | Open Corten AURA AI Copilot HUD (`corten-ai`) |
-| <kbd>Super</kbd> + <kbd>E</kbd> | Open dual-pane file manager (`corten-files`) |
-| <kbd>Super</kbd> + <kbd>I</kbd> | Open system settings & monitor topology (`corten-settings`) |
-| <kbd>Super</kbd> + <kbd>W</kbd> | Toggle Exposé / Window Overview mode |
-| <kbd>Super</kbd> + <kbd>D</kbd> | Toggle Show Desktop mode |
-| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> | Interactive region screenshot with annotation editor (`corten-snipper`) |
-| <kbd>Super</kbd> + <kbd>.</kbd> | Built-in Emoji, Math & Developer Unicode picker |
-| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd> | System-wide Color Picker / Eyedropper (`#RRGGBB` -> clipboard) |
-| <kbd>Super</kbd> + <kbd>-</kbd> / <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>-</kbd> | Toggle Drop-Down Scratchpad / Move active window to Scratchpad |
-| <kbd>Super</kbd> + <kbd>S</kbd> | Pin active window across all workspaces (Sticky / PiP) |
-| <kbd>Super</kbd> + <kbd>G</kbd> | Toggle One-Click Game Mode (VRR + Tearing + Blur Bypass + DND) |
-| <kbd>Super</kbd> + <kbd>=</kbd> / <kbd>Super</kbd> + <kbd>Ctrl</kbd> + <kbd>-</kbd> / <kbd>Super</kbd> + <kbd>Ctrl</kbd> + <kbd>Scroll</kbd> | GPU Compositor Screen Magnifier Zoom In / Out (`Super + 0` resets) |
-| <kbd>Super</kbd> + <kbd>[</kbd> / <kbd>Super</kbd> + <kbd>]</kbd> | Scroll left / right in Niri-style Scrollable Tiling strip |
-| <kbd>Super</kbd> + <kbd>R</kbd> | Cycle Scrollable column width (`33%` / `50%` / `66%` / `100%`) |
-| <kbd>PrtScn</kbd> | Fullscreen capture (saved to `~/Pictures/` & copied to clipboard) |
-| <kbd>Super</kbd> + <kbd>1</kbd> .. <kbd>9</kbd> | Switch to workspace `1..9` |
-| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>1</kbd> .. <kbd>9</kbd> | Move active window to workspace `1..9` |
-| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Backspace</kbd> | Emergency session shutdown and return to TTY (when unlocked) |
-
----
-
-## 9. IPC Control Interface (`cortenctl`)
-
-The desktop exposes a Unix domain socket and D-Bus control interface accessible via `cortenctl`:
-
-```bash
-# Query managed Wayland surfaces in JSON format
-cortenctl action windows
-
-# Trigger delayed full-screen capture
-cortenctl action screenshot --delay 3
-
-# Toggle the floating dock panel
-cortenctl panel toggle
-
-# Run hardware & production diagnostics probe
 cortenctl doctor
 ```
 
 ---
 
-## 10. License
+## Keyboard Shortcuts
 
-Corten Desktop is licensed under the **GNU General Public License v3.0** ([LICENSE](LICENSE)).  
-Crafted with precision by the Corten Desktop Contributors.
+Keybindings can be customized in `~/.config/corten/corten.toml`:
+
+| Shortcut | Description |
+| :--- | :--- |
+| <kbd>Super</kbd> + <kbd>Return</kbd> | Launch default terminal (`alacritty`, `foot`, `kitty`) |
+| <kbd>Super</kbd> + <kbd>Space</kbd> | Open application launcher (`corten-launcher`) |
+| <kbd>Super</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> | Open local assistant HUD (`corten-ai`) |
+| <kbd>Super</kbd> + <kbd>E</kbd> | Open file manager (`corten-files`) |
+| <kbd>Super</kbd> + <kbd>I</kbd> | Open system settings (`corten-settings`) |
+| <kbd>Super</kbd> + <kbd>W</kbd> | Toggle window overview / Exposé |
+| <kbd>Super</kbd> + <kbd>D</kbd> | Toggle Show Desktop |
+| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> | Region screenshot with annotation editor (`corten-snipper`) |
+| <kbd>Super</kbd> + <kbd>.</kbd> | Built-in Emoji & Unicode picker |
+| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd> | Color picker (`#RRGGBB` to clipboard) |
+| <kbd>Super</kbd> + <kbd>-</kbd> / <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>-</kbd> | Toggle scratchpad / Move active window to scratchpad |
+| <kbd>Super</kbd> + <kbd>S</kbd> | Pin active window across all workspaces (Sticky / PiP) |
+| <kbd>Super</kbd> + <kbd>G</kbd> | Toggle Game Mode (VRR + Tearing + Blur Bypass + DND) |
+| <kbd>Super</kbd> + <kbd>=</kbd> / <kbd>Super</kbd> + <kbd>Ctrl</kbd> + <kbd>Scroll</kbd> | Screen magnifier zoom in / out (`Super + 0` resets) |
+| <kbd>Super</kbd> + <kbd>[</kbd> / <kbd>Super</kbd> + <kbd>]</kbd> | Scroll left / right in Scrollable Tiling layout |
+| <kbd>Super</kbd> + <kbd>R</kbd> | Cycle scrollable column width (`33%` / `50%` / `66%` / `100%`) |
+| <kbd>PrtScn</kbd> | Fullscreen screenshot (saved to `~/Pictures/` & clipboard) |
+| <kbd>Super</kbd> + <kbd>1</kbd> .. <kbd>9</kbd> | Switch to workspace `1..9` |
+| <kbd>Super</kbd> + <kbd>Shift</kbd> + <kbd>1</kbd> .. <kbd>9</kbd> | Move active window to workspace `1..9` |
+| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Backspace</kbd> | Emergency session exit to TTY (when unlocked) |
+
+---
+
+## License
+
+Licensed under the **GNU General Public License v3.0** ([LICENSE](LICENSE)).

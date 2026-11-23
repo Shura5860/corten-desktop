@@ -826,7 +826,7 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
     install_signal_handlers();
-    info!("Starting corten-compositor (Faz 7: Dynamic Tiling Wayland Compositor)...");
+    info!("Starting corten-compositor...");
 
     // Check if launched directly from TTY / Standalone DRM mode
     let args: Vec<String> = std::env::args().collect();
@@ -2779,7 +2779,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            // FAZ 25: Per-Window Dual-Kawase Background Blur for translucent/terminal windows & Ghost Acrylic Snap Silhouette
+            // Per-window Dual-Kawase background blur for translucent/terminal windows & snap preview
             if fullscreen_win.is_none() && !state.game_mode {
                 let mut win_glass_regions = Vec::new();
                 for (window, geo) in layouts.iter() {

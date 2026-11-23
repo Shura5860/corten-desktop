@@ -36,12 +36,12 @@ members = [
 [workspace.package]
 version = "0.6.0"
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0"
 authors = ["Corten Desktop Contributors"]
 repository = "https://github.com/Shura5860/corten-desktop"
 
 [workspace.dependencies]
-# GUI Toolkit (Tam sürüm kilitli)
+# GUI Toolkit
 iced = { version = "0.13.1", default-features = false, features = ["tiny-skia"] }
 
 # IPC & D-Bus

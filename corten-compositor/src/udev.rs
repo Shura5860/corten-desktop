@@ -3799,7 +3799,7 @@ pub fn run_drm(
                 }
             }
 
-            // FAZ 25: Per-Window Dual-Kawase Background Blur & Acrylic Glass Pipeline
+            // Per-window Dual-Kawase background blur & acrylic glass pipeline
             if let Some(pipeline) = blur_pipeline.as_mut().filter(|_| !state.game_mode) {
                 let mut glass_regions: Vec<GlassRegion> = Vec::new();
 

@@ -20,7 +20,7 @@ use tracing::info;
 
 pub fn main() -> iced::Result {
     tracing_subscriber::fmt::init();
-    info!("Starting corten-greeter (Faz 6: Login Manager / Greeter)...");
+    info!("Starting corten-greeter...");
 
     iced::application(
         "Corten Login Screen",
