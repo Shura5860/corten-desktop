@@ -548,24 +548,9 @@ pub fn evaluate_window_rules_full(
         }
     }
 
-    // Smart default workspace auto-routing (unless explicitly configured by user)
-    if m.workspace.is_none() {
-        for (pattern, target_ws) in [
-            // Workspace 1: Code / Dev (💻 Kod)
-            ("code", 1), ("cursor", 1), ("zed", 1), ("sublime_text", 1), ("vscodium", 1),
-            // Workspace 2: Web Browsers (🌐 Web)
-            ("firefox", 2), ("chromium", 2), ("chrome", 2), ("brave", 2), ("zen", 2), ("epiphany", 2),
-            // Workspace 3: Chat & Communication (💬 Sohbet)
-            ("discord", 3), ("telegram", 3), ("slack", 3), ("signal", 3), ("vesktop", 3),
-            // Workspace 4: Media Players (🎵 Medya)
-            ("spotify", 4), ("rhythmbox", 4), ("vlc", 4), ("audacious", 4), ("amberol", 4),
-        ] {
-            if app_lower.contains(pattern) {
-                m.workspace = Some(target_ws);
-                break;
-            }
-        }
-    }
+    // Only route windows to another workspace when explicitly configured in user `window_rules`.
+    // Never silently teleport newly launched apps (browsers, Spotify, Discord, etc.) off the
+    // user's active workspace.
 
     m
 }
