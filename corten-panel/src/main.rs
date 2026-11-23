@@ -1546,8 +1546,8 @@ impl CortenPanelApp {
                 ws_set.insert(occ_u);
             }
         }
-        let ws_w = 24 + (ws_set.len().saturating_sub(1) as u32) * 14 + 12;
-        let left_island_w = 16 + 40 + 36 + ws_w + 16;
+        let ws_w = 24 + (ws_set.len().saturating_sub(1) as u32) * 16 + 16;
+        let left_island_w = 16 + 44 + 40 + ws_w + 16;
 
         // 2. Center Island: Corten system apps | pinned third-party + running apps
         let pinned_count = self.config.pinned_apps.len() as u32;
@@ -1578,23 +1578,40 @@ impl CortenPanelApp {
         }
         let total_app_slots = pinned_count + dyn_unpinned_count;
         let has_user_group = user_pinned + dyn_unpinned_count > 0;
-        let center_divider_w = if has_user_group { 17 } else { 0 };
-        let center_island_w = 24 + total_app_slots * 52 + center_divider_w;
+        let center_divider_w = if has_user_group { 20 } else { 0 };
+        let center_island_w = 28 + total_app_slots * 58 + center_divider_w;
 
         // 3. Right Island: Tray + Volume + Wi-Fi (+ battery) + Clock
-        let tray_w = (self.tray_items.len() as u32) * 28;
-        let battery_w = if self.battery_status.is_some() { 56 } else { 0 };
-        let right_island_w = 24 + 128 + battery_w + tray_w;
+        let tray_w = (self.tray_items.len() as u32) * 32;
+        let battery_w = if self.battery_status.is_some() { 60 } else { 0 };
+        let right_island_w = 28 + 136 + battery_w + tray_w;
 
-        // Two 10px gaps between the 3 islands + small safety margin
-        let total_content_w = left_island_w + center_island_w + right_island_w + 40;
+        // Two 10px gaps between the 3 islands + generous slack so islands never squeeze
+        let total_content_w = left_island_w + center_island_w + right_island_w + 64;
 
         let min_w = if self.show_app_drawer || self.active_window_previews.is_some() {
-            700
+            720
         } else {
-            480
+            580
         };
         total_content_w.clamp(min_w, 1800)
+    }
+
+    fn close_all_popovers(&mut self) {
+        self.show_control_center = false;
+        self.show_power_menu = false;
+        self.show_calendar = false;
+        self.show_clipboard_modal = false;
+        self.show_notification_center = false;
+        self.show_downloads_stack = false;
+        self.show_mini_task_manager = false;
+        self.show_net_speed_details = false;
+        self.show_desktop_context_hub = false;
+        self.show_app_drawer = false;
+        self.show_wifi_modal = false;
+        self.dock_context_menu = None;
+        self.active_window_previews = None;
+        self.pending_power_action = None;
     }
 
     fn layer_config_task(&mut self) -> Task<Message> {
@@ -2873,16 +2890,11 @@ impl Application for CortenPanelApp {
                 return self.layer_config_task();
             }
             Message::ToggleDownloadsStack => {
-                self.show_downloads_stack = !self.show_downloads_stack;
-                if self.show_downloads_stack {
+                let will_open = !self.show_downloads_stack;
+                self.close_all_popovers();
+                self.show_downloads_stack = will_open;
+                if will_open {
                     self.downloads_items = get_recent_downloads();
-                    self.show_control_center = false;
-                    self.show_power_menu = false;
-                    self.show_calendar = false;
-                    self.show_clipboard_modal = false;
-                    self.show_notification_center = false;
-                    self.show_mini_task_manager = false;
-                    self.dock_context_menu = None;
                 }
                 return self.layer_config_task();
             }
@@ -2956,16 +2968,10 @@ impl Application for CortenPanelApp {
                 self.mic_active = SystemInfo::is_mic_active();
             }
             Message::ToggleAudioSlider => {
-                self.show_control_center = !self.show_control_center;
-                if self.show_control_center {
-                    self.show_power_menu = false;
-                    self.show_calendar = false;
-                    self.dock_context_menu = None;
-                    self.active_window_previews = None;
-                    self.show_net_speed_details = false;
-                    self.show_downloads_stack = false;
-                    self.show_mini_task_manager = false;
-                    self.show_desktop_context_hub = false;
+                let will_open = !self.show_control_center;
+                self.close_all_popovers();
+                self.show_control_center = will_open;
+                if will_open {
                     self.popover_transition.restart();
                 }
                 return self.layer_config_task();
@@ -3004,17 +3010,10 @@ impl Application for CortenPanelApp {
                 }
             }
             Message::ToggleDesktopContextHub => {
-                self.show_desktop_context_hub = !self.show_desktop_context_hub;
-                if self.show_desktop_context_hub {
-                    self.show_control_center = false;
-                    self.show_power_menu = false;
-                    self.show_calendar = false;
-                    self.show_clipboard_modal = false;
-                    self.show_notification_center = false;
-                    self.show_downloads_stack = false;
-                    self.show_mini_task_manager = false;
-                    self.dock_context_menu = None;
-                    self.active_window_previews = None;
+                let will_open = !self.show_desktop_context_hub;
+                self.close_all_popovers();
+                self.show_desktop_context_hub = will_open;
+                if will_open {
                     self.popover_transition.restart();
                 }
                 return self.layer_config_task();
@@ -3169,16 +3168,10 @@ impl Application for CortenPanelApp {
                 self.osd_state = Some((OsdKind::Toast(toast), 100, 3));
             }
             Message::ToggleControlCenter => {
-                self.show_control_center = !self.show_control_center;
+                let will_open = !self.show_control_center;
+                self.close_all_popovers();
+                self.show_control_center = will_open;
                 if self.show_control_center {
-                    self.show_power_menu = false;
-                    self.show_calendar = false;
-                    self.dock_context_menu = None;
-                    self.active_window_previews = None;
-                    self.show_net_speed_details = false;
-                    self.show_downloads_stack = false;
-                    self.show_mini_task_manager = false;
-                    self.show_desktop_context_hub = false;
                     self.popover_transition.restart();
                     return Task::batch(vec![
                         self.layer_config_task(),
@@ -3285,27 +3278,15 @@ impl Application for CortenPanelApp {
                 }
             }
             Message::TogglePowerMenu => {
-                self.show_power_menu = !self.show_power_menu;
-                if self.show_power_menu {
-                    self.show_control_center = false;
-                    self.show_calendar = false;
-                }
+                let will_open = !self.show_power_menu;
+                self.close_all_popovers();
+                self.show_power_menu = will_open;
                 return self.layer_config_task();
             }
             Message::ToggleCalendar => {
-                self.show_calendar = !self.show_calendar;
-                if self.show_calendar {
-                    self.show_control_center = false;
-                    self.show_power_menu = false;
-                    self.dock_context_menu = None;
-                    self.active_window_previews = None;
-                    self.show_net_speed_details = false;
-                    self.show_downloads_stack = false;
-                    self.show_mini_task_manager = false;
-                    self.show_desktop_context_hub = false;
-                    self.show_clipboard_modal = false;
-                    self.show_notification_center = false;
-                }
+                let will_open = !self.show_calendar;
+                self.close_all_popovers();
+                self.show_calendar = will_open;
                 return self.layer_config_task();
             }
             Message::ShowDesktop => {
@@ -3493,20 +3474,17 @@ impl Application for CortenPanelApp {
                 return Task::perform(weather::fetch_weather_report(), Message::WeatherUpdated);
             }
             Message::ToggleClipboardModal => {
-                self.show_clipboard_modal = !self.show_clipboard_modal;
-                if self.show_clipboard_modal {
-                    self.show_control_center = false;
-                    self.show_power_menu = false;
-                    self.show_calendar = false;
-                    self.show_notification_center = false;
-                    if let Some(txt) = SystemInfo::read_clipboard_text()
-                        && self.clipboard_history.first() != Some(&txt)
-                    {
-                        self.clipboard_history.retain(|item| item != &txt);
-                        self.clipboard_history.insert(0, txt);
-                        if self.clipboard_history.len() > 30 {
-                            self.clipboard_history.truncate(30);
-                        }
+                let will_open = !self.show_clipboard_modal;
+                self.close_all_popovers();
+                self.show_clipboard_modal = will_open;
+                if will_open
+                    && let Some(txt) = SystemInfo::read_clipboard_text()
+                    && self.clipboard_history.first() != Some(&txt)
+                {
+                    self.clipboard_history.retain(|item| item != &txt);
+                    self.clipboard_history.insert(0, txt);
+                    if self.clipboard_history.len() > 30 {
+                        self.clipboard_history.truncate(30);
                     }
                 }
                 return self.layer_config_task();
@@ -3569,13 +3547,9 @@ impl Application for CortenPanelApp {
                 }
             }
             Message::ToggleNotificationCenter => {
-                self.show_notification_center = !self.show_notification_center;
-                if self.show_notification_center {
-                    self.show_control_center = false;
-                    self.show_power_menu = false;
-                    self.show_calendar = false;
-                    self.show_clipboard_modal = false;
-                }
+                let will_open = !self.show_notification_center;
+                self.close_all_popovers();
+                self.show_notification_center = will_open;
                 return self.layer_config_task();
             }
             Message::ClearNotifications => {
@@ -3583,20 +3557,10 @@ impl Application for CortenPanelApp {
             }
             Message::ToggleAppDrawer => {
                 let will_open = !self.show_app_drawer;
+                self.close_all_popovers();
                 self.show_app_drawer = will_open;
                 if will_open {
                     self.drawer_transition.restart();
-                    self.show_control_center = false;
-                    self.show_power_menu = false;
-                    self.show_calendar = false;
-                    self.show_clipboard_modal = false;
-                    self.show_notification_center = false;
-                    self.show_downloads_stack = false;
-                    self.show_mini_task_manager = false;
-                    self.show_net_speed_details = false;
-                    self.show_desktop_context_hub = false;
-                    self.dock_context_menu = None;
-                    self.active_window_previews = None;
                     self.drawer_search.clear();
 
                     let cache_stale = self
@@ -6030,7 +5994,18 @@ impl Application for CortenPanelApp {
                             .spacing(6)
                             .align_y(Alignment::Center),
                             row![
-                                text(&self.weather_report.icon).size(26.0),
+                                text(
+                                    if self.weather_report.condition.contains("Bulut")
+                                        || self.weather_report.condition.contains("Yağmur")
+                                    {
+                                        Icon::CLOUD
+                                    } else {
+                                        Icon::SUN
+                                    }
+                                )
+                                .font(LUCIDE_FONT)
+                                .size(24.0)
+                                .color(palette.primary.to_iced()),
                                 text(temp_display)
                                     .size(24.0)
                                     .color(palette.primary.to_iced()),
@@ -6080,7 +6055,10 @@ impl Application for CortenPanelApp {
                                 text(&f.day_name)
                                     .size(10.0)
                                     .color(palette.text_muted.to_iced()),
-                                text(&f.icon).size(12.0),
+                                text(Icon::CLOUD)
+                                    .font(LUCIDE_FONT)
+                                    .size(12.0)
+                                    .color(palette.text_muted.to_iced()),
                                 text(format!("{}°", f.temp_max))
                                     .size(11.0)
                                     .color(palette.text_primary.to_iced()),
@@ -6262,14 +6240,9 @@ impl Application for CortenPanelApp {
                 style
             });
 
-            let inner_card = mouse_area(calendar_card).on_press(Message::NoOp);
-            let content_col =
-                iced::widget::column![reveal_card(inner_card, reveal_max_h), dock_cluster]
-                    .spacing(12)
-                    .align_x(Alignment::Center);
-
-            mouse_area(content_col)
-                .on_press(Message::ToggleCalendar)
+            iced::widget::column![reveal_card(calendar_card, reveal_max_h), dock_cluster]
+                .spacing(popover_lift_gap)
+                .align_x(Alignment::End)
                 .into()
         } else if self.show_clipboard_modal {
             let title_row = row![
@@ -7148,14 +7121,18 @@ impl Application for CortenPanelApp {
                     style
                 });
 
-            let inner_card = mouse_area(menu_card).on_press(Message::NoOp);
-            let content_col =
-                iced::widget::column![reveal_card(inner_card, reveal_max_h), dock_cluster]
-                    .spacing(12)
-                    .align_x(Alignment::Center);
-
-            mouse_area(content_col)
-                .on_press(Message::CloseDockContextMenu)
+            let menu_area = mouse_area(
+                container(reveal_card(
+                    mouse_area(menu_card).on_press(Message::NoOp),
+                    reveal_max_h,
+                ))
+                .width(Length::Fill)
+                .align_x(Alignment::Center),
+            )
+            .on_press(Message::CloseDockContextMenu);
+            iced::widget::column![menu_area, dock_cluster]
+                .spacing(12)
+                .align_x(Alignment::Center)
                 .into()
         } else if self.show_mini_task_manager {
             let header = row![
@@ -8258,13 +8235,22 @@ impl Application for CortenPanelApp {
             })
             .on_press(Message::ToggleAppDrawer);
 
-            let inner_drawer = mouse_area(drawer_card).on_press(Message::NoOp);
-            let content_col = iced::widget::column![inner_drawer, drawer_handle_down, dock_cluster]
+            let drawer_area = mouse_area(
+                container(
+                    iced::widget::column![
+                        mouse_area(drawer_card).on_press(Message::NoOp),
+                        drawer_handle_down
+                    ]
+                    .spacing(4)
+                    .align_x(Alignment::Center),
+                )
+                .width(Length::Fill)
+                .align_x(Alignment::Center),
+            )
+            .on_press(Message::ToggleAppDrawer);
+            iced::widget::column![drawer_area, dock_cluster]
                 .spacing(4)
-                .align_x(Alignment::Center);
-
-            mouse_area(content_col)
-                .on_press(Message::ToggleAppDrawer)
+                .align_x(Alignment::Center)
                 .into()
         } else {
             let mut bar_content = iced::widget::column![]

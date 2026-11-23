@@ -419,13 +419,16 @@ impl Palette {
     }
 
     /// Parses a `#RRGGBB` or `RRGGBB` hex string and overrides `primary` & `primary_hover`
-    /// for Material You / custom wallpaper accent color theming.
+    /// when the resulting accent meets minimum WCAG UI contrast (>= 3.0:1) against the surface.
     pub fn with_custom_accent(mut self, hex: &str) -> Self {
         let clean = hex.trim().trim_start_matches('#');
         if clean.len() == 6
             && let Ok(rgb) = u32::from_str_radix(clean, 16)
         {
             let prim = Color::from_hex(rgb);
+            if prim.contrast_ratio(&self.surface_container()) < 3.0 {
+                return self;
+            }
             let delta = if self.is_light() { -0.08 } else { 0.08 };
             let hover = Color::from_rgba(
                 (prim.r + delta).clamp(0.0, 1.0),
@@ -614,8 +617,11 @@ mod tests {
         assert!((custom.primary.g - (0xA8 as f32 / 255.0)).abs() < 1e-3);
         assert!(custom.primary_hover.g > custom.primary.g);
 
-        // Invalid hex should leave primary unchanged
+        // Invalid or low-contrast hex should leave primary unchanged
         let unchanged = dark.with_custom_accent("invalid");
         assert_eq!(unchanged.primary, dark.primary);
+
+        let too_dark = dark.with_custom_accent("#43342F");
+        assert_eq!(too_dark.primary, dark.primary);
     }
 }
