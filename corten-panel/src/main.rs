@@ -204,7 +204,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             layer: Layer::Top, // High priority desktop bar, below Overlay (lockscreen)
             margin,
             exclusive_zone,
-            size: Some((initial_width, initial_config.height)), // Center-aligned compact dock pill
+            size: Some((initial_width, initial_config.height.max(82))), // Center-aligned compact dock pill + subtle ^ drawer handle
             // Request keyboard focus on demand when a popover is open so its
             // controls remain usable without a pointer.
             keyboard_interactivity: KeyboardInteractivity::OnDemand,
@@ -416,10 +416,175 @@ pub enum Message {
     RightClickCustomScript(usize),
     ConfigReloaded(PanelConfig),
     SetPatina(PatinaVariant),
+    ToggleAppDrawer,
+    DrawerAppsLoaded(Vec<DrawerAppEntry>),
+    DrawerSearchChanged(String),
+    DrawerCategorySelected(String),
+    LaunchDrawerApp(String),
     IpcCommand(PanelIpcCommand),
     IcedEvent(Event),
     LayerAction(LayershellCustomActions),
     NoOp,
+}
+
+#[derive(Debug, Clone)]
+pub struct DrawerAppEntry {
+    name: String,
+    exec: String,
+    category: &'static str,
+    icon_path: Option<PathBuf>,
+    icon_fallback: char,
+}
+
+fn scan_installed_drawer_apps() -> Vec<DrawerAppEntry> {
+    let mut dirs = vec![
+        PathBuf::from("/usr/share/applications"),
+        PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        let h = PathBuf::from(home);
+        dirs.push(h.join(".local/share/applications"));
+        dirs.push(h.join(".local/share/flatpak/exports/share/applications"));
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut apps = Vec::new();
+
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("desktop") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let mut in_main = false;
+            let mut name = String::new();
+            let mut exec = String::new();
+            let mut icon = String::new();
+            let mut categories = String::new();
+            let mut no_display = false;
+            let mut hidden = false;
+            let mut is_app = false;
+
+            for raw_line in content.lines() {
+                let line = raw_line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if line.starts_with('[') {
+                    in_main = line == "[Desktop Entry]";
+                    continue;
+                }
+                if !in_main {
+                    continue;
+                }
+                if let Some((k, v)) = line.split_once('=') {
+                    match k.trim() {
+                        "Type" => is_app = v.trim() == "Application",
+                        "Name" if name.is_empty() => name = v.trim().to_string(),
+                        "Exec" if exec.is_empty() => exec = v.trim().to_string(),
+                        "Icon" if icon.is_empty() => icon = v.trim().to_string(),
+                        "Categories" => categories = v.trim().to_ascii_lowercase(),
+                        "NoDisplay" => no_display = v.trim().eq_ignore_ascii_case("true"),
+                        "Hidden" => hidden = v.trim().eq_ignore_ascii_case("true"),
+                        _ => {}
+                    }
+                }
+            }
+
+            if !is_app || no_display || hidden || name.is_empty() || exec.is_empty() {
+                continue;
+            }
+            // Strip freedesktop Exec field codes (%u, %U, %f, %F, %i, %c, %k)
+            let cleaned_exec: String = exec
+                .split_whitespace()
+                .filter(|tok| {
+                    !matches!(
+                        *tok,
+                        "%u" | "%U" | "%f" | "%F" | "%i" | "%c" | "%k" | "%d" | "%D" | "%n" | "%N"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            if cleaned_exec.is_empty() {
+                continue;
+            }
+
+            let dedup_key = name.to_ascii_lowercase();
+            if !seen.insert(dedup_key) {
+                continue;
+            }
+
+            let category = if categories.contains("network") || categories.contains("webbrowser") {
+                "internet"
+            } else if categories.contains("development") || categories.contains("ide") {
+                "dev"
+            } else if categories.contains("audiovideo")
+                || categories.contains("audio")
+                || categories.contains("video")
+                || categories.contains("music")
+            {
+                "media"
+            } else if categories.contains("system")
+                || categories.contains("settings")
+                || categories.contains("utility")
+            {
+                "system"
+            } else {
+                "other"
+            };
+
+            let icon_key = if !icon.is_empty() {
+                icon.as_str()
+            } else {
+                path.file_stem().and_then(|s| s.to_str()).unwrap_or(&name)
+            };
+            let icon_path = if PathBuf::from(icon_key).is_file() {
+                Some(PathBuf::from(icon_key))
+            } else {
+                resolve_system_icon(icon_key)
+            };
+            let icon_fallback = app_icon_char(icon_key);
+
+            apps.push(DrawerAppEntry {
+                name,
+                exec: cleaned_exec,
+                category,
+                icon_path,
+                icon_fallback,
+            });
+        }
+    }
+
+    apps.sort_by_key(|a| a.name.to_lowercase());
+    apps
+}
+
+fn launch_drawer_exec(exec: &str) {
+    let cmd_str = exec.trim().to_string();
+    if cmd_str.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut cmd = std::process::Command::new("sh");
+        cmd.args(["-c", &cmd_str]);
+        if std::env::var_os("DISPLAY").is_none() {
+            if let Ok(rt) = std::env::var("XDG_RUNTIME_DIR") {
+                if let Ok(disp) = std::fs::read_to_string(PathBuf::from(rt).join("corten-x11-display")) {
+                    let disp = disp.trim();
+                    if !disp.is_empty() {
+                        cmd.env("DISPLAY", disp);
+                    }
+                }
+            }
+        }
+        let _ = cmd.spawn();
+    });
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,6 +641,12 @@ pub struct CortenPanelApp {
     show_calendar: bool,
     panel_visible: bool,
     show_launcher_modal: bool,
+    show_app_drawer: bool,
+    drawer_search: String,
+    drawer_category: String,
+    drawer_apps: Vec<DrawerAppEntry>,
+    drawer_loading: bool,
+    drawer_last_loaded: Option<std::time::Instant>,
     popover_transition: Transition,
     launcher_search: String,
     active_workspace: usize,
@@ -931,6 +1102,43 @@ fn resolve_system_icon(app_id: &str) -> Option<PathBuf> {
         }
     }
 
+    // Flatpak exported icons (user + system), matching exact ID or reverse-DNS stem
+    // (e.g., "brave-browser" -> "com.brave.Browser.png", "spotify" -> "com.spotify.Client.png")
+    let mut flatpak_icon_roots = vec![PathBuf::from("/var/lib/flatpak/exports/share/icons/hicolor")];
+    if let Ok(home) = std::env::var("HOME") {
+        flatpak_icon_roots.insert(
+            0,
+            PathBuf::from(home).join(".local/share/flatpak/exports/share/icons/hicolor"),
+        );
+    }
+    let key_token = clean.split(['-', '_', '.']).find(|s| s.len() >= 3).unwrap_or(clean);
+    for root in &flatpak_icon_roots {
+        for size_dir in ["128x128/apps", "64x64/apps", "48x48/apps", "scalable/apps"] {
+            let dir = root.join(size_dir);
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                        continue;
+                    };
+                    let stem_lower = stem.to_ascii_lowercase();
+                    if stem_lower == clean
+                        || stem_lower.contains(clean)
+                        || (key_token.len() >= 3 && stem_lower.contains(key_token))
+                    {
+                        if path.extension().and_then(|e| e.to_str()) == Some("svg") {
+                            if let Some(png) = convert_svg_to_png(&path, 48) {
+                                return Some(png);
+                            }
+                        } else if path.extension().and_then(|e| e.to_str()) == Some("png") {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     None
 }
 
@@ -1137,7 +1345,8 @@ impl CortenPanelApp {
         let total_content_w =
             start_orb_w + capsule_padding + workspaces_w + apps_w + dividers_w + right_w;
 
-        total_content_w.clamp(680, 1800)
+        let min_w = if self.show_app_drawer { 720 } else { 680 };
+        total_content_w.clamp(min_w, 1800)
     }
 
     fn layer_config_task(&self) -> Task<Message> {
@@ -1152,16 +1361,17 @@ impl CortenPanelApp {
             || self.dock_context_menu.is_some()
             || self.active_window_previews.is_some()
             || self.show_net_speed_details
-            || self.show_desktop_context_hub;
+            || self.show_desktop_context_hub
+            || self.show_app_drawer;
 
         let height = if !self.panel_visible {
             1
         } else if popover_open {
             560
         } else if self.osd_state.is_some() {
-            128
+            138
         } else {
-            68
+            82
         };
 
         Task::done(Message::LayerAction(LayershellCustomActions::SizeChange((
@@ -1252,6 +1462,12 @@ impl Application for CortenPanelApp {
                 show_calendar: false,
                 panel_visible: true,
                 show_launcher_modal: false,
+                show_app_drawer: false,
+                drawer_search: String::new(),
+                drawer_category: "all".into(),
+                drawer_apps: Vec::new(),
+                drawer_loading: false,
+                drawer_last_loaded: None,
                 popover_transition: Transition::new(120),
                 launcher_search: String::new(),
                 active_workspace,
@@ -1424,6 +1640,7 @@ impl Application for CortenPanelApp {
                 | Message::ToggleAudioSlider
                 | Message::ToggleWifiDetails
                 | Message::ToggleDesktopContextHub
+                | Message::ToggleAppDrawer
                 | Message::OpenDockContextMenu(_)
         ) {
             self.popover_transition.restart();
@@ -1773,7 +1990,7 @@ impl Application for CortenPanelApp {
                     let popover_open = self.show_control_center || self.show_power_menu || self.show_calendar
                         || self.show_clipboard_modal || self.show_notification_center || self.show_downloads_stack
                         || self.show_mini_task_manager || self.dock_context_menu.is_some()
-                        || self.active_window_previews.is_some() || self.show_net_speed_details || self.show_desktop_context_hub;
+                        || self.active_window_previews.is_some() || self.show_net_speed_details || self.show_desktop_context_hub || self.show_app_drawer;
                     let target_visible = !has_windows_on_ws || popover_open;
                     if self.panel_visible != target_visible {
                         self.panel_visible = target_visible;
@@ -2908,16 +3125,69 @@ impl Application for CortenPanelApp {
             Message::ClearNotifications => {
                 self.notification_history.clear();
             }
+            Message::ToggleAppDrawer => {
+                let will_open = !self.show_app_drawer;
+                self.show_app_drawer = will_open;
+                if will_open {
+                    self.show_control_center = false;
+                    self.show_power_menu = false;
+                    self.show_calendar = false;
+                    self.show_clipboard_modal = false;
+                    self.show_notification_center = false;
+                    self.show_downloads_stack = false;
+                    self.show_mini_task_manager = false;
+                    self.show_net_speed_details = false;
+                    self.show_desktop_context_hub = false;
+                    self.dock_context_menu = None;
+                    self.active_window_previews = None;
+                    self.drawer_search.clear();
+
+                    let cache_stale = self
+                        .drawer_last_loaded
+                        .is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
+                    if (self.drawer_apps.is_empty() || cache_stale) && !self.drawer_loading {
+                        self.drawer_loading = true;
+                        let scan_task = Task::perform(
+                            async {
+                                tokio::task::spawn_blocking(scan_installed_drawer_apps)
+                                    .await
+                                    .unwrap_or_default()
+                            },
+                            Message::DrawerAppsLoaded,
+                        );
+                        return Task::batch(vec![self.layer_config_task(), scan_task]);
+                    }
+                }
+                return self.layer_config_task();
+            }
+            Message::DrawerAppsLoaded(apps) => {
+                self.drawer_apps = apps;
+                self.drawer_loading = false;
+                self.drawer_last_loaded = Some(std::time::Instant::now());
+            }
+            Message::DrawerSearchChanged(q) => {
+                self.drawer_search = q;
+            }
+            Message::DrawerCategorySelected(cat) => {
+                self.drawer_category = cat;
+            }
+            Message::LaunchDrawerApp(exec) => {
+                self.show_app_drawer = false;
+                self.drawer_search.clear();
+                launch_drawer_exec(&exec);
+                return self.layer_config_task();
+            }
             Message::IcedEvent(Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(keyboard::key::Named::Escape),
                 ..
-            })) if self.show_control_center || self.show_power_menu || self.show_calendar || self.show_clipboard_modal || self.show_notification_center || self.show_desktop_context_hub || self.dock_context_menu.is_some() => {
+            })) if self.show_control_center || self.show_power_menu || self.show_calendar || self.show_clipboard_modal || self.show_notification_center || self.show_desktop_context_hub || self.show_app_drawer || self.dock_context_menu.is_some() => {
                 self.show_control_center = false;
                 self.show_power_menu = false;
                 self.show_calendar = false;
                 self.show_clipboard_modal = false;
                 self.show_notification_center = false;
                 self.show_desktop_context_hub = false;
+                self.show_app_drawer = false;
                 self.dock_context_menu = None;
                 self.pending_power_action = None;
                 return self.layer_config_task();
@@ -6638,6 +6908,248 @@ impl Application for CortenPanelApp {
                 .spacing(popover_lift_gap)
                 .align_x(Alignment::Center)
                 .into()
+        } else if self.show_app_drawer {
+            let query = self.drawer_search.trim().to_ascii_lowercase();
+            let active_cat = self.drawer_category.as_str();
+
+            let header_row = row![
+                text(Icon::SEARCH)
+                    .font(LUCIDE_FONT)
+                    .size(14.0)
+                    .color(palette.primary.to_iced()),
+                text_input("Uygulama ara...", &self.drawer_search)
+                    .on_input(Message::DrawerSearchChanged)
+                    .padding([6, 10])
+                    .size(13.0)
+                    .width(Length::Fill),
+                button(
+                    text(Icon::X)
+                        .font(LUCIDE_FONT)
+                        .size(13.0)
+                        .color(palette.text_muted.to_iced()),
+                )
+                .padding([5, 8])
+                .style(|_, status| button::Style {
+                    background: match status {
+                        button::Status::Hovered => Some(iced::Background::Color(
+                            iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+                        )),
+                        _ => None,
+                    },
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(7.0),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .on_press(Message::ToggleAppDrawer),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
+
+            let cats = [
+                ("all", "Tümü"),
+                ("internet", "İnternet"),
+                ("dev", "Geliştirme"),
+                ("media", "Medya"),
+                ("system", "Sistem"),
+            ];
+            let mut cat_row = row![].spacing(6).align_y(Alignment::Center);
+            for (code, label) in cats {
+                let is_sel = active_cat == code;
+                cat_row = cat_row.push(
+                    button(
+                        text(label)
+                            .size(11.0)
+                            .color(if is_sel {
+                                palette.on_primary().to_iced()
+                            } else {
+                                palette.text_muted.to_iced()
+                            }),
+                    )
+                    .padding([4, 10])
+                    .style(move |_, status| {
+                        let bg = if is_sel {
+                            palette.primary.to_iced()
+                        } else if matches!(status, button::Status::Hovered) {
+                            iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12)
+                        } else {
+                            iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05)
+                        };
+                        button::Style {
+                            background: Some(iced::Background::Color(bg)),
+                            border: iced::Border {
+                                radius: iced::border::Radius::from(8.0),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }
+                    })
+                    .on_press(Message::DrawerCategorySelected(code.to_string())),
+                );
+            }
+
+            let filtered: Vec<&DrawerAppEntry> = self
+                .drawer_apps
+                .iter()
+                .filter(|app| {
+                    let cat_ok = active_cat == "all" || app.category == active_cat;
+                    let q_ok = query.is_empty()
+                        || app.name.to_ascii_lowercase().contains(&query)
+                        || app.exec.to_ascii_lowercase().contains(&query);
+                    cat_ok && q_ok
+                })
+                .collect();
+
+            let grid_content: Element<'_, Self::Message> = if self.drawer_loading && self.drawer_apps.is_empty() {
+                container(
+                    text("Uygulamalar yükleniyor...")
+                        .size(13.0)
+                        .color(palette.text_muted.to_iced()),
+                )
+                .width(Length::Fill)
+                .height(Length::Fixed(280.0))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into()
+            } else if filtered.is_empty() {
+                container(
+                    text("Eşleşen uygulama bulunamadı")
+                        .size(13.0)
+                        .color(palette.text_muted.to_iced()),
+                )
+                .width(Length::Fill)
+                .height(Length::Fixed(280.0))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into()
+            } else {
+                let mut rows_col = iced::widget::column![].spacing(8).width(Length::Fill);
+                for chunk in filtered.chunks(5) {
+                    let mut grid_row = row![].spacing(8).width(Length::Fill);
+                    for app in chunk {
+                        let icon_elem: Element<'_, Self::Message> = if let Some(ref p) = app.icon_path {
+                            iced::widget::image(image::Handle::from_path(p))
+                                .width(Length::Fixed(34.0))
+                                .height(Length::Fixed(34.0))
+                                .into()
+                        } else {
+                            text(app.icon_fallback)
+                                .font(LUCIDE_FONT)
+                                .size(26.0)
+                                .color(palette.primary.to_iced())
+                                .into()
+                        };
+                        let short_name = if app.name.chars().count() > 14 {
+                            format!("{}…", app.name.chars().take(13).collect::<String>())
+                        } else {
+                            app.name.clone()
+                        };
+                        let exec_clone = app.exec.clone();
+                        let tile = button(
+                            iced::widget::column![
+                                container(icon_elem)
+                                    .width(Length::Fixed(42.0))
+                                    .height(Length::Fixed(42.0))
+                                    .center_x(Length::Fill)
+                                    .center_y(Length::Fill),
+                                text(short_name)
+                                    .size(11.0)
+                                    .color(palette.text_primary.to_iced()),
+                            ]
+                            .spacing(5)
+                            .align_x(Alignment::Center)
+                            .width(Length::Fill),
+                        )
+                        .width(Length::FillPortion(1))
+                        .padding([8, 4])
+                        .style(|_, status| {
+                            let bg = match status {
+                                button::Status::Pressed => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.16),
+                                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.09),
+                                _ => iced::Color::TRANSPARENT,
+                            };
+                            button::Style {
+                                background: Some(iced::Background::Color(bg)),
+                                border: iced::Border {
+                                    radius: iced::border::Radius::from(10.0),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            }
+                        })
+                        .on_press(Message::LaunchDrawerApp(exec_clone));
+                        grid_row = grid_row.push(tile);
+                    }
+                    // Pad incomplete last row so tiles stay uniform width
+                    for _ in chunk.len()..5 {
+                        grid_row = grid_row.push(
+                            container(row![])
+                                .width(Length::FillPortion(1)),
+                        );
+                    }
+                    rows_col = rows_col.push(grid_row);
+                }
+                iced::widget::scrollable(rows_col)
+                    .height(Length::Fixed(320.0))
+                    .width(Length::Fill)
+                    .into()
+            };
+
+            let drawer_card = container(
+                iced::widget::column![header_row, cat_row, grid_content]
+                    .spacing(10)
+                    .width(Length::Fill),
+            )
+            .padding([14, 16])
+            .width(Length::Fixed(660.0))
+            .style(move |_| {
+                let mut style = acrylic_glass_style(palette, 18.0);
+                if let Some(iced::Background::Color(color)) = style.background {
+                    style.background = Some(iced::Background::Color(iced::Color::from_rgba(
+                        color.r,
+                        color.g,
+                        color.b,
+                        color.a * popover_alpha,
+                    )));
+                }
+                style
+            });
+
+            let drawer_handle_down = button(
+                text(Icon::ARROW_DOWN)
+                    .font(LUCIDE_FONT)
+                    .size(10.0)
+                    .color(palette.primary.to_iced()),
+            )
+            .width(Length::Fixed(48.0))
+            .height(Length::Fixed(14.0))
+            .padding(0)
+            .style(move |_, status| button::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.09,
+                    0.10,
+                    0.13,
+                    if matches!(status, button::Status::Hovered) { 0.96 } else { 0.84 },
+                ))),
+                border: iced::Border {
+                    color: iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.45),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(7.0),
+                },
+                ..Default::default()
+            })
+            .on_press(Message::ToggleAppDrawer);
+
+            let inner_drawer = mouse_area(drawer_card).on_press(Message::NoOp);
+            let content_col = iced::widget::column![inner_drawer, drawer_handle_down, dock_cluster]
+                .spacing(popover_lift_gap.max(4.0))
+                .align_x(Alignment::Center);
+
+            mouse_area(content_col)
+                .on_press(Message::ToggleAppDrawer)
+                .into()
         } else {
             let mut bar_content = iced::widget::column![].spacing(8).align_x(Alignment::Center);
             if let Some((kind, lvl, _)) = &self.osd_state {
@@ -6896,10 +7408,52 @@ impl Application for CortenPanelApp {
                 bar_content = bar_content.push(osd_pill);
             }
 
-            let bottom_bar = container(dock_cluster)
+            let drawer_pull_tab = button(
+                container(
+                    text(Icon::ARROW_UP)
+                        .font(LUCIDE_FONT)
+                        .size(10.0)
+                        .color(palette.text_muted.to_iced()),
+                )
                 .width(Length::Fill)
+                .height(Length::Fill)
                 .center_x(Length::Fill)
-                .align_y(Alignment::Center);
+                .center_y(Length::Fill),
+            )
+            .width(Length::Fixed(48.0))
+            .height(Length::Fixed(14.0))
+            .padding(0)
+            .style(move |_, status| {
+                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        0.09,
+                        0.10,
+                        0.13,
+                        if hovered { 0.95 } else { 0.72 },
+                    ))),
+                    border: iced::Border {
+                        color: if hovered {
+                            iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.60)
+                        } else {
+                            iced::Color::from_rgba(1.0, 1.0, 1.0, 0.14)
+                        },
+                        width: 1.0,
+                        radius: iced::border::Radius::from(7.0),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::ToggleAppDrawer);
+
+            let bottom_bar = container(
+                iced::widget::column![drawer_pull_tab, dock_cluster]
+                    .spacing(2)
+                    .align_x(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .center_x(Length::Fill)
+            .align_y(Alignment::Center);
 
             bar_content = bar_content.push(bottom_bar);
             bar_content.into()
@@ -6907,7 +7461,7 @@ impl Application for CortenPanelApp {
 
         let _panel_height = if !self.panel_visible {
             1.0
-        } else if self.show_control_center || self.show_power_menu || self.show_calendar || self.show_clipboard_modal || self.show_notification_center || self.show_downloads_stack || self.show_mini_task_manager || self.dock_context_menu.is_some() || self.active_window_previews.is_some() || self.show_net_speed_details || self.show_desktop_context_hub {
+        } else if self.show_control_center || self.show_power_menu || self.show_calendar || self.show_clipboard_modal || self.show_notification_center || self.show_downloads_stack || self.show_mini_task_manager || self.dock_context_menu.is_some() || self.active_window_previews.is_some() || self.show_net_speed_details || self.show_desktop_context_hub || self.show_app_drawer {
             560.0
         } else {
             (self.config.height as f32).max(1.0)

@@ -506,6 +506,19 @@ impl XwmHandler for CortenCompositor {
             }
         }
     }
+
+    fn property_notify(
+        &mut self,
+        _xwm: XwmId,
+        _window: X11Surface,
+        property: smithay::xwayland::xwm::WmWindowProperty,
+    ) {
+        use smithay::xwayland::xwm::WmWindowProperty;
+        if matches!(property, WmWindowProperty::Title | WmWindowProperty::Class) {
+            self.sync_foreign_toplevels();
+            self.sync_ipc_snapshot();
+        }
+    }
 }
 
 impl CortenCompositor {

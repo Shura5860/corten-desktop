@@ -1267,7 +1267,9 @@ impl LayoutManager {
             }
         }
         let target_float = rule_match.floating.unwrap_or(auto_float);
-        let mut changed = false;
+        // Always report true on first metadata evaluation so sync_ipc_snapshot() publishes
+        // the newly received app_id & title to corten-panel's Dock immediately.
+        let mut changed = true;
 
         if let Some(op) = rule_match.opacity {
             self.set_window_target_alpha(window, op);

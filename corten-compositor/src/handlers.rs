@@ -177,6 +177,7 @@ impl CompositorHandler for CortenCompositor {
                     let target_output = self.output_for_window(win);
                     target_output.enter(surface);
                     toplevel.send_configure();
+                    metadata_changed = true;
                 }
             }
             if self
