@@ -191,35 +191,42 @@ impl SystemInfo {
 
     /// Queries the live Corten Compositor D-Bus service for a specific display output.
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity)]
+    pub fn try_get_compositor_state_for_output(output_name: Option<&str>) -> Option<(
+        usize,
+        Vec<u32>,
+        Vec<(u64, String, String, u32, bool, bool)>,
+    )> {
+        let (runtime, connection) = get_or_init_dbus()?;
+        runtime.block_on(async {
+            let proxy = corten_ipc::CompositorControlProxy::new(connection).await.ok()?;
+            let out_str = output_name.unwrap_or("");
+            if let Ok((ws, occ, windows)) = proxy.get_full_state(out_str).await {
+                return Some((ws.max(1) as usize, occ, windows));
+            }
+            // Fallback for older interface versions
+            let (active_ws, occupied) = if let Some(out) = output_name {
+                let ws = proxy.get_active_workspace_for_output(out).await.ok()?.max(1) as usize;
+                let occ = proxy.get_occupied_workspaces_for_output(out).await.unwrap_or_default();
+                (ws, occ)
+            } else {
+                let ws = proxy.get_active_workspace().await.ok()?.max(1) as usize;
+                let occ = proxy.get_occupied_workspaces().await.unwrap_or_default();
+                (ws, occ)
+            };
+            let windows = proxy.get_windows().await.ok()?;
+            Some((active_ws, occupied, windows))
+        })
+    }
+
+    #[allow(clippy::type_complexity)]
     pub fn get_compositor_state_for_output(output_name: Option<&str>) -> (
         usize,
         Vec<u32>,
         Vec<(u64, String, String, u32, bool, bool)>,
     ) {
-        let Some((runtime, connection)) = get_or_init_dbus() else {
-            return (1, Vec::new(), Vec::new());
-        };
-        runtime.block_on(async {
-            let Ok(proxy) = corten_ipc::CompositorControlProxy::new(connection).await else {
-                return (1, Vec::new(), Vec::new());
-            };
-            let out_str = output_name.unwrap_or("");
-            if let Ok((ws, occ, windows)) = proxy.get_full_state(out_str).await {
-                return (ws.max(1) as usize, occ, windows);
-            }
-            // Fallback for older interface versions
-            let (active_ws, occupied) = if let Some(out) = output_name {
-                let ws = proxy.get_active_workspace_for_output(out).await.unwrap_or(1).max(1) as usize;
-                let occ = proxy.get_occupied_workspaces_for_output(out).await.unwrap_or_default();
-                (ws, occ)
-            } else {
-                let ws = proxy.get_active_workspace().await.unwrap_or(1).max(1) as usize;
-                let occ = proxy.get_occupied_workspaces().await.unwrap_or_default();
-                (ws, occ)
-            };
-            let windows = proxy.get_windows().await.unwrap_or_default();
-            (active_ws, occupied, windows)
-        })
+        Self::try_get_compositor_state_for_output(output_name)
+            .unwrap_or_else(|| (1, Vec::new(), Vec::new()))
     }
 
     /// Switches the workspace in the current compositor

@@ -647,6 +647,7 @@ pub struct CortenPanelApp {
     drawer_apps: Vec<DrawerAppEntry>,
     drawer_loading: bool,
     drawer_last_loaded: Option<std::time::Instant>,
+    drawer_transition: Transition,
     popover_transition: Transition,
     launcher_search: String,
     active_workspace: usize,
@@ -697,6 +698,7 @@ pub struct CortenPanelApp {
     show_desktop_context_hub: bool,
     audio_vu_level: (f32, f32),
     last_dock_width: u32,
+    last_layer_size: (u32, u32),
     hovered_dock_item: Option<String>,
     launch_bounce: Option<(ActiveApp, u8)>,
     eq_tick: u8,
@@ -1349,7 +1351,7 @@ impl CortenPanelApp {
         total_content_w.clamp(min_w, 1800)
     }
 
-    fn layer_config_task(&self) -> Task<Message> {
+    fn layer_config_task(&mut self) -> Task<Message> {
         let dynamic_width = self.calculate_dock_width();
         let popover_open = self.show_control_center
             || self.show_power_menu
@@ -1374,10 +1376,14 @@ impl CortenPanelApp {
             82
         };
 
-        Task::done(Message::LayerAction(LayershellCustomActions::SizeChange((
-            dynamic_width,
-            height,
-        ))))
+        let target = (dynamic_width, height);
+        if self.last_layer_size == target {
+            return Task::none();
+        }
+        self.last_layer_size = target;
+        Task::done(Message::LayerAction(LayershellCustomActions::SizeChange(
+            target,
+        )))
     }
 }
 
@@ -1468,6 +1474,7 @@ impl Application for CortenPanelApp {
                 drawer_apps: Vec::new(),
                 drawer_loading: false,
                 drawer_last_loaded: None,
+                drawer_transition: Transition::completed(260),
                 popover_transition: Transition::new(120),
                 launcher_search: String::new(),
                 active_workspace,
@@ -1518,6 +1525,7 @@ impl Application for CortenPanelApp {
                 show_desktop_context_hub: false,
                 audio_vu_level: (0.0, 0.0),
                 last_dock_width: 600,
+                last_layer_size: (0, 0),
                 hovered_dock_item: None,
                 launch_bounce: None,
                 eq_tick: 0,
@@ -1565,6 +1573,7 @@ impl Application for CortenPanelApp {
         let timer = iced::time::every(Duration::from_millis(tick_ms)).map(|_| Message::Tick);
 
         let needs_fast_animation = !self.popover_transition.is_complete()
+            || !self.drawer_transition.is_complete()
             || self.launch_bounce.is_some()
             || self
                 .osd_state
@@ -1648,6 +1657,7 @@ impl Application for CortenPanelApp {
         match message {
             Message::AnimationTick => {
                 self.popover_transition.tick(16);
+                self.drawer_transition.tick(16);
                 if let Some((_, target_lvl, _)) = &self.osd_state {
                     self.osd_display_level =
                         Transition::smooth_lerp(self.osd_display_level, *target_lvl as f32, 0.28);
@@ -1865,16 +1875,18 @@ impl Application for CortenPanelApp {
             }
             Message::CompositorEvent(_ev) => {
                 let had_osd = self.osd_state.is_some();
-                let (active_ws, occupied_ws, windows) =
-                    SystemInfo::get_compositor_state_for_output(self.output_name.as_deref());
-                if active_ws > 0 && self.active_workspace != active_ws {
-                    self.active_workspace = active_ws;
-                    self.osd_state = Some((OsdKind::Workspace(active_ws), active_ws as u8, 3));
+                if let Some((active_ws, occupied_ws, windows)) =
+                    SystemInfo::try_get_compositor_state_for_output(self.output_name.as_deref())
+                {
+                    if active_ws > 0 && self.active_workspace != active_ws {
+                        self.active_workspace = active_ws;
+                        self.osd_state = Some((OsdKind::Workspace(active_ws), active_ws as u8, 3));
+                    }
+                    self.occupied_workspaces = occupied_ws;
+                    self.compositor_windows = windows;
+                    self.running_apps = SystemInfo::get_running_apps_from_windows(&self.compositor_windows);
+                    self.other_apps = SystemInfo::get_other_running_apps_from_windows(&self.compositor_windows);
                 }
-                self.occupied_workspaces = occupied_ws;
-                self.compositor_windows = windows;
-                self.running_apps = SystemInfo::get_running_apps_from_windows(&self.compositor_windows);
-                self.other_apps = SystemInfo::get_other_running_apps_from_windows(&self.compositor_windows);
                 let current_w = self.calculate_dock_width();
                 if current_w != self.last_dock_width || self.osd_state.is_some() != had_osd {
                     self.last_dock_width = current_w;
@@ -1897,47 +1909,49 @@ impl Application for CortenPanelApp {
                     SystemInfo::get_datetime(&self.config.time_format, &self.config.date_format);
                 self.current_time = time;
                 self.current_date = date;
-                let (active_ws, occupied_ws, windows) =
-                    SystemInfo::get_compositor_state_for_output(self.output_name.as_deref());
-                if active_ws > 0 && self.active_workspace != active_ws {
-                    self.active_workspace = active_ws;
-                    self.osd_state = Some((OsdKind::Workspace(active_ws), active_ws as u8, 3));
-                }
-                self.occupied_workspaces = occupied_ws;
-                for (_, app_id, title, _, is_active, _) in &windows {
-                    if *is_active {
-                        let hay = format!("{} {}", app_id.to_lowercase(), title.to_lowercase());
-                        if hay.contains("alacritty")
-                            || hay.contains("kitty")
-                            || hay.contains("foot")
-                            || hay.contains("konsole")
-                            || hay.contains("terminal")
-                        {
-                            self.active_app = ActiveApp::Terminal;
-                        } else if hay.contains("dolphin")
-                            || hay.contains("nautilus")
-                            || hay.contains("thunar")
-                            || hay.contains("files")
-                        {
-                            self.active_app = ActiveApp::Files;
-                        } else if hay.contains("firefox")
-                            || hay.contains("chrome")
-                            || hay.contains("brave")
-                            || hay.contains("chromium")
-                        {
-                            self.active_app = ActiveApp::Browser;
-                        } else if hay.contains("code")
-                            || hay.contains("antigravity")
-                            || hay.contains("kate")
-                            || hay.contains("gedit")
-                        {
-                            self.active_app = ActiveApp::Editor;
+                if let Some((active_ws, occupied_ws, windows)) =
+                    SystemInfo::try_get_compositor_state_for_output(self.output_name.as_deref())
+                {
+                    if active_ws > 0 && self.active_workspace != active_ws {
+                        self.active_workspace = active_ws;
+                        self.osd_state = Some((OsdKind::Workspace(active_ws), active_ws as u8, 3));
+                    }
+                    self.occupied_workspaces = occupied_ws;
+                    for (_, app_id, title, _, is_active, _) in &windows {
+                        if *is_active {
+                            let hay = format!("{} {}", app_id.to_lowercase(), title.to_lowercase());
+                            if hay.contains("alacritty")
+                                || hay.contains("kitty")
+                                || hay.contains("foot")
+                                || hay.contains("konsole")
+                                || hay.contains("terminal")
+                            {
+                                self.active_app = ActiveApp::Terminal;
+                            } else if hay.contains("dolphin")
+                                || hay.contains("nautilus")
+                                || hay.contains("thunar")
+                                || hay.contains("files")
+                            {
+                                self.active_app = ActiveApp::Files;
+                            } else if hay.contains("firefox")
+                                || hay.contains("chrome")
+                                || hay.contains("brave")
+                                || hay.contains("chromium")
+                            {
+                                self.active_app = ActiveApp::Browser;
+                            } else if hay.contains("code")
+                                || hay.contains("antigravity")
+                                || hay.contains("kate")
+                                || hay.contains("gedit")
+                            {
+                                self.active_app = ActiveApp::Editor;
+                            }
                         }
                     }
+                    self.compositor_windows = windows;
+                    self.running_apps = SystemInfo::get_running_apps_from_windows(&self.compositor_windows);
+                    self.other_apps = SystemInfo::get_other_running_apps_from_windows(&self.compositor_windows);
                 }
-                self.compositor_windows = windows;
-                self.running_apps = SystemInfo::get_running_apps_from_windows(&self.compositor_windows);
-                self.other_apps = SystemInfo::get_other_running_apps_from_windows(&self.compositor_windows);
                 let mut tick_tasks: Vec<Task<Message>> = Vec::new();
                 let mut needs_layer_sync = false;
                 let current_w = self.calculate_dock_width();
@@ -3129,6 +3143,7 @@ impl Application for CortenPanelApp {
                 let will_open = !self.show_app_drawer;
                 self.show_app_drawer = will_open;
                 if will_open {
+                    self.drawer_transition.restart();
                     self.show_control_center = false;
                     self.show_power_menu = false;
                     self.show_calendar = false;
@@ -3983,7 +3998,13 @@ impl Application for CortenPanelApp {
             for item in &self.tray_items {
                 let id = item.id.clone();
                 let id_right = item.id.clone();
-                let tray_btn = button(text(&item.icon).size(14.0))
+                let tray_glyph = app_icon_char(&format!("{} {}", item.id, item.title));
+                let tray_btn = button(
+                    text(tray_glyph)
+                        .font(LUCIDE_FONT)
+                        .size(14.0)
+                        .color(palette.text_primary.to_iced()),
+                )
                     .padding([3, 5])
                     .style(|_, status| {
                         let bg = match status {
@@ -6911,6 +6932,8 @@ impl Application for CortenPanelApp {
         } else if self.show_app_drawer {
             let query = self.drawer_search.trim().to_ascii_lowercase();
             let active_cat = self.drawer_category.as_str();
+            let drawer_eased = self.drawer_transition.eased().clamp(0.0, 1.0);
+            let animated_drawer_h = (48.0 + 372.0 * drawer_eased).round();
 
             let header_row = row![
                 text(Icon::SEARCH)
@@ -6919,16 +6942,46 @@ impl Application for CortenPanelApp {
                     .color(palette.primary.to_iced()),
                 text_input("Uygulama ara...", &self.drawer_search)
                     .on_input(Message::DrawerSearchChanged)
-                    .padding([6, 10])
+                    .padding([7, 12])
                     .size(13.0)
-                    .width(Length::Fill),
+                    .width(Length::Fill)
+                    .style(move |_, status| {
+                        let focused = matches!(status, text_input::Status::Focused);
+                        let hovered = matches!(status, text_input::Status::Hovered);
+                        text_input::Style {
+                            background: iced::Background::Color(iced::Color::from_rgba(
+                                1.0,
+                                1.0,
+                                1.0,
+                                if focused { 0.10 } else if hovered { 0.08 } else { 0.06 },
+                            )),
+                            border: iced::Border {
+                                color: if focused {
+                                    palette.primary.to_iced()
+                                } else {
+                                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.14)
+                                },
+                                width: if focused { 1.5 } else { 1.0 },
+                                radius: iced::border::Radius::from(10.0),
+                            },
+                            icon: palette.text_muted.to_iced(),
+                            placeholder: palette.text_muted.to_iced(),
+                            value: palette.text_primary.to_iced(),
+                            selection: iced::Color::from_rgba(
+                                palette.primary.r,
+                                palette.primary.g,
+                                palette.primary.b,
+                                0.35,
+                            ),
+                        }
+                    }),
                 button(
                     text(Icon::X)
                         .font(LUCIDE_FONT)
                         .size(13.0)
                         .color(palette.text_muted.to_iced()),
                 )
-                .padding([5, 8])
+                .padding([6, 9])
                 .style(|_, status| button::Style {
                     background: match status {
                         button::Status::Hovered => Some(iced::Background::Color(
@@ -6937,7 +6990,7 @@ impl Application for CortenPanelApp {
                         _ => None,
                     },
                     border: iced::Border {
-                        radius: iced::border::Radius::from(7.0),
+                        radius: iced::border::Radius::from(8.0),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -7025,9 +7078,10 @@ impl Application for CortenPanelApp {
                 .center_y(Length::Fill)
                 .into()
             } else {
-                let mut rows_col = iced::widget::column![].spacing(8).width(Length::Fill);
+                // Explicit fixed tile dimensions inside scrollable so Iced 0.13 never collapses rows!
+                let mut rows_col = iced::widget::column![].spacing(8);
                 for chunk in filtered.chunks(5) {
-                    let mut grid_row = row![].spacing(8).width(Length::Fill);
+                    let mut grid_row = row![].spacing(8).align_y(Alignment::Center);
                     for app in chunk {
                         let icon_elem: Element<'_, Self::Message> = if let Some(ref p) = app.icon_path {
                             iced::widget::image(image::Handle::from_path(p))
@@ -7041,8 +7095,8 @@ impl Application for CortenPanelApp {
                                 .color(palette.primary.to_iced())
                                 .into()
                         };
-                        let short_name = if app.name.chars().count() > 14 {
-                            format!("{}…", app.name.chars().take(13).collect::<String>())
+                        let short_name = if app.name.chars().count() > 13 {
+                            format!("{}…", app.name.chars().take(12).collect::<String>())
                         } else {
                             app.name.clone()
                         };
@@ -7050,31 +7104,37 @@ impl Application for CortenPanelApp {
                         let tile = button(
                             iced::widget::column![
                                 container(icon_elem)
-                                    .width(Length::Fixed(42.0))
-                                    .height(Length::Fixed(42.0))
-                                    .center_x(Length::Fill)
-                                    .center_y(Length::Fill),
+                                    .width(Length::Fixed(40.0))
+                                    .height(Length::Fixed(40.0))
+                                    .center_x(Length::Fixed(40.0))
+                                    .center_y(Length::Fixed(40.0)),
                                 text(short_name)
                                     .size(11.0)
                                     .color(palette.text_primary.to_iced()),
                             ]
                             .spacing(5)
-                            .align_x(Alignment::Center)
-                            .width(Length::Fill),
+                            .align_x(Alignment::Center),
                         )
-                        .width(Length::FillPortion(1))
+                        .width(Length::Fixed(116.0))
+                        .height(Length::Fixed(78.0))
                         .padding([8, 4])
                         .style(|_, status| {
                             let bg = match status {
-                                button::Status::Pressed => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.16),
-                                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.09),
-                                _ => iced::Color::TRANSPARENT,
+                                button::Status::Pressed => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.18),
+                                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10),
+                                _ => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.03),
                             };
                             button::Style {
                                 background: Some(iced::Background::Color(bg)),
                                 border: iced::Border {
+                                    color: iced::Color::from_rgba(
+                                        1.0,
+                                        1.0,
+                                        1.0,
+                                        if matches!(status, button::Status::Hovered) { 0.16 } else { 0.05 },
+                                    ),
+                                    width: 1.0,
                                     radius: iced::border::Radius::from(10.0),
-                                    ..Default::default()
                                 },
                                 ..Default::default()
                             }
@@ -7082,17 +7142,10 @@ impl Application for CortenPanelApp {
                         .on_press(Message::LaunchDrawerApp(exec_clone));
                         grid_row = grid_row.push(tile);
                     }
-                    // Pad incomplete last row so tiles stay uniform width
-                    for _ in chunk.len()..5 {
-                        grid_row = grid_row.push(
-                            container(row![])
-                                .width(Length::FillPortion(1)),
-                        );
-                    }
                     rows_col = rows_col.push(grid_row);
                 }
                 iced::widget::scrollable(rows_col)
-                    .height(Length::Fixed(320.0))
+                    .height(Length::Fixed(316.0))
                     .width(Length::Fill)
                     .into()
             };
@@ -7104,6 +7157,8 @@ impl Application for CortenPanelApp {
             )
             .padding([14, 16])
             .width(Length::Fixed(660.0))
+            .height(Length::Fixed(animated_drawer_h))
+            .clip(true)
             .style(move |_| {
                 let mut style = acrylic_glass_style(palette, 18.0);
                 if let Some(iced::Background::Color(color)) = style.background {
@@ -7111,17 +7166,23 @@ impl Application for CortenPanelApp {
                         color.r,
                         color.g,
                         color.b,
-                        color.a * popover_alpha,
+                        color.a * (0.25 + 0.75 * drawer_eased),
                     )));
                 }
                 style
             });
 
             let drawer_handle_down = button(
-                text(Icon::ARROW_DOWN)
-                    .font(LUCIDE_FONT)
-                    .size(10.0)
-                    .color(palette.primary.to_iced()),
+                container(
+                    text(Icon::ARROW_DOWN)
+                        .font(LUCIDE_FONT)
+                        .size(10.0)
+                        .color(palette.primary.to_iced()),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
             )
             .width(Length::Fixed(48.0))
             .height(Length::Fixed(14.0))
@@ -7144,7 +7205,7 @@ impl Application for CortenPanelApp {
 
             let inner_drawer = mouse_area(drawer_card).on_press(Message::NoOp);
             let content_col = iced::widget::column![inner_drawer, drawer_handle_down, dock_cluster]
-                .spacing(popover_lift_gap.max(4.0))
+                .spacing(4)
                 .align_x(Alignment::Center);
 
             mouse_area(content_col)

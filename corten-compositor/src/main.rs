@@ -1129,8 +1129,12 @@ fn main() -> anyhow::Result<()> {
                 if let Ok(b) = b.name("org.corten.Compositor") {
                     if let Ok(b) = b.serve_at("/org/corten/Compositor", server) {
                         if let Ok(b) = b.serve_at("/org/a11y/atspi/accessible/root", a11y_server) {
-                            let _ = b.build().await;
-                            std::future::pending::<()>().await;
+                            if let Ok(_conn) = b.build().await {
+                                info!("Compositor D-Bus service registered on org.corten.Compositor");
+                                std::future::pending::<()>().await;
+                            } else {
+                                tracing::warn!("Failed to build org.corten.Compositor D-Bus connection");
+                            }
                         }
                     }
                 }

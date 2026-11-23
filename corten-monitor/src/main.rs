@@ -119,12 +119,15 @@ impl ProcSampler {
                     0.0
                 };
 
+                let rss_fallback = rss_pages.saturating_mul(page_size);
+                let mem_bytes = read_proc_pss_bytes(pid_str).unwrap_or(rss_fallback);
+
                 processes.push(ProcessEntry {
                     pid,
                     name,
                     state,
                     cpu_percent: proc_cpu,
-                    rss_bytes: rss_pages.saturating_mul(page_size),
+                    rss_bytes: mem_bytes,
                     threads,
                 });
             }
@@ -184,6 +187,19 @@ impl ProcSampler {
             processes,
         }
     }
+}
+
+/// Reads Proportional Set Size (PSS) in bytes from `/proc/<pid>/smaps_rollup` so shared
+/// libraries (e.g. Mesa/LLVM/GTK) are not double-counted across every process.
+fn read_proc_pss_bytes(pid_str: &str) -> Option<u64> {
+    let raw = fs::read_to_string(format!("/proc/{pid_str}/smaps_rollup")).ok()?;
+    for line in raw.lines() {
+        if let Some(rest) = line.strip_prefix("Pss:") {
+            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some(kb.saturating_mul(1024));
+        }
+    }
+    None
 }
 
 pub fn parse_proc_stat(stat_raw: &str) -> Option<(String, char, u64, u64, u32)> {
@@ -868,7 +884,7 @@ impl CortenMonitorApp {
                         palette
                     ),
                     Self::sort_button(
-                        "Bellek (RSS)",
+                        "Bellek (PSS)",
                         ProcSortColumn::Memory,
                         self.sort_col,
                         self.sort_desc,
