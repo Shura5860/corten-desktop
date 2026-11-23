@@ -45,6 +45,10 @@ The goal of the project is simple: provide a lightweight desktop session where t
 * **Desktop Shell & Apps (`Iced 0.13`):** Shell surfaces and built-in applications use `Iced` with the `tiny-skia` software renderer so background desktop utilities stay light on system VRAM.
 * **Unified IPC (`corten-ipc`):** Components communicate over D-Bus (`zbus`) and a Unix domain socket controllable via `cortenctl`.
 
+### Development Note
+
+Corten Desktop is an independent personal project built with AI-assisted development tools—especially on the UI/shell side—while architecture, compositor integration, testing, and direction are driven manually. Design feedback, UI/UX suggestions, and compositor reviews are very welcome.
+
 ---
 
 ## Screenshots

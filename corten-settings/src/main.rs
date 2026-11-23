@@ -1549,7 +1549,7 @@ impl CortenSettingsApp {
             .into()
     }
 
-    /// Modular Bento Grid Card container with header, icon, and optional badge
+    /// Grouped settings card container with header, icon, and optional tonal badge.
     fn bento_card<'a>(
         icon: char,
         title: &'static str,
@@ -1558,28 +1558,24 @@ impl CortenSettingsApp {
         palette: Palette,
     ) -> Element<'a, Message> {
         let badge_widget: Element<'a, Message> = if let Some(b) = badge {
-            container(text(b).size(10.0).color(palette.primary.to_iced()))
-                .padding([2, 8])
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgba(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.14,
-                    ))),
-                    border: Border {
-                        color: iced::Color::from_rgba(
-                            palette.primary.r,
-                            palette.primary.g,
-                            palette.primary.b,
-                            0.35,
-                        ),
-                        width: 1.0,
-                        radius: border::Radius::from(6.0),
-                    },
-                    ..Default::default()
-                })
-                .into()
+            container(
+                text(b)
+                    .size(10.0)
+                    .color(palette.on_primary_container().to_iced()),
+            )
+            .padding([3, 10])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(
+                    palette.primary_container().to_iced(),
+                )),
+                border: Border {
+                    color: iced::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: border::Radius::from(Radius::FULL),
+                },
+                ..Default::default()
+            })
+            .into()
         } else {
             horizontal_space().into()
         };
@@ -6312,7 +6308,7 @@ impl CortenSettingsApp {
                 row![
                     row![
                         text(Icon::CPU).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
-                        text("AURA-CORE YEREL NÖRAL MOTOR")
+                        text("YEREL DİL MODELİ MOTORU")
                             .size(Typography::CAPTION)
                             .font(NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced()),
@@ -6379,17 +6375,17 @@ impl CortenSettingsApp {
         let bento_model = Self::bento_card(
             Icon::GAUGE,
             "Model Profili & Donanım Tüketimi",
-            Some("Yerel GGUF / AURA"),
+            Some("Yerel GGUF"),
             column![
                 Self::setting_item(
                     "Yerel Model Profili & Kaynak Tüketimi",
-                    "Sistem donanımına göre optimize edilmiş yerel model kademesi (AURA-CORE / GGUF)",
+                    "Sistem donanımına göre seçilmiş yerel model kademesi (GGUF)",
                     model_control,
                     palette,
                 ),
                 Self::setting_item(
                     "Yerel Motor Adresi",
-                    "AURA-CORE veya Ollama API adresi (ayarlar açıldığında bağlantı denenir)",
+                    "Yerel LLM veya Ollama API adresi (ayarlar açıldığında bağlantı denenir)",
                     {
                         let (label, color) = match self.ai_endpoint_reachable {
                             None => ("Kontrol ediliyor…", palette.text_muted),

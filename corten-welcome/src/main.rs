@@ -1268,7 +1268,7 @@ impl CortenWelcomeApp {
         };
 
         column![
-            text("AURA-CORE Yerel Yapay Zekâ & Güvenlik")
+            text("Yerel Asistan ve Güvenlik")
                 .size(26)
                 .font(corten_theme::NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),

@@ -7,9 +7,7 @@ use zbus::interface;
 use zbus::zvariant::{OwnedValue, Value};
 
 use corten_config::{AppearanceConfig, ConfigManager};
-use corten_theme::iced_styles::{
-    acrylic_glass_style, input_style, primary_button_style, secondary_button_style,
-};
+use corten_theme::iced_styles::{m3_dialog_style, m3_tonal_button, primary_button_style};
 use corten_theme::{
     Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, Palette, PatinaVariant, Spacing, ThemeMode, Typography,
 };
@@ -549,7 +547,17 @@ impl Application for CortenPolkitApp {
                     ]
                     .align_y(Alignment::Center)
                 )
-                .style(move |_| input_style(palette)),
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(
+                        palette.surface_container_high().to_iced(),
+                    )),
+                    border: iced::Border {
+                        color: iced::Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: iced::border::Radius::from(corten_theme::Radius::MD),
+                    },
+                    ..Default::default()
+                }),
                 if let Some(ref err) = self.error_message {
                     text(err)
                         .size(Typography::CAPTION)
@@ -563,7 +571,7 @@ impl Application for CortenPolkitApp {
                 row![
                     button(text("İptal").size(Typography::BODY_SM))
                         .padding([Spacing::SM, Spacing::LG])
-                        .style(move |_, status| secondary_button_style(palette, status))
+                        .style(move |_, status| m3_tonal_button(palette, false, status))
                         .on_press(Message::CancelAuth),
                     horizontal_space(),
                     button(
@@ -583,18 +591,11 @@ impl Application for CortenPolkitApp {
         )
         .padding(Spacing::XL)
         .style(move |_| {
-            let mut s = acrylic_glass_style(palette, 16.0);
-            s.border.color = if self.error_message.is_some() {
-                palette.danger.to_iced()
-            } else {
-                iced::Color::from_rgba(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.50,
-                )
-            };
-            s.border.width = 1.5;
+            let mut s = m3_dialog_style(palette);
+            if self.error_message.is_some() {
+                s.border.color = palette.danger.to_iced();
+                s.border.width = 1.5;
+            }
             s
         });
 

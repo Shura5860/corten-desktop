@@ -10,8 +10,8 @@ use corten_auth::AuthController;
 use corten_config::{AppearanceConfig, ConfigManager, InputSettingsConfig};
 use corten_theme::iced_styles::acrylic_glass_style;
 use corten_theme::{
-    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
-    Radius, ThemeMode, Transition,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, Motion, NOTO_SANS, NOTO_SANS_BYTES, Palette,
+    PatinaVariant, Radius, ThemeMode, Transition,
 };
 use iced::widget::{button, container, image, row, stack, text};
 use iced::{Alignment, Element, Event, Length, Padding, Subscription, Task, event};
@@ -812,7 +812,7 @@ impl MultiApplication for CortenLockApp {
                 primary_window: None,
                 caret_visible: true,
                 shake_transition: Transition::completed(360),
-                entrance_transition: Transition::new(260),
+                entrance_transition: Transition::new(Motion::DURATION_EMPHASIZED_DECELERATE),
                 last_tick: now_inst,
                 last_status_poll: now_inst,
                 active_patina,
@@ -1147,23 +1147,13 @@ impl MultiApplication for CortenLockApp {
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.09, 0.10, 0.12, 0.95,
-                ))),
+                background: Some(iced::Background::Color(
+                    palette.primary_container().to_iced(),
+                )),
                 border: iced::Border {
-                    color: palette.primary.to_iced(),
-                    width: 2.0,
+                    color: iced::Color::TRANSPARENT,
+                    width: 0.0,
                     radius: iced::border::Radius::from(Radius::FULL),
-                },
-                shadow: iced::Shadow {
-                    color: iced::Color::from_rgba(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.40,
-                    ),
-                    offset: iced::Vector::new(0.0, 0.0),
-                    blur_radius: 14.0,
                 },
                 ..Default::default()
             });
@@ -1315,31 +1305,17 @@ impl MultiApplication for CortenLockApp {
         .width(Length::Fixed(350.0))
         .padding(4)
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                1.0, 1.0, 1.0, 0.08,
-            ))),
+            background: Some(iced::Background::Color(
+                palette.surface_container_high().to_iced(),
+            )),
             border: iced::Border {
                 color: if self.auth.has_failed() {
                     palette.danger.to_iced()
                 } else {
-                    iced::Color::from_rgba(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.45,
-                    )
+                    iced::Color::TRANSPARENT
                 },
-                width: if self.auth.has_failed() { 1.5 } else { 1.0 },
-                radius: iced::border::Radius::from(14.0),
-            },
-            shadow: iced::Shadow {
-                color: if self.auth.has_failed() {
-                    iced::Color::from_rgba(0.9, 0.2, 0.2, 0.35)
-                } else {
-                    iced::Color::from_rgba(0.0, 0.0, 0.0, 0.30)
-                },
-                offset: iced::Vector::new(0.0, 4.0),
-                blur_radius: 12.0,
+                width: if self.auth.has_failed() { 1.5 } else { 0.0 },
+                radius: iced::border::Radius::from(Radius::FULL),
             },
             ..Default::default()
         });
@@ -1418,8 +1394,8 @@ impl MultiApplication for CortenLockApp {
             .into()
         };
 
-        // Smooth entrance slide-up offset powered by entrance_transition
-        let entrance_offset: f32 = (1.0 - self.entrance_transition.eased()) * 22.0;
+        // Smooth M3 emphasized-decelerate entrance slide-up offset
+        let entrance_offset: f32 = (1.0 - self.entrance_transition.emphasized_decelerate()) * 22.0;
 
         let center_card = container(
             container(

@@ -532,7 +532,7 @@ impl PackageManager {
             },
             PackageItem {
                 id: "corten-aura-model".into(),
-                name: "Corten AURA Yerel Zeka Modeli (Qwen 2.5 Coder)".into(),
+                name: "Corten Yerel Dil Modeli (Qwen 2.5 Coder)".into(),
                 summary: "Çevrimdışı ve gizlilik odaklı saf Rust çalışan yerel LLM GGUF ağırlığı".into(),
                 description: "Corten AI asistanı için optimize edilmiş yerel Qwen 2.5 Coder GGUF modeli. Harici sunucu veya Python bağımlılığı gerektirmeden ~/.local/share/corten/models/ altına kurulur ve doğrudan yerel kompozitör yapay zeka çekirdeğiyle çalıştırılır.".into(),
                 version: "2.5-Q4_K_M".into(),
@@ -1060,10 +1060,7 @@ impl PackageManager {
         pkg: PackageItem,
         tx: UnboundedSender<String>,
     ) -> Result<(), String> {
-        let _ = tx.send(format!(
-            "🚀 Kurulum başlatılıyor: {} ({})\n",
-            pkg.name, pkg.id
-        ));
+        let _ = tx.send(format!("Kurulum başlatılıyor: {} ({})\n", pkg.name, pkg.id));
 
         match pkg.source {
             PackageSource::Flatpak => {
@@ -1231,9 +1228,7 @@ impl PackageManager {
             }
             PackageSource::CortenCore => {
                 if pkg.id == "corten-aura-model" {
-                    let _ = tx.send(
-                        "📥 Corten AURA yerel yapay zeka modeli indiriliyor (~986 MB)...\n".into(),
-                    );
+                    let _ = tx.send("Yerel dil modeli indiriliyor (~986 MB)...\n".into());
                     let dest_dir = std::env::var("HOME")
                         .map(|h| std::path::PathBuf::from(h).join(".local/share/corten/models"))
                         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
@@ -1264,10 +1259,7 @@ impl PackageManager {
                         .await
                         .map_err(|e| format!("Bekleme hatası: {}", e))?;
                     if status.success() {
-                        let _ = tx.send(format!(
-                            "✅ Corten AURA yerel modeli başarıyla kuruldu: `{}`!\n",
-                            dest_path_str
-                        ));
+                        let _ = tx.send(format!("Yerel model kuruldu: `{}`\n", dest_path_str));
                         Ok(())
                     } else {
                         Err(format!(
@@ -1276,7 +1268,7 @@ impl PackageManager {
                         ))
                     }
                 } else {
-                    let _ = tx.send("⚡ Corten Desktop OTA güncellemesi uygulanıyor...\n".into());
+                    let _ = tx.send("Corten Desktop güncellemesi uygulanıyor...\n".into());
                     let info = corten_update::CortenUpdater::check_for_updates().await?;
                     let tx_clone = tx.clone();
                     corten_update::CortenUpdater::apply_update(&info, move |msg| {

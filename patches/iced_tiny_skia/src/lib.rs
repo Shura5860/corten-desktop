@@ -107,7 +107,24 @@ impl Renderer {
         self.layers.flush();
 
         for &region in damage {
-            let region = region * scale_factor;
+            let scaled = region * scale_factor;
+            let x0 = scaled.x.floor().max(0.0);
+            let y0 = scaled.y.floor().max(0.0);
+            let x1 = (scaled.x + scaled.width)
+                .ceil()
+                .min(physical_size.width as f32);
+            let y1 = (scaled.y + scaled.height)
+                .ceil()
+                .min(physical_size.height as f32);
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            let region = Rectangle {
+                x: x0,
+                y: y0,
+                width: x1 - x0,
+                height: y1 - y0,
+            };
 
             let path = tiny_skia::PathBuilder::from_rect(
                 tiny_skia::Rect::from_xywh(
@@ -171,7 +188,7 @@ impl Renderer {
                                 * Transformation::scale(scale_factor),
                             pixels,
                             clip_mask,
-                            clip_bounds,
+                            new_clip_bounds,
                         );
                     }
 

@@ -147,7 +147,7 @@ impl Engine {
                     pixmap.as_ref(),
                     &tiny_skia::PixmapPaint::default(),
                     tiny_skia::Transform::default(),
-                    None,
+                    clip_mask,
                 );
             }
         }
@@ -236,28 +236,40 @@ impl Engine {
                 .min(border_bounds.height / 2.0);
             }
 
-            // Stroking a path works well in this case
-            if is_simple_border {
-                let border_path =
-                    rounded_rectangle(border_bounds, border_radius);
+            // Fill an analytic EvenOdd rounded-rectangle ring instead of PathStroker to avoid 1px corner stair-stepping
+            if is_simple_border && quad.border.color.a > 0.0 {
+                let inner_bounds = Rectangle {
+                    x: quad.bounds.x + border_width,
+                    y: quad.bounds.y + border_width,
+                    width: (quad.bounds.width - border_width * 2.0).max(0.0),
+                    height: (quad.bounds.height - border_width * 2.0).max(0.0),
+                };
+                let mut inner_radius = fill_border_radius;
+                for r in &mut inner_radius {
+                    *r = (*r - border_width)
+                        .max(0.0)
+                        .min(inner_bounds.width / 2.0)
+                        .min(inner_bounds.height / 2.0);
+                }
 
-                pixels.stroke_path(
-                    &border_path,
-                    &tiny_skia::Paint {
-                        shader: tiny_skia::Shader::SolidColor(into_color(
-                            quad.border.color,
-                        )),
-                        anti_alias: true,
-                        ..tiny_skia::Paint::default()
-                    },
-                    &tiny_skia::Stroke {
-                        width: border_width,
-                        ..tiny_skia::Stroke::default()
-                    },
-                    transform,
-                    clip_mask,
-                );
-            } else {
+                if let Some(ring_path) =
+                    rounded_rectangle_ring(quad.bounds, fill_border_radius, inner_bounds, inner_radius)
+                {
+                    pixels.fill_path(
+                        &ring_path,
+                        &tiny_skia::Paint {
+                            shader: tiny_skia::Shader::SolidColor(into_color(
+                                quad.border.color,
+                            )),
+                            anti_alias: true,
+                            ..tiny_skia::Paint::default()
+                        },
+                        tiny_skia::FillRule::EvenOdd,
+                        transform,
+                        clip_mask,
+                    );
+                }
+            } else if !is_simple_border {
                 // Draw corners that have too small border radii as having no border radius,
                 // but mask them with the rounded rectangle with the correct border radius.
                 let mut temp_pixmap = tiny_skia::Pixmap::new(
@@ -479,21 +491,21 @@ impl Engine {
                     let bounds = path.bounds();
 
                     Rectangle {
-                        x: bounds.x(),
-                        y: bounds.y(),
-                        width: bounds.width(),
-                        height: bounds.height(),
+                        x: bounds.x() - 2.0,
+                        y: bounds.y() - 2.0,
+                        width: bounds.width() + 4.0,
+                        height: bounds.height() + 4.0,
                     } * transformation
                 };
 
-                let Some(clip_bounds) =
+                let Some(_clip_bounds) =
                     layer_bounds.intersection(&physical_bounds)
                 else {
                     return;
                 };
 
-                let clip_mask =
-                    (physical_bounds != clip_bounds).then_some(clip_mask as &_);
+                let clip_mask = (!physical_bounds.is_within(&layer_bounds))
+                    .then_some(clip_mask as &_);
 
                 pixels.fill_path(
                     path,
@@ -508,25 +520,26 @@ impl Engine {
                 paint,
                 stroke,
             } => {
+                let pad = (stroke.width * 0.5) + 2.0;
                 let physical_bounds = {
                     let bounds = path.bounds();
 
                     Rectangle {
-                        x: bounds.x(),
-                        y: bounds.y(),
-                        width: bounds.width(),
-                        height: bounds.height(),
+                        x: bounds.x() - pad,
+                        y: bounds.y() - pad,
+                        width: bounds.width() + pad * 2.0,
+                        height: bounds.height() + pad * 2.0,
                     } * transformation
                 };
 
-                let Some(clip_bounds) =
+                let Some(_clip_bounds) =
                     layer_bounds.intersection(&physical_bounds)
                 else {
                     return;
                 };
 
-                let clip_mask =
-                    (physical_bounds != clip_bounds).then_some(clip_mask as &_);
+                let clip_mask = (!physical_bounds.is_within(&layer_bounds))
+                    .then_some(clip_mask as &_);
 
                 pixels.stroke_path(
                     path,
@@ -751,7 +764,95 @@ fn rounded_rectangle(
         );
     }
 
+    builder.close();
+
     builder.finish().expect("Build rounded rectangle path")
+}
+
+fn append_rounded_subpath(
+    builder: &mut tiny_skia::PathBuilder,
+    bounds: Rectangle,
+    border_radius: [f32; 4],
+) {
+    let [top_left, top_right, bottom_right, bottom_left] = border_radius;
+
+    builder.move_to(bounds.x + top_left, bounds.y);
+    builder.line_to(bounds.x + bounds.width - top_right, bounds.y);
+
+    if top_right > 0.0 {
+        arc_to(
+            builder,
+            bounds.x + bounds.width - top_right,
+            bounds.y,
+            bounds.x + bounds.width,
+            bounds.y + top_right,
+            top_right,
+        );
+    }
+
+    maybe_line_to(
+        builder,
+        bounds.x + bounds.width,
+        bounds.y + bounds.height - bottom_right,
+    );
+
+    if bottom_right > 0.0 {
+        arc_to(
+            builder,
+            bounds.x + bounds.width,
+            bounds.y + bounds.height - bottom_right,
+            bounds.x + bounds.width - bottom_right,
+            bounds.y + bounds.height,
+            bottom_right,
+        );
+    }
+
+    maybe_line_to(
+        builder,
+        bounds.x + bottom_left,
+        bounds.y + bounds.height,
+    );
+
+    if bottom_left > 0.0 {
+        arc_to(
+            builder,
+            bounds.x + bottom_left,
+            bounds.y + bounds.height,
+            bounds.x,
+            bounds.y + bounds.height - bottom_left,
+            bottom_left,
+        );
+    }
+
+    maybe_line_to(builder, bounds.x, bounds.y + top_left);
+
+    if top_left > 0.0 {
+        arc_to(
+            builder,
+            bounds.x,
+            bounds.y + top_left,
+            bounds.x + top_left,
+            bounds.y,
+            top_left,
+        );
+    }
+
+    builder.close();
+}
+
+fn rounded_rectangle_ring(
+    outer_bounds: Rectangle,
+    outer_radius: [f32; 4],
+    inner_bounds: Rectangle,
+    inner_radius: [f32; 4],
+) -> Option<tiny_skia::Path> {
+    if inner_bounds.width <= 0.0 || inner_bounds.height <= 0.0 {
+        return None;
+    }
+    let mut builder = tiny_skia::PathBuilder::new();
+    append_rounded_subpath(&mut builder, outer_bounds, outer_radius);
+    append_rounded_subpath(&mut builder, inner_bounds, inner_radius);
+    builder.finish()
 }
 
 fn maybe_line_to(path: &mut tiny_skia::PathBuilder, x: f32, y: f32) {
@@ -779,7 +880,7 @@ fn arc_to(
 
     match kurbo::Arc::from_svg_arc(&svg_arc) {
         Some(arc) => {
-            arc.to_cubic_beziers(0.1, |p1, p2, p| {
+            arc.to_cubic_beziers(0.01, |p1, p2, p| {
                 path.cubic_to(
                     p1.x as f32,
                     p1.y as f32,

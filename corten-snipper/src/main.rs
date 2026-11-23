@@ -663,7 +663,7 @@ impl Application for CortenSnipperApp {
         if let Some(c) = self.countdown {
             let countdown_card = container(
                 column![
-                    text(format!("⏱️ {}", c))
+                    text(format!("{}", c))
                         .size(64.0)
                         .color(palette.primary.to_iced()),
                     text("Ekran kırpıcı açılıyor...")
@@ -671,18 +671,17 @@ impl Application for CortenSnipperApp {
                         .color(palette.text_primary.to_iced()),
                     row![
                         button(
-                            text("Hemen Kırp (Geç)")
+                            text("Hemen Kırp")
                                 .size(Typography::CAPTION)
-                                .color(palette.text_primary.to_iced()),
+                                .color(palette.on_primary().to_iced()),
                         )
-                        .padding([4, 10])
-                        .style(move |_, _| button::Style {
-                            background: Some(palette.primary.to_iced().into()),
-                            border: iced::Border {
-                                radius: iced::border::Radius::from(6.0),
-                                ..Default::default()
-                            },
-                            ..Default::default()
+                        .padding([6, 14])
+                        .style(move |_, status| {
+                            let mut s =
+                                corten_theme::iced_styles::primary_button_style(palette, status);
+                            s.border.radius =
+                                iced::border::Radius::from(corten_theme::Radius::FULL);
+                            s
                         })
                         .on_press(Message::SkipCountdown),
                         button(
@@ -690,8 +689,14 @@ impl Application for CortenSnipperApp {
                                 .size(Typography::CAPTION)
                                 .color(palette.text_muted.to_iced()),
                         )
-                        .padding([4, 10])
-                        .style(|_, _| button::Style::default())
+                        .padding([6, 14])
+                        .style(move |_, status| {
+                            let mut s =
+                                corten_theme::iced_styles::m3_tonal_button(palette, false, status);
+                            s.border.radius =
+                                iced::border::Radius::from(corten_theme::Radius::FULL);
+                            s
+                        })
                         .on_press(Message::Cancel),
                     ]
                     .spacing(8)
@@ -700,21 +705,8 @@ impl Application for CortenSnipperApp {
                 .spacing(12)
                 .align_x(iced::Alignment::Center),
             )
-            .padding([20, 32])
-            .style(move |_| container::Style {
-                background: Some(Color::from_rgba(0.08, 0.09, 0.12, 0.94).into()),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(16.0),
-                    width: 1.5,
-                    color: palette.primary.to_iced(),
-                },
-                shadow: iced::Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.60),
-                    offset: iced::Vector::new(0.0, 8.0),
-                    blur_radius: 24.0,
-                },
-                ..Default::default()
-            });
+            .padding([24, 32])
+            .style(move |_| corten_theme::iced_styles::m3_dialog_style(palette));
 
             return container(countdown_card)
                 .width(Length::Fill)
@@ -956,19 +948,8 @@ impl Application for CortenSnipperApp {
                 .padding([8, 12])
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .style(move |_| container::Style {
-                    background: Some(Color::from_rgba(0.08, 0.09, 0.12, 0.94).into()),
-                    border: iced::Border {
-                        radius: iced::border::Radius::from(12.0),
-                        width: 1.5,
-                        color: palette.primary.to_iced(),
-                    },
-                    shadow: iced::Shadow {
-                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.50),
-                        offset: iced::Vector::new(0.0, 6.0),
-                        blur_radius: 16.0,
-                    },
-                    ..Default::default()
+                .style(move |_| {
+                    corten_theme::iced_styles::m3_surface_card(palette, corten_theme::Radius::LG)
                 });
 
             return container(pinned_box)
@@ -988,53 +969,41 @@ impl Application for CortenSnipperApp {
 
         let hint = container(
             row![
-                text("Corten Ekran Kırpıcı — Çerçeveyi sürükleyin • Esc: İptal")
+                text("Ekran Kırpıcı — Çerçeveyi sürükleyin • Esc: İptal")
                     .size(Typography::BODY_SM)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
                 button(
-                    text("⏱️ 3s Gecikme")
-                        .size(11.0)
-                        .color(palette.primary.to_iced())
+                    text("3s Gecikme")
+                        .size(Typography::CAPTION)
+                        .color(palette.text_primary.to_iced())
                 )
-                .padding([2, 8])
-                .style(move |_, _| button::Style {
-                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.06).into()),
-                    border: iced::Border {
-                        radius: iced::border::Radius::from(6.0),
-                        ..Default::default()
-                    },
-                    ..Default::default()
+                .padding([4, 10])
+                .style(move |_, status| {
+                    let mut s = corten_theme::iced_styles::m3_tonal_button(palette, false, status);
+                    s.border.radius = iced::border::Radius::from(corten_theme::Radius::FULL);
+                    s
                 })
                 .on_press(Message::SetDelay(3)),
                 button(
-                    text("⏱️ 5s Gecikme")
-                        .size(11.0)
-                        .color(palette.primary.to_iced())
+                    text("5s Gecikme")
+                        .size(Typography::CAPTION)
+                        .color(palette.text_primary.to_iced())
                 )
-                .padding([2, 8])
-                .style(move |_, _| button::Style {
-                    background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.06).into()),
-                    border: iced::Border {
-                        radius: iced::border::Radius::from(6.0),
-                        ..Default::default()
-                    },
-                    ..Default::default()
+                .padding([4, 10])
+                .style(move |_, status| {
+                    let mut s = corten_theme::iced_styles::m3_tonal_button(palette, false, status);
+                    s.border.radius = iced::border::Radius::from(corten_theme::Radius::FULL);
+                    s
                 })
                 .on_press(Message::SetDelay(5)),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
         )
-        .padding([6, 14])
-        .style(move |_| container::Style {
-            background: Some(Color::from_rgba(0.08, 0.09, 0.11, 0.88).into()),
-            border: iced::Border {
-                radius: iced::border::Radius::from(8.0),
-                width: 1.0,
-                color: palette.primary.to_iced(),
-            },
-            ..Default::default()
+        .padding([8, 16])
+        .style(move |_| {
+            corten_theme::iced_styles::m3_surface_card(palette, corten_theme::Radius::LG)
         });
 
         let floating_hint = container(hint)

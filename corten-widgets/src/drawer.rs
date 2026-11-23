@@ -2,9 +2,12 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use corten_config::{AppearanceConfig, ConfigManager};
+use corten_theme::iced_styles::{
+    m3_dialog_style, m3_icon_button, m3_surface_card, m3_tonal_button,
+};
 use corten_theme::{
     Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
-    Radius, ThemeMode,
+    Radius, Spacing, ThemeMode, Typography,
 };
 use iced::widget::{button, container, horizontal_space, row, scrollable, text};
 use iced::{Alignment, Element, Length, Subscription};
@@ -109,54 +112,23 @@ impl CortenWidgetDrawerApp {
         let is_active = self.active_category == cat;
         button(
             text(label)
-                .size(11.5)
-                .font(iced::Font {
-                    weight: if is_active {
-                        iced::font::Weight::Bold
-                    } else {
-                        iced::font::Weight::Normal
-                    },
-                    ..Default::default()
+                .size(Typography::CAPTION)
+                .font(if is_active {
+                    corten_theme::NOTO_SANS_SEMIBOLD
+                } else {
+                    corten_theme::NOTO_SANS
                 })
                 .color(if is_active {
-                    palette.primary.to_iced()
+                    palette.on_primary_container().to_iced()
                 } else {
                     palette.text_muted.to_iced()
                 }),
         )
-        .padding([4, 12])
+        .padding([6, 14])
         .style(move |_, status| {
-            let bg = if is_active {
-                iced::Color::from_rgba(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.16,
-                )
-            } else if status == button::Status::Hovered {
-                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.07)
-            } else {
-                iced::Color::from_rgba(0.0, 0.0, 0.0, 0.20)
-            };
-            let border_color = if is_active {
-                iced::Color::from_rgba(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.50,
-                )
-            } else {
-                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06)
-            };
-            button::Style {
-                background: Some(iced::Background::Color(bg)),
-                border: iced::Border {
-                    color: border_color,
-                    width: 1.0,
-                    radius: iced::border::Radius::from(Radius::SM),
-                },
-                ..Default::default()
-            }
+            let mut style = m3_tonal_button(palette, is_active, status);
+            style.border.radius = iced::border::Radius::from(Radius::FULL);
+            style
         })
         .on_press(DrawerMessage::CategorySelected(cat))
         .into()
@@ -171,48 +143,35 @@ impl CortenWidgetDrawerApp {
         let id = entry.id;
 
         let toggle_btn = button(
-            row![
-                text(if is_enabled { "✓ Aktif" } else { "+ Ekle" })
-                    .size(11.0)
-                    .font(corten_theme::NOTO_SANS_MEDIUM)
-                    .color(if is_enabled {
-                        palette.primary.to_iced()
-                    } else {
-                        palette.text_muted.to_iced()
-                    }),
-            ]
-            .align_y(Alignment::Center),
+            text(if is_enabled { "Aktif" } else { "+ Ekle" })
+                .size(Typography::CAPTION)
+                .font(corten_theme::NOTO_SANS_MEDIUM)
+                .color(if is_enabled {
+                    palette.on_primary().to_iced()
+                } else {
+                    palette.text_primary.to_iced()
+                }),
         )
-        .padding([5, 12])
+        .padding([6, 12])
         .style(move |_, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             let bg = if is_enabled {
-                iced::Color::from_rgba(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.20,
-                )
-            } else if status == button::Status::Hovered {
-                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.10)
+                if hovered {
+                    palette.primary_hover.to_iced()
+                } else {
+                    palette.primary.to_iced()
+                }
+            } else if hovered {
+                palette.surface_container_highest().to_iced()
             } else {
-                iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25)
-            };
-            let border_color = if is_enabled {
-                iced::Color::from_rgba(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.50,
-                )
-            } else {
-                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+                palette.surface_container_high().to_iced()
             };
             button::Style {
                 background: Some(iced::Background::Color(bg)),
                 border: iced::Border {
-                    color: border_color,
-                    width: 1.0,
-                    radius: iced::border::Radius::from(Radius::SM),
+                    color: iced::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: iced::border::Radius::from(Radius::FULL),
                 },
                 ..Default::default()
             }
@@ -225,33 +184,38 @@ impl CortenWidgetDrawerApp {
                     .font(LUCIDE_FONT)
                     .size(16.0)
                     .color(if is_enabled {
-                        palette.primary.to_iced()
+                        palette.on_primary_container().to_iced()
                     } else {
                         palette.text_muted.to_iced()
                     }),
             )
-            .padding(6)
+            .width(Length::Fixed(32.0))
+            .height(Length::Fixed(32.0))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.0, 0.0, 0.0, 0.25
-                ))),
+                background: Some(iced::Background::Color(if is_enabled {
+                    palette.primary_container().to_iced()
+                } else {
+                    palette.surface_container_high().to_iced()
+                })),
                 border: iced::Border {
-                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(8.0),
+                    color: iced::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: iced::border::Radius::from(Radius::SM),
                 },
                 ..Default::default()
             }),
             text(entry.title)
-                .size(12.5)
-                .font(corten_theme::NOTO_SANS_BOLD)
+                .size(Typography::BODY_SM)
+                .font(corten_theme::NOTO_SANS_SEMIBOLD)
                 .color(palette.text_primary.to_iced()),
         ]
-        .spacing(8)
+        .spacing(Spacing::XS)
         .align_y(Alignment::Center);
 
         let card_body = text(entry.desc)
-            .size(11.0)
+            .size(Typography::CAPTION)
             .color(palette.text_muted.to_iced());
 
         container(
@@ -261,33 +225,12 @@ impl CortenWidgetDrawerApp {
                 horizontal_space(),
                 row![horizontal_space(), toggle_btn].align_y(Alignment::Center),
             ]
-            .spacing(8)
-            .width(Length::Fixed(210.0))
-            .height(Length::Fixed(140.0)),
+            .spacing(Spacing::XS)
+            .width(Length::Fixed(216.0))
+            .height(Length::Fixed(144.0)),
         )
-        .padding(12)
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(if is_enabled {
-                iced::Color::from_rgba(0.12, 0.13, 0.16, 0.85)
-            } else {
-                iced::Color::from_rgba(0.09, 0.10, 0.12, 0.60)
-            })),
-            border: iced::Border {
-                color: if is_enabled {
-                    iced::Color::from_rgba(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.40,
-                    )
-                } else {
-                    iced::Color::from_rgba(1.0, 1.0, 1.0, 0.07)
-                },
-                width: 1.0,
-                radius: iced::border::Radius::from(12.0),
-            },
-            ..Default::default()
-        })
+        .padding(Spacing::SM)
+        .style(move |_| m3_surface_card(palette, Radius::LG))
         .into()
     }
 }
@@ -487,52 +430,39 @@ impl Application for CortenWidgetDrawerApp {
 
         let count_badge = container(
             text(format!("{} / {} Aktif", active_count, entries.len()))
-                .size(11.0)
+                .size(Typography::CAPTION)
                 .font(corten_theme::NOTO_SANS_MEDIUM)
-                .color(palette.primary.to_iced()),
+                .color(palette.on_primary_container().to_iced()),
         )
-        .padding([4, 10])
+        .padding([4, 12])
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                palette.primary.r,
-                palette.primary.g,
-                palette.primary.b,
-                0.15,
-            ))),
+            background: Some(iced::Background::Color(
+                palette.primary_container().to_iced(),
+            )),
             border: iced::Border {
-                color: iced::Color::from_rgba(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.35,
-                ),
-                width: 1.0,
-                radius: iced::border::Radius::from(Radius::SM),
+                color: iced::Color::TRANSPARENT,
+                width: 0.0,
+                radius: iced::border::Radius::from(Radius::FULL),
             },
             ..Default::default()
         });
 
         let close_btn = button(
-            text(Icon::X)
-                .font(LUCIDE_FONT)
-                .size(14.0)
-                .color(palette.text_muted.to_iced()),
+            container(
+                text(Icon::X)
+                    .font(LUCIDE_FONT)
+                    .size(14.0)
+                    .color(palette.text_primary.to_iced()),
+            )
+            .width(Length::Fixed(32.0))
+            .height(Length::Fixed(32.0))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
         )
-        .padding([4, 8])
-        .style(|_, status| {
-            let bg = match status {
-                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
-                _ => iced::Color::TRANSPARENT,
-            };
-            button::Style {
-                background: Some(iced::Background::Color(bg)),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(Radius::SM),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
+        .width(Length::Fixed(32.0))
+        .height(Length::Fixed(32.0))
+        .padding(0)
+        .style(move |_, status| m3_icon_button(palette, status))
         .on_press(DrawerMessage::CloseDrawer);
 
         let header = row![header_title, horizontal_space(), count_badge, close_btn]
@@ -546,11 +476,11 @@ impl Application for CortenWidgetDrawerApp {
             self.category_pill("Zaman & Hava", DrawerCategory::TimeWeather, palette),
             self.category_pill("Üretkenlik & Araçlar", DrawerCategory::Tools, palette),
         ]
-        .spacing(8)
+        .spacing(Spacing::XS)
         .align_y(Alignment::Center);
 
         // 3. Horizontal Cards Deck
-        let mut cards_row = row![].spacing(12).padding([4, 4]);
+        let mut cards_row = row![].spacing(Spacing::SM).padding([4, 4]);
 
         for entry in entries.iter() {
             if self.active_category != DrawerCategory::All && entry.category != self.active_category
@@ -570,33 +500,13 @@ impl Application for CortenWidgetDrawerApp {
 
         let drawer_container = container(
             iced::widget::column![header, category_pills, scrollable_deck]
-                .spacing(14)
+                .spacing(Spacing::MD)
                 .width(Length::Fill),
         )
-        .padding([18, 24])
+        .padding([20, 24])
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                0.08, 0.09, 0.11, 0.95,
-            ))),
-            border: iced::Border {
-                color: iced::Color::from_rgba(
-                    palette.primary.r,
-                    palette.primary.g,
-                    palette.primary.b,
-                    0.40,
-                ),
-                width: 1.0,
-                radius: iced::border::Radius::from(20.0),
-            },
-            shadow: iced::Shadow {
-                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.50),
-                offset: iced::Vector::new(0.0, -8.0),
-                blur_radius: 24.0,
-            },
-            ..Default::default()
-        });
+        .style(move |_| m3_dialog_style(palette));
 
         drawer_container.into()
     }
