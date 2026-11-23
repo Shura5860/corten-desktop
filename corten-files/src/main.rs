@@ -2597,11 +2597,11 @@ impl CortenFilesApp {
                 } else {
                     palette.text_muted.to_iced()
                 }))
-                .width(Length::Fixed(32.0))
-                .height(Length::Fixed(32.0))
-                .center_x(Length::Fill)
-                .center_y(Length::Fill),
+                .center_x(Length::Fixed(32.0))
+                .center_y(Length::Fixed(32.0)),
             )
+            .width(Length::Fixed(32.0))
+            .height(Length::Fixed(32.0))
             .padding(0)
             .on_press(msg)
             .style(move |_, status| {
@@ -2616,11 +2616,11 @@ impl CortenFilesApp {
         let nav_text_btn = |glyph: &'static str, msg: Message| {
             button(
                 container(text(glyph).size(14.0).color(palette.text_muted.to_iced()))
-                    .width(Length::Fixed(32.0))
-                    .height(Length::Fixed(32.0))
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
+                    .center_x(Length::Fixed(32.0))
+                    .center_y(Length::Fixed(32.0)),
             )
+            .width(Length::Fixed(32.0))
+            .height(Length::Fixed(32.0))
             .padding(0)
             .on_press(msg)
             .style(move |_, status| corten_theme::iced_styles::m3_icon_button(palette, status))

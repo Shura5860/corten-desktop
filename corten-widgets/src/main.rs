@@ -1286,10 +1286,8 @@ impl CortenWidgetsApp {
                     .size(20.0)
                     .color(palette.text_muted.to_iced()),
             )
-            .width(Length::Fixed(48.0))
-            .height(Length::Fixed(48.0))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
+            .center_x(Length::Fixed(48.0))
+            .center_y(Length::Fixed(48.0))
             .style(move |_| container::Style {
                 background: Some(iced::Background::Color(
                     palette.surface_container_high().to_iced(),
@@ -1313,10 +1311,8 @@ impl CortenWidgetsApp {
             let size = if is_primary { 34.0 } else { 28.0 };
             button(
                 container(text(icon_char).font(LUCIDE_FONT).size(13.0).color(fg))
-                    .width(Length::Fixed(size))
-                    .height(Length::Fixed(size))
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
+                    .center_x(Length::Fixed(size))
+                    .center_y(Length::Fixed(size)),
             )
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
