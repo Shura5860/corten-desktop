@@ -10,7 +10,6 @@ description = "Desktop widgets with live audio waveform, system monitors, and st
 [dependencies]
 corten-theme = { path = "../crates/theme" }
 corten-config = { path = "../crates/config" }
-corten-ipc = { path = "../crates/ipc" }
 corten-i18n = { path = "../crates/i18n" }
 
 iced = { workspace = true, features = ["tiny-skia", "tokio", "canvas"] }

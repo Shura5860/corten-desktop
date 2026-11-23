@@ -67,11 +67,11 @@ impl StatusNotifierWatcherServer {
                     let new_owner = args.new_owner();
                     if new_owner.is_none() || new_owner.as_deref() == Some("") {
                         let dead_name = args.name();
-                        let mut items_lock = items.lock().unwrap();
+                        let mut items_lock = items.lock().unwrap_or_else(|e| e.into_inner());
                         let before_len = items_lock.len();
                         items_lock.retain(|_, item| item.bus_name != dead_name.as_str());
 
-                        let mut reg_lock = registered_keys.lock().unwrap();
+                        let mut reg_lock = registered_keys.lock().unwrap_or_else(|e| e.into_inner());
                         reg_lock.retain(|key| !key.starts_with(dead_name.as_str()));
 
                         if items_lock.len() != before_len {
@@ -92,7 +92,10 @@ impl StatusNotifierWatcherServer {
 impl StatusNotifierWatcherServer {
     #[zbus(property)]
     async fn registered_status_notifier_items(&self) -> Vec<String> {
-        self.registered_keys.lock().unwrap().clone()
+        self.registered_keys
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     #[zbus(property)]
@@ -118,7 +121,7 @@ impl StatusNotifierWatcherServer {
         info!("SNI Watcher: RegisterStatusNotifierItem received for key: {}", key);
 
         {
-            let mut reg = self.registered_keys.lock().unwrap();
+            let mut reg = self.registered_keys.lock().unwrap_or_else(|e| e.into_inner());
             if !reg.contains(&key) {
                 reg.push(key.clone());
             }
@@ -156,7 +159,7 @@ impl StatusNotifierWatcherServer {
                         menu_path,
                     };
 
-                    let mut items_lock = items_arc.lock().unwrap();
+                    let mut items_lock = items_arc.lock().unwrap_or_else(|e| e.into_inner());
                     items_lock.insert(key, item);
                     let all_items: Vec<SniItem> = items_lock.values().cloned().collect();
                     drop(items_lock);

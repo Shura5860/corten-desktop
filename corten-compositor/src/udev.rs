@@ -968,7 +968,7 @@ pub fn run_drm(
             width as i32,
             offset_y,
         ));
-        let output = state.create_output(
+        let output = state.create_output_with_physical_size(
             output_name.clone(),
             output_mode,
             location,
@@ -977,6 +977,7 @@ pub fn run_drm(
             } else {
                 1.0
             }),
+            info.size().unwrap_or((0, 0)),
         );
 
         match output_manager.initialize_output(
@@ -1307,11 +1308,12 @@ pub fn run_drm(
                         width as i32,
                         offset_y,
                     ));
-                    let output = state.create_output(
+                    let output = state.create_output_with_physical_size(
                         output_name.clone(),
                         output_mode,
                         location,
                         smithay::output::Scale::Fractional(secondary_scale_pct as f64 / 100.0),
+                        info.size().unwrap_or((0, 0)),
                     );
                     if let Ok(secondary) = output_manager.initialize_output(
                         crtc,
@@ -1527,7 +1529,8 @@ pub fn run_drm(
                             if key_state == KeyState::Pressed {
                                 let sym = keysym_handle.modified_sym().raw();
 
-                                // Always allow VT Switching (Ctrl + Alt + F1..F7) and Emergency Exit even while locked!
+                                // Allow VT Switching (Ctrl + Alt + F1..F12) for recovery; only allow
+                                // Ctrl+Alt+Backspace emergency exit when the session is NOT locked.
                                 if modifiers.ctrl && modifiers.alt {
                                     let vt = match sym {
                                         keysyms::KEY_F1 | keysyms::KEY_XF86Switch_VT_1 => Some(1),
@@ -1542,7 +1545,7 @@ pub fn run_drm(
                                         keysyms::KEY_F10 | keysyms::KEY_XF86Switch_VT_10 => Some(10),
                                         keysyms::KEY_F11 | keysyms::KEY_XF86Switch_VT_11 => Some(11),
                                         keysyms::KEY_F12 | keysyms::KEY_XF86Switch_VT_12 => Some(12),
-                                        keysyms::KEY_BackSpace => {
+                                        keysyms::KEY_BackSpace if !state.lock_surface_active() => {
                                             info!("Compositor Emergency Exit: Ctrl+Alt+Backspace triggered!");
                                             shutdown_requested_for_keyboard.set(true);
                                             None
@@ -1554,12 +1557,6 @@ pub fn run_drm(
                                         let _ = drm_state.session.change_vt(target_vt);
                                         return FilterResult::Intercept(());
                                     }
-                                }
-
-                                if modifiers.shift && sym == keysyms::KEY_Escape {
-                                    info!("Compositor Emergency Exit: Shift+Escape triggered!");
-                                    shutdown_requested_for_keyboard.set(true);
-                                    return FilterResult::Intercept(());
                                 }
                             }
 
@@ -1733,16 +1730,7 @@ pub fn run_drm(
                                     keysyms::KEY_space | keysyms::KEY_d | keysyms::KEY_D
                                         if binding("launcher") => {
                                         info!("Compositor Hotkey: Super+Space/D (Launcher Toggle)");
-                                        let check = std::process::Command::new("pkill")
-                                            .args(["-x", "corten-launcher"])
-                                            .status();
-                                        if let Ok(status) = check {
-                                            if status.success() {
-                                                return FilterResult::Intercept(());
-                                            }
-                                        }
-                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
-                                        let _ = std::process::Command::new(launcher_path).spawn();
+                                        crate::state::toggle_corten_launcher_async(&[]);
                                         return FilterResult::Intercept(());
                                     }
                                     // Super + A: Dashboard
@@ -1756,16 +1744,7 @@ pub fn run_drm(
                                     keysyms::KEY_F1 | keysyms::KEY_slash | keysyms::KEY_question
                                         if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
                                         info!("Compositor Hotkey: Super+F1 / Super+? (Shortcuts Cheat Sheet)");
-                                        let check = std::process::Command::new("pkill")
-                                            .args(["-x", "corten-launcher"])
-                                            .status();
-                                        if let Ok(status) = check {
-                                            if status.success() {
-                                                return FilterResult::Intercept(());
-                                            }
-                                        }
-                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
-                                        let _ = std::process::Command::new(launcher_path).arg("--cheat-sheet").spawn();
+                                        crate::state::toggle_corten_launcher_async(&["--cheat-sheet"]);
                                         return FilterResult::Intercept(());
                                     }
                                     // Super + I: Settings
@@ -2393,19 +2372,9 @@ pub fn run_drm(
                                     } else if !logo_held && b.button() == 273 {
                                         // Right click on empty desktop canvas: trigger Desktop Context Menu at cursor
                                         info!("Desktop Canvas Right-Click: Spawning Corten Desktop Context Menu at cursor");
-                                        let _ = std::process::Command::new("pkill")
-                                            .args(["-9", "-x", "corten-launcher"])
-                                            .status();
                                         let cur_x = state.cursor_location.x.round() as i32;
                                         let cur_y = state.cursor_location.y.round() as i32;
-                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
-                                        let _ = std::process::Command::new(launcher_path)
-                                            .arg("--desktop-menu")
-                                            .arg("--x")
-                                            .arg(cur_x.to_string())
-                                            .arg("--y")
-                                            .arg(cur_y.to_string())
-                                            .spawn();
+                                        crate::state::spawn_desktop_context_menu_async(cur_x, cur_y);
                                     }
                                 }
                             } else if button_state == ButtonState::Released {
@@ -3733,26 +3702,28 @@ pub fn run_drm(
             };
             if state.night_light_enabled {
                 if let Some(scene) = secondary_scene.as_mut() {
-                    let size = state
-                        .additional_outputs
-                        .get(output_index - 1)
+                    let sec_output = state.additional_outputs.get(output_index - 1);
+                    let size = sec_output
                         .and_then(|output| output.current_mode())
                         .map(|mode| mode.size)
                         .unwrap_or_else(|| Size::from((1, 1)));
+                    let sec_scale = sec_output
+                        .map(|output| output.current_scale().fractional_scale())
+                        .unwrap_or(fractional_scale);
                     let nl_elem = blur_pipeline.as_mut().and_then(|pipeline| {
                         pipeline.generate_night_light_element(
                             &mut renderer,
                             scene,
-                            false,
+                            true,
                             size,
-                            fractional_scale,
+                            sec_scale,
                             bg_color,
                         )
                     });
                     if let Some(nl_elem) = nl_elem {
-                        scene.push(CustomRenderElement::from(nl_elem));
+                        scene.insert(0, CustomRenderElement::from(nl_elem));
                     } else {
-                        scene.push(crate::night_light_overlay(size));
+                        scene.insert(0, crate::night_light_overlay(size));
                     }
                 }
             }

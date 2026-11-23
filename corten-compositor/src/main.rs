@@ -1608,16 +1608,7 @@ fn main() -> anyhow::Result<()> {
                                             modifiers.shift,
                                         ) => {
                                         info!("Compositor Hotkey: Super+Space/D triggered (Launch Spotlight Launcher Toggle)");
-                                        let check = std::process::Command::new("pkill")
-                                            .args(["-x", "corten-launcher"])
-                                            .status();
-                                        if let Ok(status) = check {
-                                            if status.success() {
-                                                return FilterResult::Intercept(());
-                                            }
-                                        }
-                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
-                                        let _ = std::process::Command::new(launcher_path).spawn();
+                                        crate::state::toggle_corten_launcher_async(&[]);
                                         return FilterResult::Intercept(());
                                     }
                                     // Super + A: Launch KDE-style Application Dashboard Grid
@@ -1642,18 +1633,7 @@ fn main() -> anyhow::Result<()> {
                                     keysyms::KEY_F1 | keysyms::KEY_slash | keysyms::KEY_question
                                         if modifiers.logo && !modifiers.ctrl && !modifiers.alt => {
                                         info!("Compositor Hotkey: Super+F1 / Super+? triggered (Launch Shortcuts Cheat Sheet)");
-                                        let check = std::process::Command::new("pkill")
-                                            .args(["-x", "corten-launcher"])
-                                            .status();
-                                        if let Ok(status) = check {
-                                            if status.success() {
-                                                return FilterResult::Intercept(());
-                                            }
-                                        }
-                                        let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
-                                        let _ = std::process::Command::new(launcher_path)
-                                            .arg("--cheat-sheet")
-                                            .spawn();
+                                        crate::state::toggle_corten_launcher_async(&["--cheat-sheet"]);
                                         return FilterResult::Intercept(());
                                     }
                                     // Super + I or Super + comma: Open Settings
@@ -2579,19 +2559,9 @@ fn main() -> anyhow::Result<()> {
                                 state.selection_box = Some((state.cursor_location, state.cursor_location));
                             } else if (button_code == 2 || button_code == 3 || button_code == 273) && !logo_held {
                                 info!("Right-clicked on empty desktop: Spawning Corten Desktop Context Menu at cursor");
-                                let _ = std::process::Command::new("pkill")
-                                    .args(["-9", "-x", "corten-launcher"])
-                                    .status();
                                 let cur_x = state.cursor_location.x.round() as i32;
                                 let cur_y = state.cursor_location.y.round() as i32;
-                                let launcher_path = crate::state::resolve_corten_bin("corten-launcher");
-                                let _ = std::process::Command::new(launcher_path)
-                                    .arg("--desktop-menu")
-                                    .arg("--x")
-                                    .arg(cur_x.to_string())
-                                    .arg("--y")
-                                    .arg(cur_y.to_string())
-                                    .spawn();
+                                crate::state::spawn_desktop_context_menu_async(cur_x, cur_y);
                             }
                         }
                     } else if button_state == ButtonState::Released {

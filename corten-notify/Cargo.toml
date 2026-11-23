@@ -9,7 +9,6 @@ description = "Lightweight, beautiful Wayland notification daemon for Corten Des
 [dependencies]
 corten-theme = { path = "../crates/theme" }
 corten-config = { path = "../crates/config" }
-corten-ipc = { path = "../crates/ipc" }
 corten-services = { path = "../crates/services" }
 
 # GUI & Layer-shell

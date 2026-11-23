@@ -140,6 +140,23 @@ impl CompositorHandler for CortenCompositor {
         on_commit_buffer_handler::<Self>(surface);
         self.popup_manager.commit(surface);
 
+        // Per xdg-shell spec, send initial popup configure on the popup's first commit
+        // (alongside wl_surface.enter) so Chromium/GTK4/Firefox menus never hang.
+        if let Some(PopupKind::Xdg(popup)) = self.popup_manager.find_popup(surface) {
+            let initial_configure_sent = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get::<smithay::wayland::shell::xdg::XdgPopupSurfaceData>()
+                    .and_then(|d| d.lock().ok())
+                    .map(|d| d.initial_configure_sent)
+                    .unwrap_or(true)
+            });
+            if !initial_configure_sent {
+                self.output.enter(surface);
+                let _ = popup.send_configure();
+            }
+        }
+
         let mut matched_windows = Vec::new();
         for window in self.layout.windows() {
             if crate::layout::window_wl_surface(window).as_ref() == Some(surface) {
@@ -154,10 +171,17 @@ impl CompositorHandler for CortenCompositor {
             }
         }
         let mut metadata_changed = false;
-        for win in matched_windows {
+        for win in &matched_windows {
+            if let Some(toplevel) = win.toplevel() {
+                if !crate::layout::toplevel_initial_configure_sent(toplevel) {
+                    let target_output = self.output_for_window(win);
+                    target_output.enter(surface);
+                    toplevel.send_configure();
+                }
+            }
             if self
                 .layout
-                .evaluate_window_on_commit(&win, &self.window_rules)
+                .evaluate_window_on_commit(win, &self.window_rules)
             {
                 metadata_changed = true;
             }
@@ -360,7 +384,8 @@ impl XdgShellHandler for CortenCompositor {
             state.size = Some((initial_rect.size.w.max(160), client_h).into());
             state.states.set(xdg_toplevel::State::Activated);
         });
-        surface.send_configure();
+        // Per xdg-shell spec, wait for the client's initial empty wl_surface.commit()
+        // before sending the initial configure (handled in CompositorHandler::commit).
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -406,7 +431,8 @@ impl XdgShellHandler for CortenCompositor {
         {
             tracing::warn!("Failed to track popup: {:?}", err);
         }
-        let _ = surface.send_configure();
+        // Per xdg-shell spec, wait for the popup's initial wl_surface.commit()
+        // before sending the initial configure (handled in CompositorHandler::commit).
     }
 
     fn grab(&mut self, _surface: PopupSurface, _seat: WlSeat, _serial: Serial) {}
@@ -422,7 +448,17 @@ impl XdgShellHandler for CortenCompositor {
             state.geometry = geo;
         });
         surface.send_repositioned(token);
-        let _ = surface.send_configure();
+        let initial_configure_sent = with_states(surface.wl_surface(), |states| {
+            states
+                .data_map
+                .get::<smithay::wayland::shell::xdg::XdgPopupSurfaceData>()
+                .and_then(|d| d.lock().ok())
+                .map(|d| d.initial_configure_sent)
+                .unwrap_or(true)
+        });
+        if initial_configure_sent {
+            let _ = surface.send_configure();
+        }
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
@@ -443,7 +479,9 @@ impl XdgShellHandler for CortenCompositor {
             surface.with_pending_state(|state| {
                 state.states.set(xdg_toplevel::State::Maximized);
             });
-            surface.send_configure();
+            if crate::layout::toplevel_initial_configure_sent(&surface) {
+                surface.send_configure();
+            }
         }
     }
 
@@ -465,7 +503,9 @@ impl XdgShellHandler for CortenCompositor {
             surface.with_pending_state(|state| {
                 state.states.unset(xdg_toplevel::State::Maximized);
             });
-            surface.send_configure();
+            if crate::layout::toplevel_initial_configure_sent(&surface) {
+                surface.send_configure();
+            }
         }
     }
 
@@ -501,7 +541,9 @@ impl XdgShellHandler for CortenCompositor {
             state.states.set(xdg_toplevel::State::Fullscreen);
             state.size = Some(full_size);
         });
-        surface.send_configure();
+        if crate::layout::toplevel_initial_configure_sent(&surface) {
+            surface.send_configure();
+        }
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
@@ -536,7 +578,9 @@ impl XdgShellHandler for CortenCompositor {
                 (restored_rect.size.h - titlebar_h).max(100),
             ).into());
         });
-        surface.send_configure();
+        if crate::layout::toplevel_initial_configure_sent(&surface) {
+            surface.send_configure();
+        }
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, _seat: WlSeat, _serial: Serial) {
@@ -693,6 +737,7 @@ impl WlrLayerShellHandler for CortenCompositor {
             state.size = Some(configure_size);
         });
 
+        target_output.enter(surface.wl_surface());
         let serial = surface.send_configure();
 
         // Now map the layer surface to output layer map
@@ -714,6 +759,15 @@ impl SessionLockHandler for CortenCompositor {
     }
 
     fn lock(&mut self, confirmation: SessionLocker) {
+        self.lock_surfaces.retain(|(s, _)| s.alive());
+        if self.session_locked && (!self.lock_surfaces.is_empty() || self.pending_lock.is_some()) {
+            tracing::warn!(
+                "Compositor: Ignoring duplicate ext-session-lock request while session is already locked"
+            );
+            // Dropping `confirmation` sends `ext_session_lock_v1::finished` to the duplicate client.
+            drop(confirmation);
+            return;
+        }
         info!("Compositor: ext-session-lock request received");
         self.pending_lock = Some(confirmation);
         self.session_locked = true;
@@ -738,16 +792,25 @@ impl SessionLockHandler for CortenCompositor {
 
     fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
         info!("Compositor: ext-session-lock surface attached");
+        let target_output = smithay::output::Output::from_resource(&output)
+            .unwrap_or_else(|| self.output.clone());
+        let scale = target_output.current_scale().fractional_scale().max(0.5);
         surface.with_pending_state(|state| {
-            let output_size = smithay::output::Output::from_resource(&output)
-                .unwrap_or_else(|| self.output.clone());
-            let size = output_size
-                .current_mode()
-                .map(|mode| (mode.size.w.max(1) as u32, mode.size.h.max(1) as u32).into());
+            let size = target_output.current_mode().map(|mode| {
+                let logical_w = ((mode.size.w as f64) / scale).round().max(1.0) as u32;
+                let logical_h = ((mode.size.h as f64) / scale).round().max(1.0) as u32;
+                (logical_w, logical_h).into()
+            });
             state.size = size;
         });
-        surface.send_configure();
         let wl_surface = surface.wl_surface().clone();
+        with_states(&wl_surface, |states| {
+            with_fractional_scale(states, |fractional_scale| {
+                fractional_scale.set_preferred_scale(scale);
+            });
+        });
+        target_output.enter(&wl_surface);
+        surface.send_configure();
         self.lock_surfaces.push((surface, output));
 
         // Immediately grant keyboard focus to the lock surface so password entry works on first keystroke.
@@ -848,7 +911,40 @@ impl SeatHandler for CortenCompositor {
         &mut self.seat_state
     }
 
-    fn focus_changed(&mut self, _seat: &Seat<Self>, _focused: Option<&WlSurface>) {}
+    fn focus_changed(&mut self, _seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        // Keep xdg_toplevel::State::Activated & X11 _NET_ACTIVE_WINDOW synchronized
+        // whenever keyboard focus changes (e.g. popup/layer close, alt-tab, activation).
+        let windows: Vec<Window> = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .cloned()
+            .collect();
+        for win in &windows {
+            let is_focused = focused.is_some()
+                && crate::layout::window_wl_surface(win).as_ref() == focused;
+            if let Some(toplevel) = win.toplevel() {
+                let changed = toplevel.with_pending_state(|state| {
+                    let was_active = state.states.contains(xdg_toplevel::State::Activated);
+                    if is_focused && !was_active {
+                        state.states.set(xdg_toplevel::State::Activated);
+                        true
+                    } else if !is_focused && was_active {
+                        state.states.unset(xdg_toplevel::State::Activated);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if changed && crate::layout::toplevel_initial_configure_sent(toplevel) {
+                    toplevel.send_configure();
+                }
+            } else if let Some(x11) = win.x11_surface() {
+                let _ = x11.set_activated(is_focused);
+            }
+        }
+    }
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
         self.cursor_status = image;
     }
@@ -902,7 +998,7 @@ impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for CortenCo
                 })
                 .unwrap_or(usable);
             crate::layout::configure_window_geometry(&win, rect);
-        } else {
+        } else if crate::layout::toplevel_initial_configure_sent(&toplevel) {
             toplevel.send_configure();
         }
     }
@@ -937,7 +1033,7 @@ impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for CortenCo
                 })
                 .unwrap_or(usable);
             crate::layout::configure_window_geometry(&win, rect);
-        } else {
+        } else if crate::layout::toplevel_initial_configure_sent(&toplevel) {
             let _ = toplevel.send_configure();
         }
     }
@@ -947,7 +1043,9 @@ impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for CortenCo
         toplevel.with_pending_state(|state| {
             state.decoration_mode = Some(Mode::ServerSide);
         });
-        let _ = toplevel.send_configure();
+        if crate::layout::toplevel_initial_configure_sent(&toplevel) {
+            let _ = toplevel.send_configure();
+        }
     }
 }
 
@@ -992,10 +1090,41 @@ impl PointerConstraintsHandler for CortenCompositor {
 
     fn cursor_position_hint(
         &mut self,
-        _surface: &WlSurface,
+        surface: &WlSurface,
         _pointer: &smithay::input::pointer::PointerHandle<Self>,
-        _location: smithay::utils::Point<f64, smithay::utils::Logical>,
+        location: smithay::utils::Point<f64, smithay::utils::Logical>,
     ) {
+        if self.session_locked {
+            return;
+        }
+        let target_win = self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+            .find(|w| crate::layout::window_wl_surface(w).as_ref() == Some(surface))
+            .cloned();
+        if let Some(win) = target_win {
+            let rect = self.layout.floating_geometry(&win).or_else(|| {
+                let usable = self.usable_area_for_window(&win);
+                self.layout
+                    .arrange(usable)
+                    .into_iter()
+                    .find(|(w, _)| w == &win)
+                    .map(|(_, r)| r)
+            });
+            if let Some(rect) = rect {
+                let titlebar_h = crate::layout::window_titlebar_height(
+                    &win,
+                    self.layout.is_fullscreen(&win),
+                );
+                let global_x = (rect.loc.x as f64 + location.x)
+                    .clamp(0.0, self.output_size.w.max(1) as f64);
+                let global_y = ((rect.loc.y + titlebar_h) as f64 + location.y)
+                    .clamp(0.0, self.output_size.h.max(1) as f64);
+                self.cursor_location = (global_x, global_y).into();
+            }
+        }
     }
 }
 
@@ -1040,15 +1169,14 @@ impl XdgActivationHandler for CortenCompositor {
         token_data: XdgActivationTokenData,
         surface: WlSurface,
     ) {
-        if token_data.timestamp.elapsed().as_secs() < 10 {
+        // Never allow background apps to steal focus while the session is locked.
+        if !self.session_locked && token_data.timestamp.elapsed().as_secs() < 10 {
             let target_window = self
                 .layout
                 .windows()
                 .iter()
-                .find(|w| {
-                    w.toplevel()
-                        .is_some_and(|t| t.wl_surface() == &surface)
-                })
+                .chain(self.layout.floating_windows().iter())
+                .find(|w| crate::layout::window_wl_surface(w).as_ref() == Some(&surface))
                 .cloned();
             if let Some(window) = target_window {
                 self.layout.set_active_window(&window);
@@ -1116,10 +1244,24 @@ impl smithay::wayland::input_method::InputMethodHandler for CortenCompositor {
     }
 
     fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, smithay::utils::Logical> {
-        for win in self.layout.windows().iter().chain(self.layout.floating_windows().iter()) {
+        for win in self
+            .layout
+            .windows()
+            .iter()
+            .chain(self.layout.floating_windows().iter())
+        {
             if crate::layout::window_wl_surface(win).as_ref() == Some(parent) {
                 if let Some(geo) = self.layout.floating_geometry(win) {
                     return geo;
+                }
+                let usable = self.usable_area_for_window(win);
+                if let Some((_, tiled_rect)) = self
+                    .layout
+                    .arrange(usable)
+                    .into_iter()
+                    .find(|(w, _)| w == win)
+                {
+                    return tiled_rect;
                 }
             }
         }

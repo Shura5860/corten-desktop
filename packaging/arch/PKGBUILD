@@ -1,6 +1,6 @@
 # Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
 pkgname=corten-desktop-git
-pkgver=0.5.9.r0.g0000000
+pkgver=0.6.0.r0.g0000000
 pkgrel=1
 pkgdesc="Pure-Rust Wayland desktop environment powered by Smithay, Iced & AURA-CORE"
 arch=('x86_64' 'aarch64')
@@ -48,7 +48,7 @@ sha256sums=('SKIP')
 
 pkgver() {
     cd "${srcdir}/corten-desktop"
-    printf "0.5.9.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    printf "0.6.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {

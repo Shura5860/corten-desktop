@@ -11,6 +11,5 @@ memmap2 = "0.9"
 byteorder = "1.5"
 rayon = "1.10"
 anyhow = "1.0"
-regex = "1.10"
 rand = "0.8"
 

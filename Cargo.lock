@@ -800,7 +800,7 @@ checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 
 [[package]]
 name = "corten-ai"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "corten-config",
  "corten-ipc",
@@ -823,11 +823,11 @@ dependencies = [
 
 [[package]]
 name = "corten-auth"
-version = "0.5.9"
+version = "0.6.0"
 
 [[package]]
 name = "corten-capture"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "pipewire",
  "thiserror 2.0.21",
@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "corten-capture-session"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "corten-capture",
  "corten-services",
@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "corten-compositor"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -856,7 +856,6 @@ dependencies = [
  "corten-ipc",
  "corten-services",
  "corten-theme",
- "glow 0.14.2",
  "nix 0.29.0",
  "png",
  "serde",
@@ -874,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "corten-config"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "directories",
  "notify",
@@ -886,9 +885,8 @@ dependencies = [
 
 [[package]]
 name = "corten-files"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
- "anyhow",
  "corten-config",
  "corten-services",
  "corten-theme",
@@ -903,9 +901,8 @@ dependencies = [
 
 [[package]]
 name = "corten-forge"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
- "anyhow",
  "corten-config",
  "corten-ipc",
  "corten-theme",
@@ -923,12 +920,11 @@ dependencies = [
 
 [[package]]
 name = "corten-greeter"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "corten-auth",
  "corten-config",
- "corten-ipc",
  "corten-theme",
  "greetd_ipc",
  "iced",
@@ -943,14 +939,14 @@ dependencies = [
 
 [[package]]
 name = "corten-i18n"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "corten-ipc"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "serde",
@@ -963,11 +959,10 @@ dependencies = [
 
 [[package]]
 name = "corten-launcher"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "corten-config",
  "corten-i18n",
- "corten-ipc",
  "corten-theme",
  "corten-vector",
  "directories",
@@ -988,33 +983,29 @@ dependencies = [
 
 [[package]]
 name = "corten-llm"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "byteorder",
  "memmap2 0.9.12",
  "rand 0.8.8",
  "rayon",
- "regex",
 ]
 
 [[package]]
 name = "corten-lock"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "corten-auth",
  "corten-config",
- "corten-ipc",
  "corten-services",
  "corten-theme",
  "iced",
  "iced_sessionlock",
+ "image",
  "pam",
- "serde",
- "thiserror 2.0.21",
  "tokio",
- "toml",
  "tracing",
  "tracing-subscriber",
  "users 0.11.0",
@@ -1022,7 +1013,7 @@ dependencies = [
 
 [[package]]
 name = "corten-monitor"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "corten-config",
  "corten-theme",
@@ -1034,10 +1025,9 @@ dependencies = [
 
 [[package]]
 name = "corten-notify"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "corten-config",
- "corten-ipc",
  "corten-services",
  "corten-theme",
  "futures",
@@ -1055,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "corten-panel"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "corten-config",
@@ -1079,10 +1069,8 @@ dependencies = [
 
 [[package]]
 name = "corten-polkit"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
- "anyhow",
- "corten-auth",
  "corten-config",
  "corten-theme",
  "directories",
@@ -1100,13 +1088,11 @@ dependencies = [
 
 [[package]]
 name = "corten-portal"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
- "anyhow",
  "chrono",
  "corten-config",
  "corten-ipc",
- "corten-services",
  "corten-theme",
  "directories",
  "futures",
@@ -1119,7 +1105,7 @@ dependencies = [
 
 [[package]]
 name = "corten-services"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "futures-lite",
  "thiserror 2.0.21",
@@ -1129,7 +1115,7 @@ dependencies = [
 
 [[package]]
 name = "corten-session"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1145,9 +1131,8 @@ dependencies = [
 
 [[package]]
 name = "corten-settings"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
- "anyhow",
  "corten-config",
  "corten-ipc",
  "corten-services",
@@ -1164,7 +1149,7 @@ dependencies = [
 
 [[package]]
 name = "corten-snipper"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "corten-config",
  "corten-services",
@@ -1179,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "corten-theme"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "iced",
  "serde",
@@ -1187,10 +1172,8 @@ dependencies = [
 
 [[package]]
 name = "corten-update"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
- "corten-config",
- "corten-ipc",
  "directories",
  "serde",
  "serde_json",
@@ -1201,9 +1184,8 @@ dependencies = [
 
 [[package]]
 name = "corten-vector"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
- "byteorder",
  "rayon",
  "serde",
  "serde_json",
@@ -1211,7 +1193,7 @@ dependencies = [
 
 [[package]]
 name = "corten-wallpaper"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "corten-config",
  "corten-theme",
@@ -1230,13 +1212,10 @@ dependencies = [
 
 [[package]]
 name = "corten-welcome"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
- "anyhow",
  "corten-config",
  "corten-i18n",
- "corten-ipc",
- "corten-services",
  "corten-theme",
  "directories",
  "iced",
@@ -1252,12 +1231,11 @@ dependencies = [
 
 [[package]]
 name = "corten-widgets"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "corten-config",
  "corten-i18n",
- "corten-ipc",
  "corten-theme",
  "directories",
  "futures",
@@ -2051,18 +2029,6 @@ name = "glow"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd348e04c43b32574f2de31c8bb397d96c9fcfa1371bd4ca6d8bdc464ab121b1"
-dependencies = [
- "js-sys",
- "slotmap",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "glow"
-version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d51fa363f025f5c111e03f13eda21162faeacb6911fe8caa0c0349f9cf0c4483"
 dependencies = [
  "js-sys",
  "slotmap",
@@ -4887,7 +4853,7 @@ dependencies = [
 
 [[package]]
 name = "theme-preview"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "corten-theme",
  "iced",

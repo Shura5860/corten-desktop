@@ -106,7 +106,7 @@ impl TabletState {
         state: &CortenCompositor,
         name: &str,
     ) -> TabletHandle {
-        let mut tablets = self.tablets.lock().unwrap();
+        let mut tablets = self.tablets.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(tablet) = tablets.get(name) {
             return tablet.clone();
         }
@@ -132,7 +132,7 @@ impl TabletState {
         state: &mut CortenCompositor,
         desc: &TabletToolDescriptor,
     ) -> TabletToolHandle {
-        let mut tools = self.tools.lock().unwrap();
+        let mut tools = self.tools.lock().unwrap_or_else(|e| e.into_inner());
         let key = if desc.hardware_serial != 0 {
             desc.hardware_serial
         } else {

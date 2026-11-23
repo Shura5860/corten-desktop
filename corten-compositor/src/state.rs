@@ -402,7 +402,17 @@ impl CortenCompositor {
                 self.idle_event_loop = Some(std::sync::Mutex::new(el));
             }
         }
-        if self.session_locked || self.game_mode {
+        if self.session_locked {
+            // While locked, still power off displays (DPMS-off) after inactivity
+            // to protect battery & OLED panels; any input wakes immediately via note_input().
+            let lock_dpms_timeout = self
+                .screen_sleep_after
+                .map(|t| t.min(Duration::from_secs(60)))
+                .unwrap_or(Duration::from_secs(60));
+            self.screen_asleep = self.last_input.elapsed() >= lock_dpms_timeout;
+            return false;
+        }
+        if self.game_mode {
             return false;
         }
         if self.is_idle_inhibited() {
@@ -441,10 +451,21 @@ impl CortenCompositor {
         location: Point<i32, smithay::utils::Logical>,
         scale: smithay::output::Scale,
     ) -> Output {
+        self.create_output_with_physical_size(name, mode, location, scale, (0, 0))
+    }
+
+    pub fn create_output_with_physical_size(
+        &self,
+        name: String,
+        mode: Mode,
+        location: Point<i32, smithay::utils::Logical>,
+        scale: smithay::output::Scale,
+        physical_mm: (u32, u32),
+    ) -> Output {
         let output = Output::new(
             name,
             PhysicalProperties {
-                size: (0, 0).into(),
+                size: (physical_mm.0 as i32, physical_mm.1 as i32).into(),
                 subpixel: Subpixel::Unknown,
                 make: "Corten Desktop".to_string(),
                 model: "DRM Display".to_string(),
@@ -1486,21 +1507,26 @@ impl CortenCompositor {
             "color-picker" => {
                 let x = self.cursor_location.x.round() as i32;
                 let y = self.cursor_location.y.round() as i32;
-                let (r, g, b) = sample_screen_pixel_at(x, y);
-                let (hex, rgb_str) = format_color_hex_rgb(r, g, b);
-                if let Ok(mut child) = std::process::Command::new("wl-copy")
-                    .stdin(std::process::Stdio::piped())
-                    .spawn()
-                {
-                    if let Some(mut stdin) = child.stdin.take() {
-                        use std::io::Write;
-                        let _ = stdin.write_all(hex.as_bytes());
+                // Offload grim + wl-copy off the compositor main thread to prevent
+                // Wayland screencopy deadlock!
+                std::thread::spawn(move || {
+                    let (r, g, b) = sample_screen_pixel_at(x, y);
+                    let (hex, rgb_str) = format_color_hex_rgb(r, g, b);
+                    if let Ok(mut child) = std::process::Command::new("wl-copy")
+                        .stdin(std::process::Stdio::piped())
+                        .spawn()
+                    {
+                        if let Some(mut stdin) = child.stdin.take() {
+                            use std::io::Write;
+                            let _ = stdin.write_all(hex.as_bytes());
+                        }
+                        let _ = child.wait();
                     }
-                }
-                let msg = format!("{} — {} panoya kopyalandı ({}, {})", hex, rgb_str, x, y);
-                let _ = std::process::Command::new("notify-send")
-                    .args(["Corten Renk Seçici", &msg])
-                    .spawn();
+                    let msg = format!("{} — {} panoya kopyalandı ({}, {})", hex, rgb_str, x, y);
+                    let _ = std::process::Command::new("notify-send")
+                        .args(["Corten Renk Seçici", &msg])
+                        .spawn();
+                });
             }
             "save-session" => {
                 if let Ok(path) = self.save_window_session_to_disk() {
@@ -1864,22 +1890,66 @@ pub fn resolve_corten_bin(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(name)
 }
 
+/// Toggles `corten-launcher` on a detached background thread so `pkill.status()`
+/// never stalls the compositor main event loop.
+pub fn toggle_corten_launcher_async(args: &[&str]) {
+    let owned_args: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
+    std::thread::spawn(move || {
+        if let Ok(status) = std::process::Command::new("pkill")
+            .args(["-x", "corten-launcher"])
+            .status()
+        {
+            if status.success() {
+                return;
+            }
+        }
+        let launcher_path = resolve_corten_bin("corten-launcher");
+        let _ = std::process::Command::new(launcher_path)
+            .args(&owned_args)
+            .spawn();
+    });
+}
+
+/// Replaces any open `corten-launcher` instance and spawns the desktop context menu
+/// at `(cur_x, cur_y)` without blocking the compositor main loop.
+pub fn spawn_desktop_context_menu_async(cur_x: i32, cur_y: i32) {
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("pkill")
+            .args(["-9", "-x", "corten-launcher"])
+            .status();
+        let launcher_path = resolve_corten_bin("corten-launcher");
+        let _ = std::process::Command::new(launcher_path)
+            .arg("--desktop-menu")
+            .arg("--x")
+            .arg(cur_x.to_string())
+            .arg("--y")
+            .arg(cur_y.to_string())
+            .spawn();
+    });
+}
+
 /// Calculates kinetic velocity (px/sec) from recent gesture samples.
 pub fn calculate_gesture_velocity(samples: &[(u64, f64, f64)]) -> (f64, f64) {
+    let Some(last) = samples.last() else {
+        return (0.0, 0.0);
+    };
     if samples.len() < 2 {
         return (0.0, 0.0);
     }
-    let last_time = samples.last().unwrap().0;
+    let last_time = last.0;
     // Consider samples within the last 150ms (150,000 microseconds)
     let recent: Vec<_> = samples
         .iter()
         .filter(|(t, _, _)| last_time.saturating_sub(*t) <= 150_000)
         .collect();
 
+    let Some(first) = recent.first() else {
+        return (0.0, 0.0);
+    };
     if recent.len() < 2 {
         return (0.0, 0.0);
     }
-    let first_time = recent.first().unwrap().0;
+    let first_time = first.0;
     let dt_usec = last_time.saturating_sub(first_time);
     if dt_usec < 5_000 {
         return (0.0, 0.0);

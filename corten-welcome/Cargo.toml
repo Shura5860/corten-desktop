@@ -10,8 +10,6 @@ description = "First-Boot Onboarding and Welcome Wizard for Corten Wayland Deskt
 [dependencies]
 corten-theme = { path = "../crates/theme" }
 corten-config = { path = "../crates/config" }
-corten-ipc = { path = "../crates/ipc" }
-corten-services = { path = "../crates/services" }
 corten-i18n = { path = "../crates/i18n" }
 
 # GUI Toolkit
@@ -24,6 +22,5 @@ tokio = { version = "1.0", features = ["rt", "macros"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 directories = { workspace = true }
-anyhow = "1.0"
 zbus = { workspace = true, features = ["tokio"] }
 

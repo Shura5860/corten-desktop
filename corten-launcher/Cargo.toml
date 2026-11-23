@@ -9,7 +9,6 @@ description = "Fast, keyboard-centric Wayland application launcher for Corten De
 [dependencies]
 corten-theme = { path = "../crates/theme" }
 corten-config = { path = "../crates/config" }
-corten-ipc = { path = "../crates/ipc" }
 corten-i18n = { path = "../crates/i18n" }
 corten-vector = { path = "../crates/vector" }
 

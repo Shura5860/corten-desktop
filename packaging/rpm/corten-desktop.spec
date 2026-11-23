@@ -1,5 +1,5 @@
 Name:           corten-desktop
-Version:        0.5.9
+Version:        0.6.0
 Release:        1%{?dist}
 Summary:        Pure-Rust Wayland desktop environment powered by Smithay, Iced & AURA-CORE
 License:        GPL-3.0-or-later AND MIT

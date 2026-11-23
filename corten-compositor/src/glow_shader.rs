@@ -237,9 +237,18 @@ impl DualKawaseBlurPipeline {
         }
         self.commit.increment();
 
-        let (_, mut scene_tex) = self.scene_tex.take().unwrap();
-        let (half_buf_size, mut half_tex) = self.half_tex.take().unwrap();
-        let (quarter_buf_size, mut quarter_tex) = self.quarter_tex.take().unwrap();
+        let (
+            Some((_, mut scene_tex)),
+            Some((half_buf_size, mut half_tex)),
+            Some((quarter_buf_size, mut quarter_tex)),
+        ) = (
+            self.scene_tex.take(),
+            self.half_tex.take(),
+            self.quarter_tex.take(),
+        )
+        else {
+            return Vec::new();
+        };
 
         let pass_ok: Result<(), GlesError> = (|| {
             // 1. Render background/window scene into `scene_tex`

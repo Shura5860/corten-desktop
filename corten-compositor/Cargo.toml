@@ -38,7 +38,6 @@ tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 anyhow = "1.0"
 nix = { version = "0.29", features = ["signal"] }
-glow = "0.14"
 xcursor = "0.3"
 bytemuck = "1.25.2"
 png = "0.17"

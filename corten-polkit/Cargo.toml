@@ -10,7 +10,6 @@ description = "Native PolicyKit (Polkit-1) Authentication Agent for the Corten W
 [dependencies]
 corten-theme = { path = "../crates/theme" }
 corten-config = { path = "../crates/config" }
-corten-auth = { path = "../crates/auth" }
 
 # GUI Toolkit & Layer-shell integration
 iced = { workspace = true, features = ["tiny-skia", "tokio"] }
@@ -21,7 +20,6 @@ tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "tim
 serde = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-anyhow = "1.0"
 directories = { workspace = true }
 futures-lite = "2.6"
 pam = "0.8"

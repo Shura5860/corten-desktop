@@ -604,17 +604,24 @@ fn convert_svg_to_png(svg_path: &std::path::Path, out_size: u32) -> Option<PathB
         return Some(out_file);
     }
 
+    let tmp_file = cache_dir.join(format!(
+        "{}_{:08x}_{}x{}.png.tmp",
+        file_stem, path_hash as u32, out_size, out_size
+    ));
     if let Ok(status) = std::process::Command::new("rsvg-convert")
         .args([
             "-w", &out_size.to_string(),
             "-h", &out_size.to_string(),
             svg_path.to_str()?,
-            "-o", out_file.to_str()?,
+            "-o", tmp_file.to_str()?,
         ])
         .status()
     {
-        if status.success() && out_file.exists() {
-            return Some(out_file);
+        if status.success() && tmp_file.exists() {
+            if std::fs::rename(&tmp_file, &out_file).is_ok() {
+                return Some(out_file);
+            }
+            let _ = std::fs::remove_file(&tmp_file);
         }
     }
 
@@ -1341,21 +1348,24 @@ impl Application for CortenPanelApp {
         let tick_ms = if self.osd_state.is_some() { 500 } else { 1000 };
         let timer = iced::time::every(Duration::from_millis(tick_ms)).map(|_| Message::Tick);
 
-        let needs_animation = !self.popover_transition.is_complete()
+        let needs_fast_animation = !self.popover_transition.is_complete()
             || self.launch_bounce.is_some()
             || self
                 .osd_state
                 .as_ref()
-                .is_some_and(|(_, lvl, _)| (self.osd_display_level - *lvl as f32).abs() > 0.2)
-            || (self.show_control_center
-                && (self.media_players.iter().any(|p| p.playback_status == corten_services::mpris::PlaybackStatus::Playing)
-                    || !self.app_streams.is_empty()
-                    || self.audio_vu_level.0 > 0.01
-                    || self.audio_vu_level.1 > 0.01));
+                .is_some_and(|(_, lvl, _)| (self.osd_display_level - *lvl as f32).abs() > 0.2);
+        let needs_vu_animation = self.show_control_center
+            && (self.media_players.iter().any(|p| {
+                p.playback_status == corten_services::mpris::PlaybackStatus::Playing
+            }) || !self.app_streams.is_empty()
+                || self.audio_vu_level.0 > 0.01
+                || self.audio_vu_level.1 > 0.01);
 
         let mut subs = vec![events, timer];
-        if needs_animation {
+        if needs_fast_animation {
             subs.push(iced::time::every(Duration::from_millis(16)).map(|_| Message::AnimationTick));
+        } else if needs_vu_animation {
+            subs.push(iced::time::every(Duration::from_millis(33)).map(|_| Message::AnimationTick));
         }
 
         // Standard UNIX domain event stream subscription (Hyprland / Sway model)
@@ -1711,10 +1721,12 @@ impl Application for CortenPanelApp {
                 self.compositor_windows = windows;
                 self.running_apps = SystemInfo::get_running_apps_from_windows(&self.compositor_windows);
                 self.other_apps = SystemInfo::get_other_running_apps_from_windows(&self.compositor_windows);
+                let mut tick_tasks: Vec<Task<Message>> = Vec::new();
+                let mut needs_layer_sync = false;
                 let current_w = self.calculate_dock_width();
                 if current_w != self.last_dock_width {
                     self.last_dock_width = current_w;
-                    return self.layer_config_task();
+                    needs_layer_sync = true;
                 }
 
                 // Smart On-Demand & Battery-Friendly Cadence Polling (Zero-Excess-Fork)
@@ -1727,11 +1739,11 @@ impl Application for CortenPanelApp {
                     self.battery_status = SystemInfo::get_battery_info();
                 }
                 if is_new_sec && self.show_control_center && current_secs.is_multiple_of(3) {
-                    return Task::perform(async {
+                    tick_tasks.push(Task::perform(async {
                         tokio::task::spawn_blocking(move || {
                             corten_services::mpris::list_players().unwrap_or_default()
                         }).await.unwrap_or_default()
-                    }, Message::MediaPlayersUpdated);
+                    }, Message::MediaPlayersUpdated));
                 }
                 if is_new_sec && (self.show_volume_slider || self.show_control_center) && current_secs.is_multiple_of(3) {
                     self.audio_sinks = pipewire::list_sinks();
@@ -1765,7 +1777,7 @@ impl Application for CortenPanelApp {
                     let target_visible = !has_windows_on_ws || popover_open;
                     if self.panel_visible != target_visible {
                         self.panel_visible = target_visible;
-                        return self.layer_config_task();
+                        needs_layer_sync = true;
                     }
                 }
 
@@ -1913,13 +1925,13 @@ impl Application for CortenPanelApp {
 
                 // Dynamically sync dock width & OSD height with real-time contents immediately
                 let current_w = self.calculate_dock_width();
-                let mut post_tasks = custom_script_tasks;
-                if current_w != self.last_dock_width || self.osd_state.is_some() != had_osd {
+                tick_tasks.extend(custom_script_tasks);
+                if needs_layer_sync || current_w != self.last_dock_width || self.osd_state.is_some() != had_osd {
                     self.last_dock_width = current_w;
-                    post_tasks.push(self.layer_config_task());
+                    tick_tasks.push(self.layer_config_task());
                 }
-                if !post_tasks.is_empty() {
-                    return Task::batch(post_tasks);
+                if !tick_tasks.is_empty() {
+                    return Task::batch(tick_tasks);
                 }
             }
             Message::CustomScriptResult(idx, raw_output) => {
@@ -2258,29 +2270,38 @@ impl Application for CortenPanelApp {
             }
             Message::EmptyTrash => {
                 if let Ok(home) = std::env::var("HOME") {
-                    let trash_dir = PathBuf::from(home).join(".local/share/Trash/files");
-                    let _ = std::fs::remove_dir_all(&trash_dir);
-                    let _ = std::fs::create_dir_all(&trash_dir);
+                    // FreeDesktop Trash Spec: clear BOTH Trash/files and Trash/info off the UI thread.
+                    let trash_root = PathBuf::from(home).join(".local/share/Trash");
+                    std::thread::spawn(move || {
+                        for sub in ["files", "info"] {
+                            let dir = trash_root.join(sub);
+                            let _ = std::fs::remove_dir_all(&dir);
+                            let _ = std::fs::create_dir_all(&dir);
+                        }
+                    });
                     self.trash_item_count = 0;
+                    self.osd_state = Some((OsdKind::Toast("Çöp kutusu boşaltıldı".into()), 100, 3));
                 }
             }
             Message::OpenLauncher | Message::ToggleLauncherModal => {
-                if let Some(cmdline) = get_corten_launcher_cmdline() {
-                    let _ = std::process::Command::new("pkill")
-                        .args(["-TERM", "-x", "corten-launcher"])
-                        .status();
-                    if cmdline.contains("--dashboard") {
+                std::thread::spawn(|| {
+                    if let Some(cmdline) = get_corten_launcher_cmdline() {
+                        let _ = std::process::Command::new("pkill")
+                            .args(["-TERM", "-x", "corten-launcher"])
+                            .status();
+                        if cmdline.contains("--dashboard") {
+                            let bin = find_binary("corten-launcher");
+                            let _ = std::process::Command::new(bin)
+                                .arg("--start-menu")
+                                .spawn();
+                        }
+                    } else {
                         let bin = find_binary("corten-launcher");
                         let _ = std::process::Command::new(bin)
                             .arg("--start-menu")
                             .spawn();
                     }
-                } else {
-                    let bin = find_binary("corten-launcher");
-                    let _ = std::process::Command::new(bin)
-                        .arg("--start-menu")
-                        .spawn();
-                }
+                });
             }
             Message::LauncherSearchChanged(query) => {
                 self.launcher_search = query;
@@ -2290,22 +2311,24 @@ impl Application for CortenPanelApp {
                 let _ = launch_fallback_chain(&cmd);
             }
             Message::OpenDashboard => {
-                if let Some(cmdline) = get_corten_launcher_cmdline() {
-                    let _ = std::process::Command::new("pkill")
-                        .args(["-TERM", "-x", "corten-launcher"])
-                        .status();
-                    if !cmdline.contains("--dashboard") {
+                std::thread::spawn(|| {
+                    if let Some(cmdline) = get_corten_launcher_cmdline() {
+                        let _ = std::process::Command::new("pkill")
+                            .args(["-TERM", "-x", "corten-launcher"])
+                            .status();
+                        if !cmdline.contains("--dashboard") {
+                            let bin = find_binary("corten-launcher");
+                            let _ = std::process::Command::new(bin)
+                                .arg("--dashboard")
+                                .spawn();
+                        }
+                    } else {
                         let bin = find_binary("corten-launcher");
                         let _ = std::process::Command::new(bin)
                             .arg("--dashboard")
                             .spawn();
                     }
-                } else {
-                    let bin = find_binary("corten-launcher");
-                    let _ = std::process::Command::new(bin)
-                        .arg("--dashboard")
-                        .spawn();
-                }
+                });
             }
             Message::ToggleAudioMute => {
                 let _ = pipewire::toggle_mute("@DEFAULT_AUDIO_SINK@");
@@ -2747,7 +2770,12 @@ impl Application for CortenPanelApp {
                 self.show_calendar = false;
                 match action {
                     SystemPowerAction::Lock => {
-                        if let Err(error) = std::process::Command::new("corten-lock").spawn() {
+                        let lock_bin = std::env::current_exe()
+                            .ok()
+                            .and_then(|p| p.parent().map(|d| d.join("corten-lock")))
+                            .filter(|p| p.exists())
+                            .unwrap_or_else(|| std::path::PathBuf::from("corten-lock"));
+                        if let Err(error) = std::process::Command::new(lock_bin).spawn() {
                             warn!(%error, "Failed to start lock screen");
                         }
                     }
@@ -3976,22 +4004,32 @@ impl Application for CortenPanelApp {
 
             let battery_info: Element<'_, Self::Message> =
                 if let Some((pct, is_charging)) = self.battery_status {
-                    row![
+                    let mut bat_row = row![
                         text(Icon::BATTERY)
                             .font(LUCIDE_FONT)
                             .size(14.0)
-                            .color(if pct <= 20 {
+                            .color(if pct <= 20 && !is_charging {
                                 palette.danger.to_iced()
                             } else {
                                 palette.primary.to_iced()
                             }),
-                        text(format!("{}%{}", pct, if is_charging { " ⚡" } else { "" }))
+                    ]
+                    .spacing(4)
+                    .align_y(Alignment::Center);
+                    if is_charging {
+                        bat_row = bat_row.push(
+                            text(Icon::ZAP)
+                                .font(LUCIDE_FONT)
+                                .size(12.0)
+                                .color(palette.warning.to_iced()),
+                        );
+                    }
+                    bat_row = bat_row.push(
+                        text(format!("{pct}%"))
                             .size(12.0)
                             .color(palette.text_muted.to_iced()),
-                    ]
-                    .spacing(6)
-                    .align_y(Alignment::Center)
-                    .into()
+                    );
+                    bat_row.into()
                 } else {
                     row![
                         text(Icon::MONITOR)
@@ -4365,7 +4403,10 @@ impl Application for CortenPanelApp {
                                 .size(11.0)
                                 .color(palette.text_primary.to_iced()),
                             horizontal_space(),
-                            text(if is_sec { "🔒" } else { "🔓" }).size(10.0),
+                            text(if is_sec { Icon::LOCK } else { Icon::GLOBE })
+                                .font(LUCIDE_FONT)
+                                .size(11.0)
+                                .color(palette.text_muted.to_iced()),
                         ]
                         .spacing(6)
                         .align_y(Alignment::Center),
@@ -4402,7 +4443,7 @@ impl Application for CortenPanelApp {
                                 .size(12.0)
                                 .color(palette.primary.to_iced()),
                             horizontal_space(),
-                            button(text("✕").size(10.0).color(palette.text_muted.to_iced()))
+                            button(text(Icon::X).font(LUCIDE_FONT).size(11.0).color(palette.text_muted.to_iced()))
                                 .padding([1, 4])
                                 .style(|_, _| button::Style::default())
                                 .on_press(Message::CloseWifiModal),
@@ -4469,7 +4510,7 @@ impl Application for CortenPanelApp {
                     &player.artist
                 };
 
-                let play_icon = if is_playing { "⏸" } else { "▶" };
+                let play_icon = if is_playing { Icon::PAUSE } else { Icon::PLAY };
 
                 container(
                     row![
@@ -4484,7 +4525,7 @@ impl Application for CortenPanelApp {
                         .spacing(2)
                         .width(Length::Fill),
                         row![
-                            button(text("⏮").size(13.0).color(palette.text_primary.to_iced()))
+                            button(text(Icon::SKIP_BACK).font(LUCIDE_FONT).size(13.0).color(palette.text_primary.to_iced()))
                                 .padding([4, 8])
                                 .style(|_, status| {
                                     let bg = match status {
@@ -4501,7 +4542,7 @@ impl Application for CortenPanelApp {
                                     }
                                 })
                                 .on_press(Message::MprisPrevious(bus.clone())),
-                            button(text(play_icon).size(13.0).color(palette.on_primary().to_iced()))
+                            button(text(play_icon).font(LUCIDE_FONT).size(13.0).color(palette.on_primary().to_iced()))
                                 .padding([4, 10])
                                 .style(move |_, status| {
                                     let bg = match status {
@@ -4518,7 +4559,7 @@ impl Application for CortenPanelApp {
                                     }
                                 })
                                 .on_press(Message::MprisPlayPause(bus.clone())),
-                            button(text("⏭").size(13.0).color(palette.text_primary.to_iced()))
+                            button(text(Icon::SKIP_FORWARD).font(LUCIDE_FONT).size(13.0).color(palette.text_primary.to_iced()))
                                 .padding([4, 8])
                                 .style(|_, status| {
                                     let bg = match status {
@@ -4581,11 +4622,11 @@ impl Application for CortenPanelApp {
                         slider(0..=100, vol, move |v| Message::SetAppStreamVolume(id, v))
                             .width(Length::Fill)
                             .style(corten_theme::iced_styles::capsule_slider_style(palette)),
-                        button(text("🔀").size(10.0).color(palette.primary.to_iced()))
+                        button(text(Icon::SHUFFLE).font(LUCIDE_FONT).size(11.0).color(palette.primary.to_iced()))
                             .padding([2, 5])
                             .style(|_, _| button::Style::default())
                             .on_press(Message::RouteAppStreamToNextSink(id)),
-                        button(text(if is_muted { "✕" } else { "🔉" }).size(11.0).color(palette.text_muted.to_iced()))
+                        button(text(if is_muted { Icon::VOLUME_X } else { Icon::VOLUME }).font(LUCIDE_FONT).size(12.0).color(palette.text_muted.to_iced()))
                             .padding([2, 5])
                             .style(|_, _| button::Style::default())
                             .on_press(Message::ToggleAppStreamMute(id)),
@@ -4881,7 +4922,7 @@ impl Application for CortenPanelApp {
                     },
                     ..Default::default()
                 }),
-                button(text("✕").size(12.0).color(palette.text_muted.to_iced()))
+                button(text(Icon::X).font(LUCIDE_FONT).size(13.0).color(palette.text_muted.to_iced()))
                     .padding([2, 6])
                     .style(|_, _| button::Style::default())
                     .on_press(Message::TogglePowerMenu),
@@ -4945,7 +4986,7 @@ impl Application for CortenPanelApp {
                     action_card(Icon::LOCK, t.power_lock, t.power_lock_desc, SystemPowerAction::Lock, false),
                     action_card(Icon::MOON, t.power_suspend, t.power_suspend_desc, SystemPowerAction::Suspend, false),
                     action_card(Icon::USER, t.power_logout, t.power_logout_desc, SystemPowerAction::Logout, false),
-                    action_card(Icon::CODE, t.power_reboot, t.power_reboot_desc, SystemPowerAction::Reboot, false),
+                    action_card(Icon::REFRESH, t.power_reboot, t.power_reboot_desc, SystemPowerAction::Reboot, false),
                     action_card(Icon::POWER, t.power_poweroff, t.power_poweroff_desc, SystemPowerAction::Poweroff, true),
                 ]
                 .spacing(5)
@@ -4987,7 +5028,7 @@ impl Application for CortenPanelApp {
                     .size(14.0)
                     .color(palette.text_primary.to_iced()),
                 horizontal_space(),
-                button(text("✕").size(12.0).color(palette.text_muted.to_iced()))
+                button(text(Icon::X).font(LUCIDE_FONT).size(13.0).color(palette.text_muted.to_iced()))
                     .padding([2, 6])
                     .style(|_, _| button::Style::default())
                     .on_press(Message::ToggleCalendar),

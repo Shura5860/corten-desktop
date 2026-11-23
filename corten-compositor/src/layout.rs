@@ -289,7 +289,7 @@ fn configure_window_geometry_ex(
             }
             changed
         });
-        if needs_configure {
+        if needs_configure && toplevel_initial_configure_sent(toplevel) {
             toplevel.send_configure();
         }
     } else if let Some(x11) = window.x11_surface() {
@@ -302,6 +302,24 @@ fn configure_window_geometry_ex(
             let _ = x11.configure(x11_rect);
         }
     }
+}
+
+/// Returns `true` if the `xdg_toplevel` has already received its initial
+/// `xdg_surface.configure` (after the client's initial empty `wl_surface.commit()`).
+/// Sending `send_configure()` before the initial commit violates the `xdg-shell`
+/// protocol and causes strict clients (Chromium, Brave, Electron, GTK4) to hang
+/// indefinitely without mapping a window.
+pub fn toplevel_initial_configure_sent(
+    toplevel: &smithay::wayland::shell::xdg::ToplevelSurface,
+) -> bool {
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
+            .and_then(|d| d.lock().ok())
+            .map(|d| d.initial_configure_sent)
+            .unwrap_or(true)
+    })
 }
 
 /// Extracts `(app_id, title)` from an XDG toplevel or XWayland `X11Surface`.
@@ -1295,7 +1313,9 @@ impl LayoutManager {
                         Mode::ServerSide
                     });
                 });
-                toplevel.send_configure();
+                if toplevel_initial_configure_sent(toplevel) {
+                    toplevel.send_configure();
+                }
             }
         }
 
@@ -1818,7 +1838,9 @@ impl LayoutManager {
                 tstate.size = sz;
                 tstate.bounds = sz;
             });
-            toplevel.send_configure();
+            if toplevel_initial_configure_sent(toplevel) {
+                toplevel.send_configure();
+            }
         } else if let Some(x11) = window.x11_surface() {
             let _ = x11.set_maximized(maximized);
             configure_window_geometry(window, target_rect);

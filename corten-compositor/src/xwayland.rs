@@ -36,6 +36,7 @@ impl XWaylandShellHandler for CortenCompositor {
         wl_surface: WlSurface,
         window: X11Surface,
     ) {
+        self.output.enter(&wl_surface);
         let output_scale = self.output.current_scale().fractional_scale();
         let scale = compute_xwayland_surface_scale(output_scale, self.xwayland_force_zero_scaling);
         smithay::wayland::compositor::with_states(&wl_surface, |states| {
@@ -136,6 +137,7 @@ impl XwmHandler for CortenCompositor {
 
         let _ = window.set_activated(true);
         if let Some(wl_surface) = window.wl_surface() {
+            self.output.enter(&wl_surface);
             let output_scale = self.output.current_scale().fractional_scale();
             let scale = compute_xwayland_surface_scale(output_scale, self.xwayland_force_zero_scaling);
             smithay::wayland::compositor::with_states(&wl_surface, |states| {
@@ -157,6 +159,7 @@ impl XwmHandler for CortenCompositor {
             .layout
             .windows()
             .iter()
+            .chain(self.layout.floating_windows().iter())
             .any(|w| window_stable_id(w) == wid);
         if !already_tracked {
             let smithay_window = Window::new_x11_window(window.clone());
@@ -617,8 +620,23 @@ pub fn start_xwayland(
                 }
             }
             XWaylandEvent::Error => {
-                warn!("XWayland exited with an error before becoming ready");
+                warn!("XWayland exited with an error; clearing state and scheduling automatic recovery");
                 state.xwm = None;
+                state.xwayland_client = None;
+                if let Some(ref lh) = state.loop_handle.clone() {
+                    let dh = state.display_handle.clone();
+                    let timer = smithay::reexports::calloop::timer::Timer::from_duration(
+                        std::time::Duration::from_secs(2),
+                    );
+                    let lh_for_retry = lh.clone();
+                    let _ = lh.insert_source(timer, move |_, _, st: &mut CortenCompositor| {
+                        if st.xwm.is_none() {
+                            info!("XWayland watchdog: attempting automatic respawn");
+                            let _ = start_xwayland(&dh, &lh_for_retry);
+                        }
+                        smithay::reexports::calloop::timer::TimeoutAction::Drop
+                    });
+                }
             }
         }
     });
