@@ -191,7 +191,6 @@ impl SystemInfo {
 
     /// Queries the live Corten Compositor D-Bus service for a specific display output.
     #[allow(clippy::type_complexity)]
-    #[allow(clippy::type_complexity)]
     pub fn try_get_compositor_state_for_output(output_name: Option<&str>) -> Option<(
         usize,
         Vec<u32>,
