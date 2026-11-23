@@ -499,7 +499,7 @@ impl CortenFilesApp {
             _ => None,
         });
         let timer_sub =
-            iced::time::every(std::time::Duration::from_secs(6)).map(|_| Message::RefreshDevices);
+            iced::time::every(std::time::Duration::from_secs(2)).map(|_| Message::RefreshDevices);
         Subscription::batch([key_sub, timer_sub])
     }
 
@@ -543,16 +543,29 @@ impl CortenFilesApp {
                     Message::TerminalCommandFinished,
                 )
             }
-            Message::RefreshDevices => iced::Task::perform(
-                async {
-                    tokio::task::spawn_blocking(|| {
-                        corten_services::udisks2::list_devices().unwrap_or_default()
-                    })
-                    .await
-                    .unwrap_or_default()
-                },
-                Message::DevicesRefreshed,
-            ),
+            Message::RefreshDevices => {
+                if let Ok(cfg) =
+                    corten_config::ConfigManager::<corten_config::AppearanceConfig>::load_or_default(
+                        "appearance",
+                    )
+                {
+                    self.active_patina = PatinaVariant::from_code(&cfg.get().patina);
+                    self.theme_mode = match cfg.get().theme_mode {
+                        corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                        corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
+                    };
+                }
+                iced::Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(|| {
+                            corten_services::udisks2::list_devices().unwrap_or_default()
+                        })
+                        .await
+                        .unwrap_or_default()
+                    },
+                    Message::DevicesRefreshed,
+                )
+            }
             Message::MountDevice(obj_path) => {
                 let obj_clone = obj_path.clone();
                 iced::Task::perform(

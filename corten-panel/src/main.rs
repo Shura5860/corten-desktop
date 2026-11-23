@@ -2001,6 +2001,7 @@ impl Application for CortenPanelApp {
                     {
                         self.language = Language::from_code(&app_cfg.get().language);
                         self.active_patina = PatinaVariant::from_code(&app_cfg.get().patina);
+                        self.custom_accent = app_cfg.get().accent_color.clone();
                         self.theme_mode = match app_cfg.get().theme_mode {
                             corten_config::ThemeModeChoice::Light => ThemeMode::Light,
                             corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
@@ -3797,20 +3798,19 @@ impl Application for CortenPanelApp {
                 })
         };
 
-        let left_island = container(
-            row![
-                start_btn,
-                app_drawer_btn,
-                container(spaces_row).padding([0, 6])
-            ]
-            .spacing(4)
-            .align_y(Alignment::Center)
-            .padding([0, 8]),
-        )
-        .width(Length::Shrink)
-        .height(Length::Fixed(56.0))
-        .center_y(Length::Fixed(56.0))
-        .style(island_style);
+        let mut left_items = row![].spacing(4).align_y(Alignment::Center).padding([0, 8]);
+        if self.config.show_launcher_button {
+            left_items = left_items.push(start_btn);
+        }
+        left_items = left_items
+            .push(app_drawer_btn)
+            .push(container(spaces_row).padding([0, 6]));
+
+        let left_island = container(left_items)
+            .width(Length::Shrink)
+            .height(Length::Fixed(56.0))
+            .center_y(Length::Fixed(56.0))
+            .style(island_style);
 
         // ==================== SECTION 2: SYSTEM APPS (FIXED) + PINNED/RUNNING APPS ====================
         let mut sys_row = row![].spacing(6).align_y(Alignment::Center);

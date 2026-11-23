@@ -81,6 +81,7 @@ pub enum Message {
     LogLineReceived(String),
     OperationFinished(Result<(), String>),
     RefreshAll,
+    ThemeSyncTick,
     EventTriggered(Event),
 }
 
@@ -497,6 +498,15 @@ impl CortenForgeApp {
                     ),
                 ]);
             }
+            Message::ThemeSyncTick => {
+                if let Ok(cfg) = ConfigManager::<AppearanceConfig>::load_or_default("appearance") {
+                    self.active_patina = PatinaVariant::from_code(&cfg.get().patina);
+                    self.theme_mode = match cfg.get().theme_mode {
+                        corten_config::ThemeModeChoice::Light => ThemeMode::Light,
+                        corten_config::ThemeModeChoice::Dark => ThemeMode::Dark,
+                    };
+                }
+            }
             Message::EventTriggered(_) => {}
         }
         Task::none()
@@ -608,7 +618,9 @@ impl CortenForgeApp {
 
     fn subscription(&self) -> Subscription<Message> {
         let events = event::listen().map(Message::EventTriggered);
-        let mut subs = vec![events];
+        let theme_tick =
+            iced::time::every(std::time::Duration::from_secs(2)).map(|_| Message::ThemeSyncTick);
+        let mut subs = vec![events, theme_tick];
 
         if let Some(rx_arc) = &self.log_rx {
             let rx_clone = Arc::clone(rx_arc);
