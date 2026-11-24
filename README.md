@@ -118,7 +118,7 @@ Configured in `~/.config/corten/compositor.toml`:
 
 ## Development Note
 
-AI coding assistants were used during development—primarily for UI boilerplate and refactoring—alongside manual architecture decisions, compositor integration, and TTY hardware testing. Bug reports, code reviews, and pull requests are welcome.
+I use AI coding assistants while working on this project, mostly for UI boilerplate and refactoring, while handling the architecture, compositor integration, and TTY hardware testing myself. Bug reports, code reviews, and pull requests are welcome.
 
 ## License
 
