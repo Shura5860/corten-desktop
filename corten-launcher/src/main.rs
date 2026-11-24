@@ -11,8 +11,8 @@ use corten_config::{AppearanceConfig, ConfigManager};
 use corten_i18n::Language;
 use corten_theme::iced_styles::{acrylic_glass_style, input_style};
 use corten_theme::{
-    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
-    Radius, Spacing, ThemeMode, Transition, Typography,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, Motion, NOTO_SANS, NOTO_SANS_BYTES, Palette,
+    PatinaVariant, Radius, Spacing, ThemeMode, Transition, Typography,
 };
 use iced::keyboard::Key;
 use iced::keyboard::key::Named;
@@ -1595,7 +1595,7 @@ impl Application for CortenLauncherApp {
                 stay_open,
                 should_exit: false,
                 status_message: None,
-                entrance: Transition::new(140),
+                entrance: Transition::new(Motion::DURATION_EMPHASIZED_DECELERATE),
                 mode_transition: Transition::new(120),
             },
             load_font_task,
@@ -2236,7 +2236,7 @@ impl Application for CortenLauncherApp {
 
     fn view(&self) -> Element<'_, Self::Message> {
         let palette = Palette::for_mode(self.theme_mode).with_patina(self.active_patina);
-        let entrance_alpha = (0.72 + 0.28 * self.entrance.eased()).clamp(0.0, 1.0);
+        let entrance_alpha = (0.20 + 0.80 * self.entrance.emphasized_decelerate()).clamp(0.0, 1.0);
         let content_alpha = (0.82 + 0.18 * self.mode_transition.eased()).clamp(0.0, 1.0);
 
         if self.mode == LauncherMode::DesktopMenu {
@@ -2244,7 +2244,7 @@ impl Application for CortenLauncherApp {
         }
 
         if self.config.style == LauncherStyle::StartMenu {
-            // ==================== CORTEN START MENU (PIXEL PERFECT & VECTOR ICONS) ====================
+            // Start menu view
             let close_btn = button(
                 text(Icon::X)
                     .font(LUCIDE_FONT)
@@ -2301,18 +2301,13 @@ impl Application for CortenLauncherApp {
             )
             .width(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    1.0, 1.0, 1.0, 0.06,
-                ))),
+                background: Some(iced::Background::Color(
+                    palette.surface_container_high().to_iced(),
+                )),
                 border: iced::Border {
-                    color: iced::Color::from_rgba(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.40,
-                    ),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(10.0),
+                    color: iced::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: iced::border::Radius::from(Radius::FULL),
                 },
                 ..Default::default()
             });
@@ -2929,8 +2924,12 @@ impl Application for CortenLauncherApp {
             )
             .padding([14, 16])
             .width(Length::Fixed(680.0))
-            .height(Length::Fixed(590.0))
-            .style(move |_| acrylic_glass_style(palette, 16.0));
+            // Material 3 emphasized-decelerate upward reveal matching the dock popovers.
+            .height(Length::Fixed(
+                (48.0 + 542.0 * self.entrance.emphasized_decelerate().clamp(0.0, 1.0)).round(),
+            ))
+            .clip(true)
+            .style(move |_| acrylic_glass_style(palette, Radius::LG));
 
             let inner_card = mouse_area(menu_card).on_press(Message::NoOp);
 
@@ -3133,9 +3132,9 @@ impl Application for CortenLauncherApp {
             .on_press(Message::SwitchLauncherStyle(LauncherStyle::StartMenu)),
             button(
                 text(match self.config.style {
-                    LauncherStyle::Spotlight => "⊞ Izgara Görünümü",
-                    LauncherStyle::Dashboard => "🔍 Spotlight Görünümü",
-                    LauncherStyle::StartMenu => "⊞ Izgara Görünümü",
+                    LauncherStyle::Spotlight => "Izgara Görünümü",
+                    LauncherStyle::Dashboard => "Spotlight Görünümü",
+                    LauncherStyle::StartMenu => "Izgara Görünümü",
                 })
                 .size(Typography::CAPTION)
                 .color(palette.primary.to_iced())

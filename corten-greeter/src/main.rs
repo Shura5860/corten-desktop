@@ -261,58 +261,55 @@ impl CortenGreeterApp {
         let avatar = container(
             text(Icon::USER)
                 .font(LUCIDE_FONT)
-                .size(40.0)
-                .color(palette.primary.to_iced()),
+                .size(38.0)
+                .color(palette.on_primary_container().to_iced()),
         )
-        .width(Length::Fixed(88.0))
-        .height(Length::Fixed(88.0))
+        .width(Length::Fixed(80.0))
+        .height(Length::Fixed(80.0))
         .center_x(Length::Fill)
         .center_y(Length::Fill)
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgb(
-                0.22, 0.16, 0.14,
-            ))),
+            background: Some(iced::Background::Color(
+                palette.primary_container().to_iced(),
+            )),
             border: iced::Border {
-                color: iced::Color::from_rgb(0.70, 0.35, 0.22),
-                width: 2.0,
+                color: iced::Color::TRANSPARENT,
+                width: 0.0,
                 radius: iced::border::Radius::from(Radius::FULL),
             },
             ..Default::default()
         });
 
         let user_input = text_input("Kullanıcı Adı", self.auth.username())
-            .size(16.0)
-            .padding([14, 20])
-            .style(move |_, status| {
-                corten_theme::iced_styles::corten_text_input_style(palette, status)
-            })
+            .size(15.0)
+            .padding([12, 16])
+            .style(move |_, status| corten_theme::iced_styles::m3_text_input_style(palette, status))
             .on_input(Message::UsernameChanged)
             .on_submit(Message::SubmitLogin);
 
         let pass_input = text_input("Parola", self.auth.secret())
-            .size(16.0)
+            .size(15.0)
             .secure(true)
-            .padding([14, 20])
-            .style(move |_, status| {
-                corten_theme::iced_styles::corten_text_input_style(palette, status)
-            })
+            .padding([12, 16])
+            .style(move |_, status| corten_theme::iced_styles::m3_text_input_style(palette, status))
             .on_input(Message::PasswordChanged)
             .on_submit(Message::SubmitLogin);
 
         let submit_btn = button(
-            text("Giriş Yap")
-                .size(16.0)
-                .color(palette.background.to_iced()),
+            container(
+                text("Giriş Yap")
+                    .size(15.0)
+                    .color(palette.on_primary().to_iced()),
+            )
+            .width(Length::Fill)
+            .center_x(Length::Fill),
         )
         .width(Length::Fill)
         .padding([12, 20])
-        .style(move |_, _| button::Style {
-            background: Some(iced::Background::Color(palette.primary.to_iced())),
-            border: iced::Border {
-                radius: iced::border::Radius::from(12.0),
-                ..Default::default()
-            },
-            ..Default::default()
+        .style(move |_, status| {
+            let mut s = corten_theme::iced_styles::primary_button_style(palette, status);
+            s.border.radius = iced::border::Radius::from(Radius::FULL);
+            s
         })
         .on_press(Message::SubmitLogin);
 
@@ -336,30 +333,7 @@ impl CortenGreeterApp {
 
         let card = container(card_content)
             .padding([28, 36])
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    palette.surface.r,
-                    palette.surface.g,
-                    palette.surface.b,
-                    0.88,
-                ))),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.40,
-                    ),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(Radius::LG),
-                },
-                shadow: iced::Shadow {
-                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.45),
-                    offset: iced::Vector::new(0.0, 8.0),
-                    blur_radius: 24.0,
-                },
-                ..Default::default()
-            });
+            .style(move |_| corten_theme::iced_styles::m3_dialog_style(palette));
 
         let center_box = container(card)
             .width(Length::Fill)

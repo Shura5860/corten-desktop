@@ -77,9 +77,9 @@ fn default_pinned_apps() -> Vec<String> {
 impl Default for PanelSettingsConfig {
     fn default() -> Self {
         Self {
-            height: 78,
+            height: 56,
             position: PanelPositionChoice::Bottom,
-            style: PanelStyleChoice::Floating,
+            style: PanelStyleChoice::Islands,
             time_format: default_time_format(),
             date_format: default_date_format(),
             show_launcher_button: true,
@@ -123,7 +123,7 @@ impl Default for LauncherSettingsConfig {
     fn default() -> Self {
         Self {
             style: "startmenu".to_string(),
-            width: 480,
+            width: 600,
             max_results: 16,
             placeholder: default_placeholder(),
             enable_clipboard_history: true,
@@ -243,17 +243,17 @@ fn default_widgets_margin() -> (i32, i32, i32, i32) {
 impl Default for WidgetsSettingsConfig {
     fn default() -> Self {
         Self {
-            music_enabled: true,
+            music_enabled: false,
             sysinfo_enabled: true,
-            scratchpad_enabled: true,
+            scratchpad_enabled: false,
             weather_enabled: true,
             network_enabled: true,
             clock_enabled: true,
             gpu_enabled: true,
             weather_forecast_enabled: true,
-            quick_actions_enabled: true,
-            disk_enabled: true,
-            pomodoro_enabled: true,
+            quick_actions_enabled: false,
+            disk_enabled: false,
+            pomodoro_enabled: false,
             position: WidgetsPositionChoice::TopRight,
             margin: default_widgets_margin(),
         }

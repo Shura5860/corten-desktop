@@ -12,11 +12,11 @@ corten-theme = { path = "../crates/theme" }
 corten-config = { path = "../crates/config" }
 corten-i18n = { path = "../crates/i18n" }
 
-iced = { workspace = true, features = ["tiny-skia", "tokio", "canvas"] }
+iced = { workspace = true, features = ["tiny-skia", "tokio", "canvas", "image"] }
 iced_layershell = "0.7"
 iced_runtime = "0.13"
 
-zbus = { workspace = true }
+zbus = { workspace = true, features = ["tokio"] }
 serde = { workspace = true }
 toml = { workspace = true }
 notify = { workspace = true }

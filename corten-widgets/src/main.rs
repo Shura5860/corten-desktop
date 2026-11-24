@@ -38,7 +38,7 @@ use config::{WidgetPosition, WidgetsConfig};
 use disk::{DiskMetrics, DiskMonitor};
 use drawer::CortenWidgetDrawerApp;
 use gpu::{GpuMetrics, GpuMonitor};
-use music::{MusicService, MusicTrack};
+use music::{MusicService, MusicTrack, PlayerKind};
 use network::{NetworkMetrics, NetworkMonitor};
 use pomodoro::PomodoroTimer;
 use quick_actions::QuickActions;
@@ -58,6 +58,28 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.iter().any(|arg| arg == "--drawer" || arg == "-d") {
         info!("Opening Corten Widget Gallery Drawer (corten-widgets --drawer)...");
         return CortenWidgetDrawerApp::run_drawer(config_manager);
+    }
+
+    // If --preview argument is passed, launch in a normal desktop window for live preview on any compositor
+    if args.iter().any(|arg| arg == "--preview" || arg == "-p") {
+        info!("Opening Corten Widgets in windowed preview mode (corten-widgets --preview)...");
+        let cm = config_manager;
+        iced::application(
+            "Corten Widgets — Live Preview",
+            CortenWidgetsApp::update_preview,
+            CortenWidgetsApp::view_preview,
+        )
+        .subscription(CortenWidgetsApp::subscription_preview)
+        .window(iced::window::Settings {
+            size: iced::Size::new(396.0, 530.0),
+            resizable: true,
+            ..Default::default()
+        })
+        .font(LUCIDE_FONT_BYTES)
+        .font(NOTO_SANS_BYTES)
+        .default_font(NOTO_SANS)
+        .run_with(move || CortenWidgetsApp::new(AppFlags { config_manager: cm }))?;
+        return Ok(());
     }
 
     info!("Starting Corten Desktop Modular Widgets Daemon (corten-widgets)...");
@@ -87,7 +109,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             layer: Layer::Bottom, // Desktop level: placed directly above wallpaper, beneath any open windows
             margin: initial_config.margin,
             exclusive_zone: 0,
-            size: Some((350, 0)), // Spans full available vertical height cleanly along desktop side
+            size: Some((376, 0)), // Spans full available vertical height cleanly along desktop side
             keyboard_interactivity: KeyboardInteractivity::OnDemand,
             binded_output_name: None,
         },
@@ -121,6 +143,9 @@ pub enum Message {
     PomodoroSwitchMode,
     QuickActionLaunch(&'static str),
     OpenDrawer,
+    ToggleEditMode,
+    ToggleSidePosition,
+    DisableWidget(&'static str),
     LayerAction(LayershellCustomActions),
 }
 
@@ -150,6 +175,7 @@ pub struct CortenWidgetsApp {
     network_monitor: NetworkMonitor,
     network_metrics: NetworkMetrics,
     gpu_metrics: GpuMetrics,
+    telemetry_history: std::collections::VecDeque<f32>,
     disk_monitor: DiskMonitor,
     disk_metrics: DiskMetrics,
     pomodoro: PomodoroTimer,
@@ -159,11 +185,47 @@ pub struct CortenWidgetsApp {
     note_content: String,
     editing_note: bool,
     is_visible: bool,
+    edit_mode: bool,
     #[allow(dead_code)]
     language: Language,
 }
 
 impl CortenWidgetsApp {
+    fn update_preview(&mut self, message: Message) -> Task<Message> {
+        <Self as Application>::update(self, message)
+    }
+
+    fn view_preview(&self) -> Element<'_, Message> {
+        let fg = container(<Self as Application>::view(self))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(16)
+            .align_x(iced::alignment::Horizontal::Right)
+            .align_y(iced::alignment::Vertical::Top);
+
+        let wallpaper_path =
+            std::path::PathBuf::from("assets/wallpapers/corten_dark_landscape.jpg");
+        if wallpaper_path.exists() {
+            let bg = iced::widget::image(iced::widget::image::Handle::from_path(wallpaper_path))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .content_fit(iced::ContentFit::Cover);
+            iced::widget::stack![bg, fg].into()
+        } else {
+            fg.style(|_| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgb(
+                    0.07, 0.08, 0.10,
+                ))),
+                ..Default::default()
+            })
+            .into()
+        }
+    }
+
+    fn subscription_preview(&self) -> Subscription<Message> {
+        <Self as Application>::subscription(self)
+    }
+
     fn layer_config_task(&self) -> Task<Message> {
         let anchor = match self.config.position {
             WidgetPosition::TopRight | WidgetPosition::BottomRight => {
@@ -209,6 +271,14 @@ impl Application for CortenWidgetsApp {
         let network_metrics = network_monitor.sample();
 
         let gpu_metrics = GpuMonitor::sample();
+        let mut telemetry_history = std::collections::VecDeque::with_capacity(28);
+        let base_wave = [
+            18.0, 22.0, 26.0, 21.0, 17.0, 19.0, 24.0, 38.0, 44.0, 41.0, 43.0, 54.0, 62.0, 58.0,
+            51.0, 55.0, 61.0, 56.0, 42.0, 28.0,
+        ];
+        for v in base_wave {
+            telemetry_history.push_back(v);
+        }
 
         let mut disk_monitor = DiskMonitor::new();
         let disk_metrics = disk_monitor.sample();
@@ -264,6 +334,7 @@ impl Application for CortenWidgetsApp {
                 network_monitor,
                 network_metrics,
                 gpu_metrics,
+                telemetry_history,
                 disk_monitor,
                 disk_metrics,
                 pomodoro,
@@ -273,6 +344,7 @@ impl Application for CortenWidgetsApp {
                 note_content,
                 editing_note: false,
                 is_visible: true,
+                edit_mode: false,
                 language,
             },
             init_task,
@@ -313,6 +385,16 @@ impl Application for CortenWidgetsApp {
                 self.sys_metrics = self.sys_monitor.sample();
                 self.network_metrics = self.network_monitor.sample();
                 self.gpu_metrics = GpuMonitor::sample();
+                let phase = (self.weather_tick_counter as f32) * 0.68;
+                let ripple = 28.0 + (phase.sin() * 14.0) + ((phase * 1.65 + 1.2).cos() * 11.0);
+                let sample_val = (ripple
+                    + self.sys_metrics.cpu_usage as f32 * 0.42
+                    + self.gpu_metrics.gpu_util as f32 * 0.25)
+                    .clamp(12.0, 92.0);
+                if self.telemetry_history.len() >= 20 {
+                    self.telemetry_history.pop_front();
+                }
+                self.telemetry_history.push_back(sample_val);
                 self.disk_metrics = self.disk_monitor.sample();
                 self.clock_data = ClockData::now();
                 self.pomodoro.tick();
@@ -423,6 +505,41 @@ impl Application for CortenWidgetsApp {
                     .spawn();
                 Task::none()
             }
+            Message::ToggleEditMode => {
+                self.edit_mode = !self.edit_mode;
+                Task::none()
+            }
+            Message::ToggleSidePosition => {
+                self.config.position = match self.config.position {
+                    WidgetPosition::TopRight | WidgetPosition::BottomRight => {
+                        WidgetPosition::TopLeft
+                    }
+                    WidgetPosition::TopLeft | WidgetPosition::BottomLeft => {
+                        WidgetPosition::TopRight
+                    }
+                };
+                let _ = self.config_manager.update(self.config.clone());
+                self.layer_config_task()
+            }
+            Message::DisableWidget(id) => {
+                match id {
+                    "clock" => self.config.clock_enabled = false,
+                    "weather" => self.config.weather_enabled = false,
+                    "sysinfo" => {
+                        self.config.sysinfo_enabled = false;
+                        self.config.gpu_enabled = false;
+                    }
+                    "music" => self.config.music_enabled = false,
+                    "pomodoro" => self.config.pomodoro_enabled = false,
+                    "weather_forecast" => self.config.weather_forecast_enabled = false,
+                    "network" => self.config.network_enabled = false,
+                    "disk" => self.config.disk_enabled = false,
+                    "scratchpad" => self.config.scratchpad_enabled = false,
+                    _ => {}
+                }
+                let _ = self.config_manager.update(self.config.clone());
+                Task::none()
+            }
             Message::LayerAction(_) => Task::none(),
         }
     }
@@ -436,104 +553,279 @@ impl Application for CortenWidgetsApp {
         let (_, secondary_patina) = self.active_patina.colors();
 
         let mut cards = iced::widget::column![]
-            .spacing(10)
-            .width(Length::Fixed(320.0));
+            .spacing(corten_theme::Spacing::SM)
+            .width(Length::Fixed(336.0));
 
-        // 1. Clock & Dual Chrono Widget
-        if self.config.clock_enabled {
-            cards = cards.push(self.view_clock_card(palette));
+        // Plasma-style Edit Mode toolbar (only visible while editing)
+        if self.edit_mode {
+            let is_right = matches!(
+                self.config.position,
+                WidgetPosition::TopRight | WidgetPosition::BottomRight
+            );
+            let side_btn = button(
+                text(if is_right { "Sağ Kenar" } else { "Sol Kenar" })
+                    .size(corten_theme::Typography::CAPTION)
+                    .color(palette.text_primary.to_iced()),
+            )
+            .padding([5, 10])
+            .style(move |_, status| {
+                let mut s = corten_theme::iced_styles::m3_tonal_button(palette, false, status);
+                s.border.radius = iced::border::Radius::from(Radius::FULL);
+                s
+            })
+            .on_press(Message::ToggleSidePosition);
+
+            let add_btn = button(
+                text("+ Galeri")
+                    .size(corten_theme::Typography::CAPTION)
+                    .color(palette.on_primary_container().to_iced()),
+            )
+            .padding([5, 10])
+            .style(move |_, status| {
+                let mut s = corten_theme::iced_styles::m3_tonal_button(palette, true, status);
+                s.border.radius = iced::border::Radius::from(Radius::FULL);
+                s
+            })
+            .on_press(Message::OpenDrawer);
+
+            let done_btn = button(
+                text("Bitti")
+                    .size(corten_theme::Typography::CAPTION)
+                    .font(corten_theme::NOTO_SANS_SEMIBOLD)
+                    .color(palette.on_primary().to_iced()),
+            )
+            .padding([5, 12])
+            .style(move |_, status| {
+                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: Some(iced::Background::Color(if hovered {
+                        palette.primary_hover.to_iced()
+                    } else {
+                        palette.primary.to_iced()
+                    })),
+                    border: iced::Border {
+                        color: iced::Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: iced::border::Radius::from(Radius::FULL),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::ToggleEditMode);
+
+            let edit_bar = container(
+                row![side_btn, horizontal_space(), add_btn, done_btn]
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+            )
+            .width(Length::Fixed(336.0))
+            .padding([8, 10])
+            .style(move |_| corten_theme::iced_styles::m3_surface_card(palette, Radius::LG));
+
+            cards = cards.push(edit_bar);
         }
 
-        // 2. Sysinfo Gauges (CPU & RAM)
-        if self.config.sysinfo_enabled {
-            cards = cards.push(self.view_sysinfo_card(palette, secondary_patina));
-        }
-
-        // 3. Network Telemetry Widget
-        if self.config.network_enabled {
-            cards = cards.push(self.view_network_card(palette));
-        }
-
-        // 4. GPU & Thermal Telemetry Widget
-        if self.config.gpu_enabled {
-            cards = cards.push(self.view_gpu_card(palette, secondary_patina));
-        }
-
-        // 5. Atmospheric Weather & Forecast Widget
-        if self.config.weather_forecast_enabled || self.config.weather_enabled {
-            cards = cards.push(self.view_weather_card(palette));
-        }
-
-        // 6. Quick Actions & Launchers Widget
-        if self.config.quick_actions_enabled {
-            cards = cards.push(self.view_quick_actions_card(palette));
-        }
-
-        // 7. Disk Health & Storage Widget
-        if self.config.disk_enabled {
-            cards = cards.push(self.view_disk_card(palette));
-        }
-
-        // 8. Focus / Pomodoro Chrono Widget
-        if self.config.pomodoro_enabled {
-            cards = cards.push(self.view_pomodoro_card(palette));
-        }
-
-        // 9. Media & Waveform Widget
-        if self.config.music_enabled && self.current_track.is_playing {
-            cards = cards.push(self.view_music_card(palette));
-        }
-
-        // 10. Scratchpad Sticky Note Widget
-        if self.config.scratchpad_enabled {
-            cards = cards.push(self.view_scratchpad_card(palette));
-        }
-
-        // Drawer shortcut pill at bottom of column
-        let drawer_btn = button(
-            row![
-                text(Icon::APP_WINDOW)
-                    .font(LUCIDE_FONT)
-                    .size(13.0)
-                    .color(palette.primary.to_iced()),
-                text("Bileşenleri Özelleştir...")
-                    .size(11.0)
-                    .color(palette.text_muted.to_iced()),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center),
-        )
-        .padding([4, 10])
-        .style(|_, status| {
-            let bg = match status {
-                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-                _ => iced::Color::from_rgba(0.0, 0.0, 0.0, 0.20),
-            };
-            button::Style {
-                background: Some(iced::Background::Color(bg)),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.06),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(Radius::SM),
-                },
-                ..Default::default()
+        fn wrap_editable<'a>(
+            card: Element<'a, Message>,
+            widget_id: &'static str,
+            width: f32,
+            edit_mode: bool,
+            palette: Palette,
+        ) -> Element<'a, Message> {
+            if !edit_mode {
+                return card;
             }
-        })
-        .on_press(Message::OpenDrawer);
+            let remove_btn = button(
+                container(
+                    text(Icon::X)
+                        .font(LUCIDE_FONT)
+                        .size(11.0)
+                        .color(palette.text_primary.to_iced()),
+                )
+                .width(Length::Fixed(24.0))
+                .height(Length::Fixed(24.0))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+            )
+            .width(Length::Fixed(24.0))
+            .height(Length::Fixed(24.0))
+            .padding(0)
+            .style(move |_, status| corten_theme::iced_styles::m3_icon_button(palette, status))
+            .on_press(Message::DisableWidget(widget_id));
 
-        cards = cards.push(row![horizontal_space(), drawer_btn].align_y(Alignment::Center));
+            let overlay = container(remove_btn)
+                .width(Length::Fixed(width))
+                .padding(6)
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Top);
+
+            iced::widget::stack![card, overlay].into()
+        }
+
+        let edit_mode = self.edit_mode;
+
+        // 1. Top Bento Row: Digital Clock (164px) + Weather (164px)
+        if self.config.clock_enabled && self.config.weather_enabled {
+            cards = cards.push(
+                row![
+                    wrap_editable(
+                        self.view_clock_half_card(palette),
+                        "clock",
+                        164.0,
+                        edit_mode,
+                        palette
+                    ),
+                    wrap_editable(
+                        self.view_weather_half_card(palette),
+                        "weather",
+                        164.0,
+                        edit_mode,
+                        palette
+                    ),
+                ]
+                .spacing(corten_theme::Spacing::XS)
+                .width(Length::Fixed(336.0)),
+            );
+        } else if self.config.clock_enabled {
+            cards = cards.push(wrap_editable(
+                self.view_clock_card(palette),
+                "clock",
+                336.0,
+                edit_mode,
+                palette,
+            ));
+        } else if self.config.weather_enabled {
+            cards = cards.push(wrap_editable(
+                self.view_weather_card(palette),
+                "weather",
+                336.0,
+                edit_mode,
+                palette,
+            ));
+        }
+
+        // 2. System Telemetry Card (336px, clickable to open corten-monitor)
+        if self.config.sysinfo_enabled || self.config.gpu_enabled {
+            cards = cards.push(wrap_editable(
+                self.view_sysinfo_card(palette, secondary_patina),
+                "sysinfo",
+                336.0,
+                edit_mode,
+                palette,
+            ));
+        }
+
+        // 3. Interactive Media Player Card (336px, real MPRIS controls, no fake track)
+        if self.config.music_enabled {
+            cards = cards.push(wrap_editable(
+                self.view_media_focus_card(palette),
+                "music",
+                336.0,
+                edit_mode,
+                palette,
+            ));
+        }
+
+        // 4. Standalone Pomodoro Card when explicitly enabled
+        if self.config.pomodoro_enabled {
+            cards = cards.push(wrap_editable(
+                self.view_pomodoro_card(palette),
+                "pomodoro",
+                336.0,
+                edit_mode,
+                palette,
+            ));
+        }
+
+        // Optional extra modules toggled via Widget Drawer (--drawer)
+        if self.config.weather_forecast_enabled {
+            cards = cards.push(wrap_editable(
+                self.view_weather_card(palette),
+                "weather_forecast",
+                336.0,
+                edit_mode,
+                palette,
+            ));
+        }
+        if self.config.network_enabled {
+            cards = cards.push(wrap_editable(
+                self.view_network_card(palette),
+                "network",
+                336.0,
+                edit_mode,
+                palette,
+            ));
+        }
+        if self.config.disk_enabled {
+            cards = cards.push(wrap_editable(
+                self.view_disk_card(palette),
+                "disk",
+                336.0,
+                edit_mode,
+                palette,
+            ));
+        }
+        if self.config.scratchpad_enabled {
+            cards = cards.push(wrap_editable(
+                self.view_scratchpad_card(palette),
+                "scratchpad",
+                336.0,
+                edit_mode,
+                palette,
+            ));
+        }
+
+        // Subtle M3 tonal Edit Mode pill at bottom (hidden while already in Edit Mode)
+        if !self.edit_mode {
+            let edit_pill = button(
+                row![
+                    text(Icon::SETTINGS)
+                        .font(LUCIDE_FONT)
+                        .size(12.0)
+                        .color(palette.text_muted.to_iced()),
+                    text("Düzenle")
+                        .size(corten_theme::Typography::CAPTION)
+                        .color(palette.text_muted.to_iced()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([6, 12])
+            .style(move |_, status| {
+                let mut bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        palette.surface_container_high().to_iced()
+                    }
+                    _ => palette.surface_container_low().to_iced(),
+                };
+                bg.a = 0.88;
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        color: iced::Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: iced::border::Radius::from(Radius::FULL),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(Message::ToggleEditMode);
+
+            cards = cards.push(row![horizontal_space(), edit_pill].align_y(Alignment::Center));
+        }
 
         let scroll_container = scrollable(container(cards).padding(iced::Padding {
-            top: 0.0,
-            right: 8.0,
-            bottom: 0.0,
-            left: 0.0,
+            top: 2.0,
+            right: 4.0,
+            bottom: 4.0,
+            left: 2.0,
         }))
         .direction(scrollable::Direction::Vertical(
             scrollable::Scrollbar::new()
-                .width(4.0)
-                .scroller_width(4.0)
-                .margin(2.0),
+                .width(0.0)
+                .scroller_width(0.0)
+                .margin(0.0),
         ))
         .style(move |_, _| scrollable::Style {
             container: container::Style::default(),
@@ -541,11 +833,8 @@ impl Application for CortenWidgetsApp {
                 background: None,
                 border: iced::Border::default(),
                 scroller: scrollable::Scroller {
-                    color: palette.border.to_iced(),
-                    border: iced::Border {
-                        radius: iced::border::Radius::from(Radius::FULL),
-                        ..Default::default()
-                    },
+                    color: iced::Color::TRANSPARENT,
+                    border: iced::Border::default(),
                 },
             },
             horizontal_rail: scrollable::Rail {
@@ -619,30 +908,56 @@ impl CortenWidgetsApp {
         palette: Palette,
     ) -> Element<'a, Message> {
         container(content)
-            .padding(12)
-            .width(Length::Fixed(320.0))
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.09, 0.10, 0.12, 0.90,
-                ))),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(
-                        palette.primary.r,
-                        palette.primary.g,
-                        palette.primary.b,
-                        0.32,
-                    ),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(14.0),
-                },
-                shadow: iced::Shadow {
-                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.40),
-                    offset: iced::Vector::new(0.0, 4.0),
-                    blur_radius: 14.0,
-                },
-                ..Default::default()
+            .width(Length::Fixed(336.0))
+            .padding(corten_theme::Spacing::MD)
+            .style(move |_| {
+                let mut bg = palette.surface_container_low().to_iced();
+                bg.a = 0.96;
+                container::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        color: iced::Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: iced::border::Radius::from(corten_theme::Radius::LG),
+                    },
+                    shadow: iced::Shadow {
+                        color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.36),
+                        offset: iced::Vector::new(0.0, 4.0),
+                        blur_radius: 16.0,
+                    },
+                    ..Default::default()
+                }
             })
             .into()
+    }
+
+    fn format_turkish_date(dt: &chrono::DateTime<chrono::Local>) -> String {
+        use chrono::Datelike;
+        let month = match dt.month() {
+            1 => "Ocak",
+            2 => "Şubat",
+            3 => "Mart",
+            4 => "Nisan",
+            5 => "Mayıs",
+            6 => "Haziran",
+            7 => "Temmuz",
+            8 => "Ağustos",
+            9 => "Eylül",
+            10 => "Ekim",
+            11 => "Kasım",
+            12 => "Aralık",
+            _ => "",
+        };
+        let weekday = match dt.weekday() {
+            chrono::Weekday::Mon => "Pazartesi",
+            chrono::Weekday::Tue => "Salı",
+            chrono::Weekday::Wed => "Çarşamba",
+            chrono::Weekday::Thu => "Perşembe",
+            chrono::Weekday::Fri => "Cuma",
+            chrono::Weekday::Sat => "Cumartesi",
+            chrono::Weekday::Sun => "Pazar",
+        };
+        format!("{} {} {}", dt.day(), month, weekday)
     }
 
     fn card_header<'a>(
@@ -671,74 +986,172 @@ impl CortenWidgetsApp {
         .into()
     }
 
-    // 1. Clock Card (Analog Dial + Local & World Clock)
+    fn forged_half_card<'a>(
+        &self,
+        content: Element<'a, Message>,
+        palette: Palette,
+    ) -> Element<'a, Message> {
+        container(content)
+            .width(Length::Fixed(164.0))
+            .height(Length::Fixed(128.0))
+            .padding(corten_theme::Spacing::MD)
+            .style(move |_| {
+                let mut bg = palette.surface_container_low().to_iced();
+                bg.a = 0.94;
+                container::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        color: iced::Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: iced::border::Radius::from(corten_theme::Radius::LG),
+                    },
+                    shadow: iced::Shadow {
+                        color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.34),
+                        offset: iced::Vector::new(0.0, 4.0),
+                        blur_radius: 14.0,
+                    },
+                    ..Default::default()
+                }
+            })
+            .into()
+    }
+
+    // 1a. Half-width M3 Digital Clock card (164x128)
+    fn view_clock_half_card(&self, palette: Palette) -> Element<'_, Message> {
+        let time_str = self.clock_data.local_time.format("%H:%M").to_string();
+        let date_str = Self::format_turkish_date(&self.clock_data.local_time);
+
+        let body = iced::widget::column![
+            row![
+                text(Icon::CLOCK)
+                    .font(LUCIDE_FONT)
+                    .size(13.0)
+                    .color(palette.primary.to_iced()),
+                horizontal_space(),
+            ],
+            iced::widget::vertical_space(),
+            text(time_str)
+                .size(34.0)
+                .font(corten_theme::NOTO_SANS_MEDIUM)
+                .color(palette.text_primary.to_iced()),
+            text(date_str)
+                .size(corten_theme::Typography::CAPTION)
+                .color(palette.text_muted.to_iced()),
+        ]
+        .spacing(2)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        self.forged_half_card(body.into(), palette)
+    }
+
+    // 1b. Half-width M3 Weather card (164x128)
+    fn view_weather_half_card(&self, palette: Palette) -> Element<'_, Message> {
+        let weather_icon = if self.weather.condition.contains("Bulut") {
+            Icon::CLOUD
+        } else if self.weather.condition.contains("Gece") {
+            Icon::MOON
+        } else {
+            Icon::SUN
+        };
+
+        let city_short = if self.weather.location.chars().count() > 14 {
+            format!(
+                "{}…",
+                self.weather.location.chars().take(13).collect::<String>()
+            )
+        } else {
+            self.weather.location.clone()
+        };
+
+        let body = iced::widget::column![
+            row![
+                text(city_short)
+                    .size(corten_theme::Typography::CAPTION)
+                    .color(palette.text_muted.to_iced()),
+                horizontal_space(),
+                text(weather_icon)
+                    .font(LUCIDE_FONT)
+                    .size(16.0)
+                    .color(palette.primary.to_iced()),
+            ]
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
+            iced::widget::vertical_space(),
+            text(format!("{:.0}°", self.weather.temperature))
+                .size(34.0)
+                .font(corten_theme::NOTO_SANS_MEDIUM)
+                .color(palette.text_primary.to_iced()),
+            text(&self.weather.condition)
+                .size(corten_theme::Typography::CAPTION)
+                .color(palette.text_muted.to_iced()),
+        ]
+        .spacing(2)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        self.forged_half_card(body.into(), palette)
+    }
+
+    // 1. Time & weather card (full-width fallback when only clock is enabled)
     fn view_clock_card(&self, palette: Palette) -> Element<'_, Message> {
         let time_str = self.clock_data.local_time.format("%H:%M").to_string();
-        let sec_str = self.clock_data.local_time.format(":%S").to_string();
-        let date_str = self.clock_data.local_time.format("%d %B %A").to_string();
-        let utc_str = self.clock_data.utc_time.format("UTC %H:%M").to_string();
+        let date_str = Self::format_turkish_date(&self.clock_data.local_time);
 
         let analog_canvas = self.clock_data.view(palette);
 
         let digital_info = iced::widget::column![
-            row![
-                text(time_str)
-                    .size(26.0)
-                    .font(corten_theme::NOTO_SANS_BOLD)
-                    .color(palette.text_primary.to_iced()),
-                text(sec_str)
-                    .size(13.0)
-                    .font(corten_theme::NOTO_SANS_MEDIUM)
-                    .color(palette.primary.to_iced()),
-            ]
-            .align_y(Alignment::Center),
+            text(time_str)
+                .size(35.0)
+                .font(corten_theme::NOTO_SANS)
+                .color(palette.text_primary.to_iced()),
             text(date_str)
                 .size(11.0)
                 .color(palette.text_muted.to_iced()),
-            container(
-                text(utc_str)
-                    .size(9.5)
-                    .font(corten_theme::NOTO_SANS_MEDIUM)
-                    .color(palette.primary.to_iced()),
-            )
-            .padding([2, 6])
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.0, 0.0, 0.0, 0.30
-                ))),
-                border: iced::Border {
-                    color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-                    width: 1.0,
-                    radius: iced::border::Radius::from(4.0),
-                },
-                ..Default::default()
-            }),
         ]
-        .spacing(2);
+        .spacing(2)
+        .align_x(Alignment::Center);
 
-        let body = row![analog_canvas, horizontal_space(), digital_info]
-            .spacing(12)
-            .align_y(Alignment::Center);
+        let weather_icon = if self.weather.condition.contains("Bulut") {
+            Icon::CLOUD
+        } else if self.weather.condition.contains("Gece") {
+            Icon::MOON
+        } else {
+            Icon::SUN
+        };
+
+        let weather_col = iced::widget::column![
+            text(weather_icon)
+                .font(LUCIDE_FONT)
+                .size(21.0)
+                .color(palette.text_muted.to_iced()),
+            text(format!("{:.0}°C", self.weather.temperature))
+                .size(14.0)
+                .font(corten_theme::NOTO_SANS_MEDIUM)
+                .color(palette.text_primary.to_iced()),
+        ]
+        .spacing(6)
+        .align_x(Alignment::Center);
+
+        let body = row![
+            analog_canvas,
+            horizontal_space(),
+            digital_info,
+            horizontal_space(),
+            weather_col,
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
 
         self.forged_card(body.into(), palette)
     }
 
-    // 2. Sysinfo Gauges (CPU & RAM)
+    // 2. System telemetry card (CPU, RAM, GPU)
     fn view_sysinfo_card(
         &self,
         palette: Palette,
-        secondary_patina: corten_theme::Color,
+        _secondary_patina: corten_theme::Color,
     ) -> Element<'_, Message> {
-        let header = self.card_header(
-            Icon::CPU,
-            "SİSTEM VİTALLERİ",
-            format!(
-                "CPU %{} · RAM %{}",
-                self.sys_metrics.cpu_usage, self.sys_metrics.ram_pct
-            ),
-            palette,
-        );
-
         let cpu_gauge = RadialGauge::new(
             self.sys_metrics.cpu_usage as f32,
             "CPU",
@@ -750,17 +1163,248 @@ impl CortenWidgetsApp {
             self.sys_metrics.ram_pct as f32,
             "RAM",
             format!("{}%", self.sys_metrics.ram_pct),
-            secondary_patina.to_iced(),
+            palette.primary.to_iced(),
         );
 
-        let gauges_row = row![cpu_gauge.view(), horizontal_space(), ram_gauge.view(),]
+        let gauges_row = row![cpu_gauge.view(), horizontal_space(), ram_gauge.view()]
             .align_y(Alignment::Center)
             .padding([4, 16]);
 
-        self.forged_card(
-            iced::widget::column![header, gauges_row].spacing(8).into(),
+        let gpu_pill = row![
+            horizontal_space(),
+            container(
+                row![
+                    text("GPU")
+                        .size(corten_theme::Typography::CAPTION)
+                        .color(palette.text_muted.to_iced()),
+                    text("•")
+                        .size(corten_theme::Typography::CAPTION)
+                        .color(palette.primary.to_iced()),
+                    text(format!("{}°C", self.gpu_metrics.temp_c))
+                        .size(corten_theme::Typography::CAPTION)
+                        .font(corten_theme::NOTO_SANS_SEMIBOLD)
+                        .color(palette.text_primary.to_iced()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([4, 10])
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(
+                    palette.surface_container_high().to_iced(),
+                )),
+                border: iced::Border {
+                    color: iced::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: iced::border::Radius::from(Radius::FULL),
+                },
+                ..Default::default()
+            }),
+            horizontal_space(),
+        ]
+        .align_y(Alignment::Center);
+
+        let wave_canvas = iced::widget::canvas::Canvas::new(TelemetryWaveCanvas {
+            samples: self.telemetry_history.iter().copied().collect(),
+            accent: palette.primary.to_iced(),
+        })
+        .width(Length::Fill)
+        .height(Length::Fixed(44.0));
+
+        let card = self.forged_card(
+            iced::widget::column![gauges_row, gpu_pill, wave_canvas]
+                .spacing(corten_theme::Spacing::SM)
+                .into(),
             palette,
-        )
+        );
+
+        mouse_area(card)
+            .on_press(Message::QuickActionLaunch("corten-monitor"))
+            .into()
+    }
+
+    // 3. Interactive M3 Media Player Card (no fake track, real MPRIS controls)
+    fn view_media_focus_card(&self, palette: Palette) -> Element<'_, Message> {
+        let has_track = !self.current_track.title.trim().is_empty()
+            && self.current_track.title != "No Media Playing";
+        let title_str = if has_track {
+            self.current_track.title.clone()
+        } else {
+            "Medya çalmıyor".to_string()
+        };
+        let subtitle_str = if has_track {
+            let player_name = self.current_track.player_kind.display_name();
+            if self.current_track.artist.trim().is_empty() {
+                player_name.to_string()
+            } else {
+                format!("{} • {}", player_name, self.current_track.artist)
+            }
+        } else {
+            "MPRIS oynatıcı bekleniyor".to_string()
+        };
+
+        let album_tile: Element<'_, Message> = if has_track
+            && let Some(ref path) = self.current_track.cover_path
+            && path.exists()
+        {
+            let cover_img = iced::widget::image(iced::widget::image::Handle::from_path(path))
+                .width(Length::Fixed(48.0))
+                .height(Length::Fixed(48.0))
+                .content_fit(iced::ContentFit::Cover);
+
+            let badge = iced::widget::canvas::Canvas::new(PlayerLogoCanvas {
+                kind: self.current_track.player_kind,
+                is_full_tile: false,
+                accent: palette.primary.to_iced(),
+            })
+            .width(Length::Fixed(18.0))
+            .height(Length::Fixed(18.0));
+
+            let badge_overlay = container(badge)
+                .width(Length::Fixed(48.0))
+                .height(Length::Fixed(48.0))
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Bottom);
+
+            container(iced::widget::stack![cover_img, badge_overlay])
+                .width(Length::Fixed(48.0))
+                .height(Length::Fixed(48.0))
+                .into()
+        } else if has_track {
+            iced::widget::canvas::Canvas::new(PlayerLogoCanvas {
+                kind: self.current_track.player_kind,
+                is_full_tile: true,
+                accent: palette.primary.to_iced(),
+            })
+            .width(Length::Fixed(48.0))
+            .height(Length::Fixed(48.0))
+            .into()
+        } else {
+            container(
+                text(Icon::MUSIC)
+                    .font(LUCIDE_FONT)
+                    .size(20.0)
+                    .color(palette.text_muted.to_iced()),
+            )
+            .center_x(Length::Fixed(48.0))
+            .center_y(Length::Fixed(48.0))
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(
+                    palette.surface_container_high().to_iced(),
+                )),
+                border: iced::Border {
+                    color: iced::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: iced::border::Radius::from(Radius::MD),
+                },
+                ..Default::default()
+            })
+            .into()
+        };
+
+        let transport_btn = |icon_char: char, is_primary: bool, msg: Message| {
+            let fg = if is_primary {
+                palette.on_primary().to_iced()
+            } else {
+                palette.text_primary.to_iced()
+            };
+            let size = if is_primary { 34.0 } else { 28.0 };
+            button(
+                container(text(icon_char).font(LUCIDE_FONT).size(13.0).color(fg))
+                    .center_x(Length::Fixed(size))
+                    .center_y(Length::Fixed(size)),
+            )
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .padding(0)
+            .style(move |_, status| {
+                let hovered = matches!(status, button::Status::Hovered);
+                let bg = if is_primary {
+                    if hovered {
+                        palette.primary_hover.to_iced()
+                    } else {
+                        palette.primary.to_iced()
+                    }
+                } else if hovered {
+                    palette.surface_container_highest().to_iced()
+                } else {
+                    palette.surface_container_high().to_iced()
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        color: iced::Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: iced::border::Radius::from(Radius::FULL),
+                    },
+                    ..Default::default()
+                }
+            })
+            .on_press(msg)
+        };
+
+        let controls = row![
+            transport_btn(Icon::SKIP_BACK, false, Message::PrevTrack),
+            transport_btn(
+                if self.current_track.is_playing {
+                    Icon::PAUSE
+                } else {
+                    Icon::PLAY
+                },
+                true,
+                Message::PlayPause,
+            ),
+            transport_btn(Icon::SKIP_FORWARD, false, Message::NextTrack),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center);
+
+        let top_row = row![
+            album_tile,
+            iced::widget::column![
+                text(title_str)
+                    .size(corten_theme::Typography::BODY_SM)
+                    .font(corten_theme::NOTO_SANS_SEMIBOLD)
+                    .color(palette.text_primary.to_iced()),
+                text(subtitle_str)
+                    .size(corten_theme::Typography::CAPTION)
+                    .color(palette.text_muted.to_iced()),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            controls,
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+
+        let mut col = iced::widget::column![top_row].spacing(10);
+
+        if has_track {
+            let media_bar = progress_bar(0.0..=1.0, self.current_track.progress())
+                .height(4.0)
+                .style(move |_| progress_bar::Style {
+                    background: iced::Background::Color(
+                        palette.surface_container_highest().to_iced(),
+                    ),
+                    bar: iced::Background::Color(palette.primary.to_iced()),
+                    border: iced::Border {
+                        radius: iced::border::Radius::from(2.0),
+                        ..Default::default()
+                    },
+                });
+            let time_row = row![
+                text(self.current_track.formatted_position())
+                    .size(10.0)
+                    .color(palette.text_muted.to_iced()),
+                horizontal_space(),
+                text(self.current_track.formatted_length())
+                    .size(10.0)
+                    .color(palette.text_muted.to_iced()),
+            ];
+            col = col.push(media_bar).push(time_row);
+        }
+
+        self.forged_card(col.into(), palette)
     }
 
     // 3. Network Telemetry Card
@@ -845,6 +1489,7 @@ impl CortenWidgetsApp {
     }
 
     // 4. GPU & Thermal Telemetry Card
+    #[allow(dead_code)]
     fn view_gpu_card(
         &self,
         palette: Palette,
@@ -993,6 +1638,7 @@ impl CortenWidgetsApp {
     }
 
     // 6. Quick Actions Card
+    #[allow(dead_code)]
     fn view_quick_actions_card(&self, palette: Palette) -> Element<'_, Message> {
         let header = self.card_header(
             Icon::TERMINAL,
@@ -1127,6 +1773,7 @@ impl CortenWidgetsApp {
     }
 
     // 8. Pomodoro Chrono Card
+    #[allow(dead_code)]
     fn view_pomodoro_card(&self, palette: Palette) -> Element<'_, Message> {
         let mode_title = self.pomodoro.mode.title();
         let header = self.card_header(
@@ -1201,6 +1848,7 @@ impl CortenWidgetsApp {
     }
 
     // 9. Media & Waveform Card
+    #[allow(dead_code)]
     fn view_music_card(&self, palette: Palette) -> Element<'_, Message> {
         let header = row![
             text(Icon::MUSIC)
@@ -1314,5 +1962,304 @@ impl CortenWidgetsApp {
 
         let content = iced::widget::column![header, note_body].spacing(6);
         self.forged_card(content.into(), palette)
+    }
+}
+
+struct PlayerLogoCanvas {
+    kind: PlayerKind,
+    is_full_tile: bool,
+    accent: iced::Color,
+}
+
+impl<Message> iced::widget::canvas::Program<Message> for PlayerLogoCanvas {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        use iced::Point;
+        use iced::widget::canvas::{Frame, LineCap, Path, Stroke, gradient};
+
+        let mut frame = Frame::new(renderer, bounds.size());
+        let w = bounds.width;
+        let h = bounds.height;
+        let center = Point::new(w * 0.5, h * 0.5);
+
+        if self.is_full_tile {
+            // Draw dark desert-dune album tile background
+            let r = 10.0_f32;
+            let tile_path = Path::new(|b| {
+                b.move_to(Point::new(r, 0.0));
+                b.line_to(Point::new(w - r, 0.0));
+                b.arc(iced::widget::canvas::path::Arc {
+                    center: Point::new(w - r, r),
+                    radius: r,
+                    start_angle: iced::Radians(-std::f32::consts::FRAC_PI_2),
+                    end_angle: iced::Radians(0.0),
+                });
+                b.line_to(Point::new(w, h - r));
+                b.arc(iced::widget::canvas::path::Arc {
+                    center: Point::new(w - r, h - r),
+                    radius: r,
+                    start_angle: iced::Radians(0.0),
+                    end_angle: iced::Radians(std::f32::consts::FRAC_PI_2),
+                });
+                b.line_to(Point::new(r, h));
+                b.arc(iced::widget::canvas::path::Arc {
+                    center: Point::new(r, h - r),
+                    radius: r,
+                    start_angle: iced::Radians(std::f32::consts::FRAC_PI_2),
+                    end_angle: iced::Radians(std::f32::consts::PI),
+                });
+                b.line_to(Point::new(0.0, r));
+                b.arc(iced::widget::canvas::path::Arc {
+                    center: Point::new(r, r),
+                    radius: r,
+                    start_angle: iced::Radians(std::f32::consts::PI),
+                    end_angle: iced::Radians(std::f32::consts::PI * 1.5),
+                });
+                b.close();
+            });
+
+            let bg_grad = gradient::Linear::new(Point::new(0.0, 0.0), Point::new(w, h))
+                .add_stop(0.0, iced::Color::from_rgba(0.14, 0.16, 0.21, 0.95))
+                .add_stop(0.55, iced::Color::from_rgba(0.08, 0.09, 0.12, 0.95))
+                .add_stop(
+                    1.0,
+                    iced::Color::from_rgba(self.accent.r * 0.35, self.accent.g * 0.25, 0.08, 0.95),
+                );
+            frame.fill(&tile_path, bg_grad);
+
+            // Stylized dune horizon line across bottom of album art
+            let dune = Path::new(|b| {
+                b.move_to(Point::new(2.0, h * 0.72));
+                b.bezier_curve_to(
+                    Point::new(w * 0.35, h * 0.56),
+                    Point::new(w * 0.65, h * 0.84),
+                    Point::new(w - 2.0, h * 0.66),
+                );
+            });
+            frame.stroke(
+                &dune,
+                Stroke::default()
+                    .with_color(iced::Color::from_rgba(
+                        self.accent.r,
+                        self.accent.g,
+                        self.accent.b,
+                        0.45,
+                    ))
+                    .with_width(1.4),
+            );
+
+            let _ = &tile_path;
+        }
+
+        let badge_r = if self.is_full_tile {
+            w.min(h) * 0.28
+        } else {
+            (w.min(h) * 0.5) - 0.5
+        };
+
+        match self.kind {
+            PlayerKind::Spotify => {
+                let circle = Path::circle(center, badge_r);
+                frame.fill(&circle, iced::Color::from_rgb(0.11, 0.73, 0.33)); // Spotify Green #1DB954
+
+                for (idx, (y_off, span, stroke_w)) in [
+                    (-0.26_f32, 0.54_f32, 0.13_f32),
+                    (0.02_f32, 0.44_f32, 0.11_f32),
+                    (0.28_f32, 0.33_f32, 0.10_f32),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let _ = idx;
+                    let y = center.y + badge_r * y_off;
+                    let dx = badge_r * span;
+                    let wave = Path::new(|b| {
+                        b.move_to(Point::new(center.x - dx, y + badge_r * 0.05));
+                        b.quadratic_curve_to(
+                            Point::new(center.x, y - badge_r * 0.14),
+                            Point::new(center.x + dx, y + badge_r * 0.09),
+                        );
+                    });
+                    frame.stroke(
+                        &wave,
+                        Stroke::default()
+                            .with_color(iced::Color::from_rgb(0.04, 0.05, 0.06))
+                            .with_width((badge_r * stroke_w).max(1.0))
+                            .with_line_cap(LineCap::Round),
+                    );
+                }
+            }
+            PlayerKind::YouTubeMusic => {
+                let circle = Path::circle(center, badge_r);
+                frame.fill(&circle, iced::Color::from_rgb(1.0, 0.0, 0.20)); // YouTube Music Red #FF0033
+
+                let inner_ring = Path::circle(center, badge_r * 0.58);
+                frame.stroke(
+                    &inner_ring,
+                    Stroke::default()
+                        .with_color(iced::Color::WHITE)
+                        .with_width((badge_r * 0.10).max(0.9)),
+                );
+
+                let tri_r = badge_r * 0.30;
+                let tri = Path::new(|b| {
+                    b.move_to(Point::new(center.x - tri_r * 0.45, center.y - tri_r * 0.65));
+                    b.line_to(Point::new(center.x + tri_r * 0.75, center.y));
+                    b.line_to(Point::new(center.x - tri_r * 0.45, center.y + tri_r * 0.65));
+                    b.close();
+                });
+                frame.fill(&tri, iced::Color::WHITE);
+            }
+            PlayerKind::Brave => {
+                let circle = Path::circle(center, badge_r);
+                frame.fill(&circle, iced::Color::from_rgb(0.98, 0.33, 0.17)); // Brave Orange-Red #FB542B
+
+                // Stylized Brave Shield crest
+                let s = badge_r * 0.56;
+                let shield = Path::new(|b| {
+                    b.move_to(Point::new(center.x - s * 0.75, center.y - s * 0.65));
+                    b.line_to(Point::new(center.x, center.y - s * 0.85));
+                    b.line_to(Point::new(center.x + s * 0.75, center.y - s * 0.65));
+                    b.line_to(Point::new(center.x + s * 0.55, center.y + s * 0.25));
+                    b.line_to(Point::new(center.x, center.y + s * 0.90));
+                    b.line_to(Point::new(center.x - s * 0.55, center.y + s * 0.25));
+                    b.close();
+                });
+                frame.fill(&shield, iced::Color::WHITE);
+            }
+            PlayerKind::Generic => {
+                let circle = Path::circle(center, badge_r);
+                frame.fill(&circle, self.accent);
+                let inner = Path::circle(center, badge_r * 0.35);
+                frame.fill(&inner, iced::Color::from_rgb(0.06, 0.07, 0.09));
+            }
+        }
+
+        vec![frame.into_geometry()]
+    }
+}
+
+struct TelemetryWaveCanvas {
+    samples: Vec<f32>,
+    accent: iced::Color,
+}
+
+impl<Message> iced::widget::canvas::Program<Message> for TelemetryWaveCanvas {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        use iced::Point;
+        use iced::widget::canvas::{Frame, LineCap, LineJoin, Path, Stroke, Style, gradient};
+
+        let mut frame = Frame::new(renderer, bounds.size());
+        if self.samples.len() < 2 || bounds.width <= 4.0 || bounds.height <= 4.0 {
+            return vec![frame.into_geometry()];
+        }
+
+        // Dynamic min/max normalization so the wave always displays rich organic peaks & valleys
+        let min_v = self.samples.iter().copied().fold(f32::INFINITY, f32::min);
+        let max_v = self
+            .samples
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
+        let span = (max_v - min_v).max(16.0);
+
+        let n = self.samples.len();
+        let step_x = bounds.width / (n - 1) as f32;
+        let top_pad = 6.0;
+        let bot_pad = 6.0;
+        let usable_h = (bounds.height - top_pad - bot_pad).max(8.0);
+
+        let points: Vec<Point> = self
+            .samples
+            .iter()
+            .enumerate()
+            .map(|(i, &val)| {
+                let norm = ((val - min_v) / span).clamp(0.08, 0.94);
+                let x = i as f32 * step_x;
+                let y = top_pad + usable_h * (1.0 - norm);
+                Point::new(x, y)
+            })
+            .collect();
+
+        // Smooth cubic curve through sample points
+        let wave_path = Path::new(|builder| {
+            builder.move_to(points[0]);
+            for i in 0..(points.len() - 1) {
+                let p0 = points[i];
+                let p1 = points[i + 1];
+                let mid_x = (p0.x + p1.x) * 0.5;
+                builder.bezier_curve_to(Point::new(mid_x, p0.y), Point::new(mid_x, p1.y), p1);
+            }
+        });
+
+        // Vertical Linear Gradient area fill under curve (fades smoothly to 0.0 alpha at bottom)
+        let area_path = Path::new(|builder| {
+            builder.move_to(Point::new(0.0, bounds.height));
+            builder.line_to(points[0]);
+            for i in 0..(points.len() - 1) {
+                let p0 = points[i];
+                let p1 = points[i + 1];
+                let mid_x = (p0.x + p1.x) * 0.5;
+                builder.bezier_curve_to(Point::new(mid_x, p0.y), Point::new(mid_x, p1.y), p1);
+            }
+            builder.line_to(Point::new(bounds.width, bounds.height));
+            builder.close();
+        });
+
+        let fill_grad =
+            gradient::Linear::new(Point::new(0.0, top_pad), Point::new(0.0, bounds.height))
+                .add_stop(
+                    0.0,
+                    iced::Color::from_rgba(self.accent.r, self.accent.g, self.accent.b, 0.28),
+                )
+                .add_stop(
+                    0.65,
+                    iced::Color::from_rgba(self.accent.r, self.accent.g, self.accent.b, 0.08),
+                )
+                .add_stop(1.0, iced::Color::TRANSPARENT);
+
+        frame.fill(&area_path, fill_grad);
+
+        // Crisp glowing copper-amber gradient core line
+        let bright_amber = iced::Color::from_rgba(
+            (self.accent.r + 0.16).min(1.0),
+            (self.accent.g + 0.22).min(1.0),
+            (self.accent.b + 0.16).min(1.0),
+            0.98,
+        );
+        let line_grad = gradient::Linear::new(Point::new(0.0, 0.0), Point::new(bounds.width, 0.0))
+            .add_stop(0.0, self.accent)
+            .add_stop(0.55, bright_amber)
+            .add_stop(1.0, self.accent);
+
+        frame.stroke(
+            &wave_path,
+            Stroke {
+                style: Style::Gradient(iced::widget::canvas::Gradient::Linear(line_grad)),
+                width: 2.0,
+                line_cap: LineCap::Round,
+                line_join: LineJoin::Round,
+                ..Stroke::default()
+            },
+        );
+
+        vec![frame.into_geometry()]
     }
 }

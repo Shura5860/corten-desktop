@@ -9,19 +9,34 @@ pub fn card_style(palette: Palette) -> container::Style {
     surface_style(palette, false)
 }
 
-/// Shared surface style for cards, panels, and popovers.
+/// Shared tonal surface style for cards, panels, and popovers.
 pub fn surface_style(palette: Palette, elevated: bool) -> container::Style {
+    let bg = if elevated {
+        palette.surface_container().to_iced()
+    } else {
+        palette.surface_container_low().to_iced()
+    };
+    let (border_color, border_width) = if palette.is_light() {
+        (palette.outline_variant().to_iced(), 1.0)
+    } else {
+        (iced::Color::TRANSPARENT, 0.0)
+    };
     container::Style {
         text_color: Some(palette.text_primary.to_iced()),
-        background: Some(Background::Color(palette.surface.to_iced())),
+        background: Some(Background::Color(bg)),
         border: Border {
-            color: palette.border.to_iced(),
-            width: 1.0,
-            radius: border::Radius::from(Radius::MD),
+            color: border_color,
+            width: border_width,
+            radius: border::Radius::from(Radius::LG),
         },
         shadow: if elevated {
             Shadow {
-                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.28),
+                color: iced::Color::from_rgba(
+                    0.0,
+                    0.0,
+                    0.0,
+                    if palette.is_light() { 0.14 } else { 0.34 },
+                ),
                 offset: iced::Vector::new(0.0, 4.0),
                 blur_radius: 14.0,
             }
@@ -64,22 +79,30 @@ pub fn surface_level_style(palette: Palette, level: SurfaceLevel, radius: f32) -
         },
         SurfaceLevel::Raised => container::Style {
             text_color: Some(palette.text_primary.to_iced()),
-            background: Some(Background::Color(palette.surface.to_iced())),
+            background: Some(Background::Color(palette.surface_container_low().to_iced())),
             border: Border {
-                color: palette.border.to_iced(),
-                width: 1.0,
+                color: if palette.is_light() {
+                    palette.outline_variant().to_iced()
+                } else {
+                    iced::Color::TRANSPARENT
+                },
+                width: if palette.is_light() { 1.0 } else { 0.0 },
                 radius: border::Radius::from(radius),
             },
             shadow: Shadow::default(),
         },
         SurfaceLevel::Overlay => {
-            let shadow_alpha = if palette.is_light() { 0.14 } else { 0.30 };
+            let shadow_alpha = if palette.is_light() { 0.14 } else { 0.34 };
             container::Style {
                 text_color: Some(palette.text_primary.to_iced()),
-                background: Some(Background::Color(palette.surface.to_iced())),
+                background: Some(Background::Color(palette.surface_container().to_iced())),
                 border: Border {
-                    color: palette.border.to_iced(),
-                    width: 1.0,
+                    color: if palette.is_light() {
+                        palette.outline_variant().to_iced()
+                    } else {
+                        iced::Color::TRANSPARENT
+                    },
+                    width: if palette.is_light() { 1.0 } else { 0.0 },
                     radius: border::Radius::from(radius),
                 },
                 shadow: Shadow {
@@ -93,69 +116,61 @@ pub fn surface_level_style(palette: Palette, level: SurfaceLevel, radius: f32) -
     }
 }
 
-/// High-end frosted glass acrylic style with patina border highlight and ambient shadow
+/// Material 3 tonal surface container for floating overlays, popovers, and panels.
 pub fn acrylic_glass_style(palette: Palette, radius: f32) -> container::Style {
-    let mut bg = palette.surface.to_iced();
-    bg.a = if palette.is_light() { 0.96 } else { 0.93 };
-    let border_alpha = if palette.is_light() { 0.40 } else { 0.32 };
-    let shadow_alpha = if palette.is_light() { 0.16 } else { 0.35 };
+    let mut bg = palette.surface_container().to_iced();
+    bg.a = 0.96;
+
+    let (border_color, border_width, shadow_alpha) = if palette.is_light() {
+        (palette.outline_variant().to_iced(), 1.0, 0.14)
+    } else {
+        (iced::Color::TRANSPARENT, 0.0, 0.42)
+    };
+
     container::Style {
         text_color: Some(palette.text_primary.to_iced()),
         background: Some(Background::Color(bg)),
         border: Border {
-            color: iced::Color::from_rgba(
-                palette.primary.r,
-                palette.primary.g,
-                palette.primary.b,
-                border_alpha,
-            ),
-            width: 1.0,
+            color: border_color,
+            width: border_width,
             radius: border::Radius::from(radius),
         },
         shadow: Shadow {
             color: iced::Color::from_rgba(0.0, 0.0, 0.0, shadow_alpha),
             offset: iced::Vector::new(0.0, 6.0),
-            blur_radius: 16.0,
+            blur_radius: 18.0,
         },
     }
 }
 
-/// Tactile Bento tile button style for Control Center quick toggles and launcher favorite tiles
+/// Tonal tile button style for quick settings toggles and action chips.
 pub fn bento_tile_button_style(
     palette: Palette,
     is_active: bool,
     status: button::Status,
 ) -> button::Style {
-    let (bg, border_color, text_color) = if is_active {
+    let (bg, text_color) = if is_active {
         let bg = match status {
             button::Status::Hovered => palette.primary_hover.to_iced(),
-            _ => iced::Color::from_rgba(
-                palette.primary.r,
-                palette.primary.g,
-                palette.primary.b,
-                0.22,
-            ),
+            _ => palette.primary.to_iced(),
         };
-        let fg = if matches!(status, button::Status::Hovered) {
-            palette.on_primary().to_iced()
-        } else {
-            palette.text_primary.to_iced()
-        };
-        (bg, palette.primary.to_iced(), fg)
+        (bg, palette.on_primary().to_iced())
     } else {
         let bg = match status {
-            button::Status::Hovered | button::Status::Pressed => palette.surface_hover.to_iced(),
-            _ => palette.surface.to_iced(),
+            button::Status::Hovered | button::Status::Pressed => {
+                palette.surface_container_highest().to_iced()
+            }
+            _ => palette.surface_container_high().to_iced(),
         };
-        (bg, palette.border.to_iced(), palette.text_primary.to_iced())
+        (bg, palette.text_primary.to_iced())
     };
 
     button::Style {
         background: Some(Background::Color(bg)),
         text_color,
         border: Border {
-            color: border_color,
-            width: 1.0,
+            color: iced::Color::TRANSPARENT,
+            width: 0.0,
             radius: border::Radius::from(Radius::MD),
         },
         shadow: Shadow::default(),
@@ -185,43 +200,9 @@ pub fn input_style(palette: Palette) -> container::Style {
     }
 }
 
-/// Unified Corten styled `text_input` with soft rounded corners, subtle surface fill,
-/// hover highlight, and warm accent focus ring.
+/// Unified Corten `text_input` using Material 3 tonal surface fill and focus ring.
 pub fn corten_text_input_style(palette: Palette, status: text_input::Status) -> text_input::Style {
-    let (bg, border_color, border_width) = match status {
-        text_input::Status::Active => (palette.background.to_iced(), palette.border.to_iced(), 1.0),
-        text_input::Status::Hovered => (
-            palette.surface_hover.to_iced(),
-            iced::Color::from_rgba(
-                palette.primary.r,
-                palette.primary.g,
-                palette.primary.b,
-                0.55,
-            ),
-            1.0,
-        ),
-        text_input::Status::Focused => {
-            (palette.background.to_iced(), palette.primary.to_iced(), 1.5)
-        }
-        text_input::Status::Disabled => (palette.surface.to_iced(), palette.border.to_iced(), 1.0),
-    };
-    text_input::Style {
-        background: Background::Color(bg),
-        border: Border {
-            color: border_color,
-            width: border_width,
-            radius: border::Radius::from(Radius::MD),
-        },
-        icon: palette.text_muted.to_iced(),
-        placeholder: palette.text_muted.to_iced(),
-        value: palette.text_primary.to_iced(),
-        selection: iced::Color::from_rgba(
-            palette.primary.r,
-            palette.primary.g,
-            palette.primary.b,
-            0.35,
-        ),
-    }
+    m3_text_input_style(palette, status)
 }
 
 /// Primary button style with Corten Rust accent and clean rounded corners
@@ -257,17 +238,19 @@ pub fn primary_button_style(palette: Palette, status: button::Status) -> button:
     }
 }
 
-/// Secondary button style with explicit border
+/// Secondary tonal button style (borderless in dark mode, subtle outline in light mode).
 pub fn secondary_button_style(palette: Palette, status: button::Status) -> button::Style {
     let (bg, text_color) = match status {
-        button::Status::Active => (palette.surface.to_iced(), palette.text_primary.to_iced()),
-        button::Status::Hovered => (
-            palette.surface_hover.to_iced(),
+        button::Status::Active => (
+            palette.surface_container_high().to_iced(),
             palette.text_primary.to_iced(),
         ),
-        button::Status::Pressed => (palette.surface.to_iced(), palette.text_primary.to_iced()),
+        button::Status::Hovered | button::Status::Pressed => (
+            palette.surface_container_highest().to_iced(),
+            palette.text_primary.to_iced(),
+        ),
         button::Status::Disabled => (
-            palette.background.to_iced(),
+            palette.surface_container_low().to_iced(),
             palette.text_disabled.to_iced(),
         ),
     };
@@ -276,8 +259,12 @@ pub fn secondary_button_style(palette: Palette, status: button::Status) -> butto
         background: Some(Background::Color(bg)),
         text_color,
         border: Border {
-            color: palette.border.to_iced(),
-            width: 1.0,
+            color: if palette.is_light() {
+                palette.outline_variant().to_iced()
+            } else {
+                iced::Color::TRANSPARENT
+            },
+            width: if palette.is_light() { 1.0 } else { 0.0 },
             radius: border::Radius::from(Radius::MD),
         },
         shadow: Shadow::default(),
@@ -338,40 +325,43 @@ pub fn kbd_style(palette: Palette) -> container::Style {
     }
 }
 
-/// Fluid capsule slider style with filled patina rail and glowing thumb (macOS/iOS inspired)
+/// Material 3 style slider with tonal inactive track and solid primary thumb.
 pub fn capsule_slider_style(
     palette: Palette,
 ) -> impl Fn(&iced::Theme, iced::widget::slider::Status) -> iced::widget::slider::Style {
     move |_theme, status| {
-        let (handle_color, rail_active) = match status {
-            iced::widget::slider::Status::Hovered => (
-                palette.primary_hover.to_iced(),
-                palette.primary_hover.to_iced(),
-            ),
-            iced::widget::slider::Status::Dragged => {
-                (iced::Color::WHITE, palette.primary.to_iced())
+        let rail_active = match status {
+            iced::widget::slider::Status::Hovered | iced::widget::slider::Status::Dragged => {
+                palette.primary_hover.to_iced()
             }
-            _ => (palette.primary.to_iced(), palette.primary.to_iced()),
+            _ => palette.primary.to_iced(),
+        };
+        let handle_bg = rail_active;
+        let handle_radius = match status {
+            iced::widget::slider::Status::Hovered | iced::widget::slider::Status::Dragged => 7.0,
+            _ => 6.0,
         };
 
         iced::widget::slider::Style {
             rail: iced::widget::slider::Rail {
                 backgrounds: (
                     Background::Color(rail_active),
-                    Background::Color(palette.surface_hover.to_iced()),
+                    Background::Color(palette.surface_container_highest().to_iced()),
                 ),
-                width: 10.0,
+                width: 4.0,
                 border: Border {
-                    radius: border::Radius::from(5.0),
+                    radius: border::Radius::from(2.0),
                     width: 0.0,
                     color: iced::Color::TRANSPARENT,
                 },
             },
             handle: iced::widget::slider::Handle {
-                shape: iced::widget::slider::HandleShape::Circle { radius: 8.0 },
-                background: Background::Color(handle_color),
-                border_width: 2.0,
-                border_color: palette.surface.to_iced(),
+                shape: iced::widget::slider::HandleShape::Circle {
+                    radius: handle_radius,
+                },
+                background: Background::Color(handle_bg),
+                border_width: 0.0,
+                border_color: iced::Color::TRANSPARENT,
             },
         }
     }
@@ -500,4 +490,183 @@ pub fn toast_banner<'a, Message: 'a>(
     .padding([8, 14])
     .style(move |_| surface_level_style(palette, SurfaceLevel::Glass, Radius::FULL))
     .into()
+}
+
+/// Material 3 tonal surface card (`surface_container_low`, zero border, subtle elevation).
+pub fn m3_surface_card(palette: Palette, radius: f32) -> container::Style {
+    let mut bg = palette.surface_container_low().to_iced();
+    bg.a = 0.94;
+    container::Style {
+        text_color: Some(palette.text_primary.to_iced()),
+        background: Some(Background::Color(bg)),
+        border: Border {
+            color: iced::Color::TRANSPARENT,
+            width: 0.0,
+            radius: border::Radius::from(radius),
+        },
+        shadow: Shadow {
+            color: iced::Color::from_rgba(
+                0.0,
+                0.0,
+                0.0,
+                if palette.is_light() { 0.10 } else { 0.34 },
+            ),
+            offset: iced::Vector::new(0.0, 4.0),
+            blur_radius: 14.0,
+        },
+    }
+}
+
+/// Material 3 modal dialog container (`surface_container`, `Radius::XL`).
+pub fn m3_dialog_style(palette: Palette) -> container::Style {
+    let mut bg = palette.surface_container().to_iced();
+    bg.a = 0.98;
+    container::Style {
+        text_color: Some(palette.text_primary.to_iced()),
+        background: Some(Background::Color(bg)),
+        border: Border {
+            color: if palette.is_light() {
+                palette.outline_variant().to_iced()
+            } else {
+                iced::Color::TRANSPARENT
+            },
+            width: if palette.is_light() { 1.0 } else { 0.0 },
+            radius: border::Radius::from(Radius::XL),
+        },
+        shadow: Shadow {
+            color: iced::Color::from_rgba(
+                0.0,
+                0.0,
+                0.0,
+                if palette.is_light() { 0.16 } else { 0.45 },
+            ),
+            offset: iced::Vector::new(0.0, 8.0),
+            blur_radius: 22.0,
+        },
+    }
+}
+
+/// Material 3 tonal button (`primary_container` when active, `surface_container_high` when idle).
+pub fn m3_tonal_button(palette: Palette, is_active: bool, status: button::Status) -> button::Style {
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let (bg, fg) = if is_active {
+        let bg = if hovered {
+            palette.primary_hover.to_iced()
+        } else {
+            palette.primary_container().to_iced()
+        };
+        let fg = if hovered {
+            palette.on_primary().to_iced()
+        } else {
+            palette.on_primary_container().to_iced()
+        };
+        (bg, fg)
+    } else {
+        let bg = if hovered {
+            palette.surface_container_highest().to_iced()
+        } else {
+            palette.surface_container_high().to_iced()
+        };
+        (bg, palette.text_primary.to_iced())
+    };
+
+    button::Style {
+        background: Some(Background::Color(bg)),
+        text_color: fg,
+        border: Border {
+            color: iced::Color::TRANSPARENT,
+            width: 0.0,
+            radius: border::Radius::from(Radius::MD),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
+/// Material 3 navigation rail/sidebar pill item.
+pub fn m3_nav_item(palette: Palette, is_active: bool, status: button::Status) -> button::Style {
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let (bg, fg) = if is_active {
+        (
+            Some(Background::Color(palette.primary_container().to_iced())),
+            palette.on_primary_container().to_iced(),
+        )
+    } else if hovered {
+        (
+            Some(Background::Color(
+                palette.surface_container_high().to_iced(),
+            )),
+            palette.text_primary.to_iced(),
+        )
+    } else {
+        (None, palette.text_muted.to_iced())
+    };
+
+    button::Style {
+        background: bg,
+        text_color: fg,
+        border: Border {
+            color: iced::Color::TRANSPARENT,
+            width: 0.0,
+            radius: border::Radius::from(Radius::FULL),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
+/// Material 3 circular tonal icon button.
+pub fn m3_icon_button(palette: Palette, status: button::Status) -> button::Style {
+    let bg = match status {
+        button::Status::Hovered | button::Status::Pressed => {
+            palette.surface_container_highest().to_iced()
+        }
+        _ => palette.surface_container_high().to_iced(),
+    };
+    button::Style {
+        background: Some(Background::Color(bg)),
+        text_color: palette.text_primary.to_iced(),
+        border: Border {
+            color: iced::Color::TRANSPARENT,
+            width: 0.0,
+            radius: border::Radius::from(Radius::FULL),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
+/// Material 3 filled tonal text input (borderless when idle, primary ring on focus).
+pub fn m3_text_input_style(palette: Palette, status: text_input::Status) -> text_input::Style {
+    let (bg, border_color, border_width) = match status {
+        text_input::Status::Focused => (
+            palette.surface_container_highest().to_iced(),
+            palette.primary.to_iced(),
+            1.5,
+        ),
+        text_input::Status::Hovered => (
+            palette.surface_container_highest().to_iced(),
+            iced::Color::TRANSPARENT,
+            0.0,
+        ),
+        _ => (
+            palette.surface_container_high().to_iced(),
+            iced::Color::TRANSPARENT,
+            0.0,
+        ),
+    };
+    text_input::Style {
+        background: Background::Color(bg),
+        border: Border {
+            color: border_color,
+            width: border_width,
+            radius: border::Radius::from(Radius::MD),
+        },
+        icon: palette.text_muted.to_iced(),
+        placeholder: palette.text_muted.to_iced(),
+        value: palette.text_primary.to_iced(),
+        selection: iced::Color::from_rgba(
+            palette.primary.r,
+            palette.primary.g,
+            palette.primary.b,
+            0.32,
+        ),
+    }
 }

@@ -343,14 +343,92 @@ impl Palette {
         self.background.relative_luminance() >= 0.5
     }
 
+    /// Material 3 tonal surface hierarchy: recessed container (wells, sub-pills).
+    pub fn surface_container_lowest(&self) -> Color {
+        if self.is_light() {
+            Color::from_hex(0xFFFFFF)
+        } else {
+            Color::from_hex(0x101114)
+        }
+    }
+
+    /// Material 3 tonal surface hierarchy: base cards and floating dock capsule.
+    pub fn surface_container_low(&self) -> Color {
+        if self.is_light() {
+            Color::from_hex(0xF6F3EC)
+        } else {
+            Color::from_hex(0x181A1F)
+        }
+    }
+
+    /// Material 3 tonal surface hierarchy: popovers, control deck, and menus.
+    pub fn surface_container(&self) -> Color {
+        if self.is_light() {
+            Color::from_hex(0xEFECE4)
+        } else {
+            Color::from_hex(0x1E2026)
+        }
+    }
+
+    /// Material 3 tonal surface hierarchy: interactive tiles and secondary controls.
+    pub fn surface_container_high(&self) -> Color {
+        if self.is_light() {
+            Color::from_hex(0xE7E3DA)
+        } else {
+            Color::from_hex(0x272A32)
+        }
+    }
+
+    /// Material 3 tonal surface hierarchy: hovered tiles and emphasized neutral controls.
+    pub fn surface_container_highest(&self) -> Color {
+        if self.is_light() {
+            Color::from_hex(0xDFDAD0)
+        } else {
+            Color::from_hex(0x313540)
+        }
+    }
+
+    /// Material 3 tonal accent container (blended primary over surface for active chips/workspaces).
+    pub fn primary_container(&self) -> Color {
+        let mix = if self.is_light() { 0.18 } else { 0.24 };
+        let base = self.surface_container();
+        Color::from_rgba(
+            base.r * (1.0 - mix) + self.primary.r * mix,
+            base.g * (1.0 - mix) + self.primary.g * mix,
+            base.b * (1.0 - mix) + self.primary.b * mix,
+            1.0,
+        )
+    }
+
+    /// High-contrast foreground color for content on `primary_container`.
+    pub fn on_primary_container(&self) -> Color {
+        if self.is_light() {
+            Color::from_hex(0x1A1C1E)
+        } else {
+            Color::from_hex(0xF6EFEA)
+        }
+    }
+
+    /// Subtle structural hairline divider color (low visual noise).
+    pub fn outline_variant(&self) -> Color {
+        if self.is_light() {
+            Color::from_rgba(0.10, 0.11, 0.13, 0.14)
+        } else {
+            Color::from_rgba(1.0, 1.0, 1.0, 0.10)
+        }
+    }
+
     /// Parses a `#RRGGBB` or `RRGGBB` hex string and overrides `primary` & `primary_hover`
-    /// for Material You / custom wallpaper accent color theming.
+    /// when the resulting accent meets minimum WCAG UI contrast (>= 3.0:1) against the surface.
     pub fn with_custom_accent(mut self, hex: &str) -> Self {
         let clean = hex.trim().trim_start_matches('#');
         if clean.len() == 6
             && let Ok(rgb) = u32::from_str_radix(clean, 16)
         {
             let prim = Color::from_hex(rgb);
+            if prim.contrast_ratio(&self.surface_container()) < 3.0 {
+                return self;
+            }
             let delta = if self.is_light() { -0.08 } else { 0.08 };
             let hover = Color::from_rgba(
                 (prim.r + delta).clamp(0.0, 1.0),
@@ -539,8 +617,11 @@ mod tests {
         assert!((custom.primary.g - (0xA8 as f32 / 255.0)).abs() < 1e-3);
         assert!(custom.primary_hover.g > custom.primary.g);
 
-        // Invalid hex should leave primary unchanged
+        // Invalid or low-contrast hex should leave primary unchanged
         let unchanged = dark.with_custom_accent("invalid");
         assert_eq!(unchanged.primary, dark.primary);
+
+        let too_dark = dark.with_custom_accent("#43342F");
+        assert_eq!(too_dark.primary, dark.primary);
     }
 }

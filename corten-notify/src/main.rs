@@ -7,10 +7,10 @@ use tracing::{info, warn};
 use zbus::connection::Builder;
 
 use corten_config::{AppearanceConfig, ConfigManager};
-use corten_theme::iced_styles::acrylic_glass_style;
+use corten_theme::iced_styles::{acrylic_glass_style, m3_tonal_button};
 use corten_theme::{
-    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, NOTO_SANS, NOTO_SANS_BYTES, Palette, PatinaVariant,
-    Spacing, ThemeMode, Transition, Typography,
+    Icon, LUCIDE_FONT, LUCIDE_FONT_BYTES, Motion, NOTO_SANS, NOTO_SANS_BYTES, Palette,
+    PatinaVariant, Spacing, ThemeMode, Transition, Typography,
 };
 use iced::widget::{button, column, container, image, mouse_area, row, text, text_input};
 use iced::{Alignment, Element, Length, Subscription};
@@ -511,7 +511,7 @@ impl Application for CortenNotificationApp {
                             item: item.clone(),
                             remaining_ms: timeout,
                             initial_ms: timeout.max(1),
-                            entrance: Transition::new(220),
+                            entrance: Transition::new(Motion::DURATION_EMPHASIZED_DECELERATE),
                         });
                         if self.notifications.len() > self.config.max_visible {
                             self.notifications.remove(0);
@@ -1158,17 +1158,8 @@ impl Application for CortenNotificationApp {
                             .size(Typography::CAPTION)
                             .color(palette.text_primary.to_iced()),
                     )
-                    .padding([4, 10])
-                    .style(move |_, _| button::Style {
-                        background: Some(iced::Background::Color(palette.surface_hover.to_iced())),
-                        text_color: palette.text_primary.to_iced(),
-                        border: iced::Border {
-                            color: palette.border.to_iced(),
-                            width: 1.0,
-                            radius: iced::border::Radius::from(corten_theme::Radius::SM),
-                        },
-                        shadow: iced::Shadow::default(),
-                    })
+                    .padding([6, 12])
+                    .style(move |_, status| m3_tonal_button(palette, false, status))
                     .on_press(Message::ActionInvoked(notif_id, key_clone));
 
                     action_buttons = action_buttons.push(action_btn);
@@ -1178,41 +1169,33 @@ impl Application for CortenNotificationApp {
 
             card_content = card_content.push(progress_bar);
 
-            let spring_p = notif.entrance.spring();
+            let ease_p = notif.entrance.emphasized_decelerate().clamp(0.0, 1.0);
             let exit_alpha = if item.urgency != Urgency::Critical && notif.remaining_ms <= 400 {
                 (notif.remaining_ms as f32 / 400.0).clamp(0.25, 1.0)
             } else {
                 1.0
             };
             let slide_offset_right =
-                ((1.0 - spring_p).max(0.0) * 28.0 + (1.0 - exit_alpha) * 20.0).round();
+                ((1.0 - ease_p).max(0.0) * 24.0 + (1.0 - exit_alpha) * 18.0).round();
 
             let card = container(card_content)
                 .padding(Spacing::MD)
                 .width(Length::Fixed(self.config.card_width as f32))
                 .style(move |_| {
-                    let mut style = acrylic_glass_style(palette, corten_theme::Radius::MD);
+                    let mut style = acrylic_glass_style(palette, corten_theme::Radius::LG);
                     if let Some(iced::Background::Color(c)) = style.background {
                         style.background = Some(iced::Background::Color(iced::Color::from_rgba(
                             c.r,
                             c.g,
                             c.b,
-                            c.a * (0.65 + 0.35 * notif.entrance.eased()) * exit_alpha,
+                            c.a * (0.25 + 0.75 * ease_p) * exit_alpha,
                         )));
                     }
-                    style.border.color = border_color;
-                    style.border.width = if item.urgency == Urgency::Critical {
-                        2.0
-                    } else {
-                        1.0
-                    };
                     if item.urgency == Urgency::Critical {
-                        style.shadow.color = iced::Color::from_rgba(
-                            palette.danger.r,
-                            palette.danger.g,
-                            palette.danger.b,
-                            0.40,
-                        );
+                        style.border.color = border_color;
+                        style.border.width = 1.5;
+                    } else {
+                        style.border.width = 0.0;
                     }
                     style
                 });

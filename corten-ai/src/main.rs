@@ -573,9 +573,9 @@ impl Application for CortenAiApp {
                     .font(LUCIDE_FONT)
                     .size(15.0)
                     .color(palette.primary.to_iced()),
-                text(" CORTEN AURA")
+                text("Corten Assistant")
                     .size(Typography::TITLE_SM)
-                    .color(palette.primary.to_iced()),
+                    .color(palette.text_primary.to_iced()),
                 container(
                     text("v0.2.0")
                         .size(10.0)
@@ -1144,29 +1144,17 @@ impl Application for CortenAiApp {
 
         // 5. Input Capsule & Control Deck
         let screen_btn = button(
-            text("📸")
-                .size(Typography::BODY)
-                .color(palette.primary.to_iced()),
+            text(Icon::CAMERA)
+                .font(LUCIDE_FONT)
+                .size(16.0)
+                .color(palette.text_primary.to_iced()),
         )
         .padding([Spacing::SM, Spacing::MD])
-        .style(move |_, status| {
-            let bg = match status {
-                button::Status::Hovered => iced::Color::from_rgba(1.0, 1.0, 1.0, 0.12),
-                _ => iced::Color::TRANSPARENT,
-            };
-            button::Style {
-                background: Some(iced::Background::Color(bg)),
-                border: iced::Border {
-                    radius: iced::border::Radius::from(Radius::SM),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
+        .style(move |_, status| corten_theme::iced_styles::m3_tonal_button(palette, false, status))
         .on_press(Message::AnalyzeScreenRequested);
 
         let input_elem = text_input(
-            "Corten AURA'ya sor, eylem iste veya kod analiz et...",
+            "Bir soru sor, komut çalıştır veya kod analiz et...",
             &self.query_input,
         )
         .padding([Spacing::SM, Spacing::MD])
