@@ -1,8 +1,8 @@
 # Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
 pkgname=corten-desktop-bin
-pkgver=0.6.0
+pkgver=0.7.0
 pkgrel=1
-pkgdesc="Pure-Rust Wayland desktop environment powered by Smithay, Iced & AURA-CORE (precompiled binary release)"
+pkgdesc="Wayland compositor and desktop environment written in Rust (Smithay + Iced, precompiled binary release)"
 arch=('x86_64')
 url="https://github.com/Shura5860/corten-desktop"
 license=('GPL-3.0-or-later' 'MIT')
