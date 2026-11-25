@@ -41,6 +41,7 @@ use smithay::wayland::tablet_manager::TabletSeatHandler;
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
 };
+use smithay::wayland::xwayland_keyboard_grab::{XWaylandKeyboardGrab, XWaylandKeyboardGrabHandler};
 use tracing::info;
 use wayland_protocols::xdg::shell::server::xdg_toplevel;
 use wayland_server::Client;
@@ -1315,6 +1316,18 @@ impl smithay::wayland::input_method::InputMethodHandler for CortenCompositor {
     }
 }
 
+impl XWaylandKeyboardGrabHandler for CortenCompositor {
+    fn keyboard_focus_for_xsurface(&self, surface: &WlSurface) -> Option<WlSurface> {
+        Some(surface.clone())
+    }
+
+    fn grab(&mut self, surface: WlSurface, _seat: Seat<Self>, _grab: XWaylandKeyboardGrab<Self>) {
+        info!("Compositor: zwp_xwayland_keyboard_grab_v1 activated for XWayland surface");
+        self.xwayland_keyboard_grab_surface = Some(surface);
+    }
+}
+
+smithay::delegate_xwayland_keyboard_grab!(CortenCompositor);
 smithay::delegate_drm_syncobj!(CortenCompositor);
 smithay::delegate_idle_notify!(CortenCompositor);
 smithay::delegate_xdg_foreign!(CortenCompositor);

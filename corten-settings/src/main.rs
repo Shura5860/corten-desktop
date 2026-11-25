@@ -227,6 +227,7 @@ pub enum Message {
     ToggleAutoNightLight(bool),
     ToggleVrr(bool),
     ToggleAllowTearing(bool),
+    ToggleAutoFullscreenGameMode(bool),
     SetDisplayScale(u32),
     SetDisplayResolution(String),
     SetSecondaryScale(u32),
@@ -252,7 +253,9 @@ pub enum Message {
     BluetoothRefreshed(bool, Vec<corten_services::bluetooth::BluetoothDevice>),
     // AI messages
     ToggleAiEnabled(bool),
-    SetAiModelTier(String),
+    SetAiBackendUrl(String),
+    SetAiSelectedModel(String),
+    CheckAiEndpoint,
     ToggleAiGameGpuRelease(bool),
     // Power messages
     SetPowerProfile(String),
@@ -459,6 +462,7 @@ impl CortenSettingsApp {
             Message::SelectCategory(_)
             | Message::AnimationTick
             | Message::AiEndpointChecked(_)
+            | Message::CheckAiEndpoint
             | Message::SearchChanged(_)
             | Message::SelectDisplayCard(_)
             | Message::RefreshBluetooth
@@ -677,6 +681,7 @@ impl CortenSettingsApp {
             Message::ToggleAutoNightLight(v) => self.displays.auto_night_light = v,
             Message::ToggleVrr(v) => self.displays.vrr = v,
             Message::ToggleAllowTearing(v) => self.displays.allow_tearing = v,
+            Message::ToggleAutoFullscreenGameMode(v) => self.displays.auto_fullscreen_game_mode = v,
             Message::SetDisplayScale(s) => self.displays.scale_pct = s,
             Message::SetDisplayResolution(resolution) => self.displays.resolution = resolution,
             Message::SetSecondaryScale(s) => self.displays.secondary_scale_pct = s,
@@ -832,7 +837,16 @@ impl CortenSettingsApp {
             }
             // AI handlers
             Message::ToggleAiEnabled(v) => self.ai.enabled = v,
-            Message::SetAiModelTier(t) => self.ai.model_tier = t,
+            Message::SetAiBackendUrl(url) => self.ai.backend_url = url,
+            Message::SetAiSelectedModel(model) => self.ai.selected_model = model,
+            Message::CheckAiEndpoint => {
+                self.ai_endpoint_reachable = None;
+                let url = self.ai.backend_url.clone();
+                return iced::Task::perform(
+                    check_endpoint_reachable(url),
+                    Message::AiEndpointChecked,
+                );
+            }
             Message::ToggleAiGameGpuRelease(v) => self.ai.auto_gpu_release_on_game = v,
             // Power handlers
             Message::SetPowerProfile(p) => self.power.power_profile = p,
@@ -3998,6 +4012,18 @@ impl CortenSettingsApp {
                     palette,
                 ),
                 Self::setting_item(
+                    "Otomatik Tam Ekran Oyun Modu",
+                    "Tam ekran oyunlarda VRR, Tearing, Direct Scanout ve blur kapatmayı otomatik etkinleştirir",
+                    Self::pill_switch(
+                        self.displays.auto_fullscreen_game_mode,
+                        Message::ToggleAutoFullscreenGameMode(
+                            !self.displays.auto_fullscreen_game_mode,
+                        ),
+                        palette,
+                    ),
+                    palette,
+                ),
+                Self::setting_item(
                     "XWayland Keskin Ölçekleme (Force Zero Scaling)",
                     "Kesirli ölçeklemede (%125/%150) eski X11 uygulamalarının bulanıklaşmasını önler",
                     Self::pill_switch(
@@ -6074,7 +6100,7 @@ impl CortenSettingsApp {
                 .size(Typography::TITLE)
                 .font(NOTO_SANS_BOLD)
                 .color(palette.text_primary.to_iced()),
-            text("Yerel yapay zeka ajanını, model profillerini ve GPU/RAM kaynak kullanımını yapılandırın")
+            text("Yerel AI sunucusu (UDS / TCP), dinamik model seçimi ve Oyun Modu GPU korumasını yapılandırın")
                 .size(Typography::CAPTION)
                 .color(palette.text_muted.to_iced()),
         ]
@@ -6086,76 +6112,89 @@ impl CortenSettingsApp {
             palette,
         );
 
-        let model_control = row![
-            Self::segment_button(
-                "Eco (1.5B)",
-                self.ai.model_tier == "eco",
-                Message::SetAiModelTier("eco".into()),
-                palette,
-            ),
-            Self::segment_button(
-                "Dengeli (3B)",
-                self.ai.model_tier == "balanced",
-                Message::SetAiModelTier("balanced".into()),
-                palette,
-            ),
-            Self::segment_button(
-                "Pro (7B)",
-                self.ai.model_tier == "pro",
-                Message::SetAiModelTier("pro".into()),
-                palette,
-            ),
-        ]
-        .spacing(Spacing::XS);
-
         let game_gpu_cb = Self::pill_switch(
             self.ai.auto_gpu_release_on_game,
             Message::ToggleAiGameGpuRelease(!self.ai.auto_gpu_release_on_game),
             palette,
         );
 
+        let active_model_badge = if self.ai.selected_model.trim().is_empty() {
+            "Model: Otomatik".to_string()
+        } else {
+            format!("Model: {}", self.ai.selected_model.trim())
+        };
+
         let hero = Self::hero_stage(
             column![
                 row![
                     row![
-                        text(Icon::CPU).font(LUCIDE_FONT).size(16).color(palette.primary.to_iced()),
+                        text(Icon::CPU)
+                            .font(LUCIDE_FONT)
+                            .size(16)
+                            .color(palette.primary.to_iced()),
                         text("YEREL DİL MODELİ MOTORU")
                             .size(Typography::CAPTION)
                             .font(NOTO_SANS_BOLD)
                             .color(palette.primary.to_iced()),
-                    ].spacing(Spacing::XS).align_y(Alignment::Center),
+                    ]
+                    .spacing(Spacing::XS)
+                    .align_y(Alignment::Center),
                     horizontal_space(),
                     container(
-                        text(if self.ai.enabled { "Sistem Ajanı Devrede" } else { "Devre Dışı" })
-                            .size(Typography::CAPTION)
-                            .color(if self.ai.enabled { palette.primary.to_iced() } else { palette.text_muted.to_iced() })
+                        text(if self.ai.enabled {
+                            "Etkin"
+                        } else {
+                            "Devre Dışı"
+                        })
+                        .size(Typography::CAPTION)
+                        .color(if self.ai.enabled {
+                            palette.primary.to_iced()
+                        } else {
+                            palette.text_muted.to_iced()
+                        })
                     )
                     .padding([2, 8])
                     .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.surface.r, palette.surface.g, palette.surface.b, 0.7))),
-                        border: Border { color: palette.border.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(
+                            palette.surface.r,
+                            palette.surface.g,
+                            palette.surface.b,
+                            0.7,
+                        ))),
+                        border: Border {
+                            color: palette.border.to_iced(),
+                            width: 1.0,
+                            radius: border::Radius::from(6.0),
+                        },
                         ..Default::default()
                     }),
                     container(
-                        text(format!("Model Kademesi: {}", self.ai.model_tier.to_uppercase()))
+                        text(active_model_badge)
                             .size(Typography::CAPTION)
                             .color(palette.primary.to_iced())
                     )
                     .padding([2, 8])
                     .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba(palette.primary.r, palette.primary.g, palette.primary.b, 0.15))),
-                        border: Border { color: palette.primary.to_iced(), width: 1.0, radius: border::Radius::from(6.0) },
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(
+                            palette.primary.r,
+                            palette.primary.g,
+                            palette.primary.b,
+                            0.15,
+                        ))),
+                        border: Border {
+                            color: palette.primary.to_iced(),
+                            width: 1.0,
+                            radius: border::Radius::from(6.0),
+                        },
                         ..Default::default()
                     }),
                 ]
                 .align_y(Alignment::Center)
                 .width(Length::Fill),
                 vertical_space().height(Spacing::XS),
-                row![
-                    text("Doğal dil masaüstü kontrolü (HUD: Super+Alt+Space) için yerel donanım üzerinde çalışan gizlilik odaklı LLM mimarisi.")
-                        .size(Typography::BODY_SM)
-                        .color(palette.text_muted.to_iced()),
-                ],
+                text("AURA-CORE (UDS soketi veya TCP 11435), Ollama (11434) ya da llama-server (8080) üzerinden her boyuttaki yerel modeli (3B, 14B, 30B+) çalıştırır.")
+                    .size(Typography::BODY_SM)
+                    .color(palette.text_muted.to_iced()),
             ]
             .spacing(Spacing::SM),
             palette,
@@ -6163,18 +6202,18 @@ impl CortenSettingsApp {
 
         let bento_agent = Self::bento_card(
             Icon::CPU,
-            "Sistem Asistanı & Optimizasyon",
+            "Sistem Asistanı & Oyun Koruması",
             Some("Wayland HUD"),
             column![
                 Self::setting_item(
                     "Corten AI Sistem Asistanı",
-                    "Wayland HUD (Super+Alt+Space) ve Başlatıcı doğal dil sistem komutlarını etkinleştir",
+                    "Wayland HUD (Super+Alt+Space) yerel yapay zeka erişimini etkinleştir",
                     ai_enabled_cb,
                     palette,
                 ),
                 Self::setting_item(
                     "Oyun Modu GPU Koruması",
-                    "Tam ekran bir oyun veya 3D render açıldığında model VRAM'i boşaltılarak maksimum FPS sağlanır",
+                    "Tam ekran oyun açıldığında AI VRAM kullanımını serbest bırakarak maksimum FPS sağlar",
                     game_gpu_cb,
                     palette,
                 ),
@@ -6183,35 +6222,88 @@ impl CortenSettingsApp {
             palette,
         );
 
+        let endpoint_input = text_input(
+            "http://127.0.0.1:11435 veya unix:///run/user/1000/corten/aura.sock",
+            &self.ai.backend_url,
+        )
+        .on_input(Message::SetAiBackendUrl)
+        .padding([6, 10])
+        .width(Length::Fixed(280.0))
+        .size(Typography::BODY_SM);
+
+        let model_input = text_input(
+            "Otomatik (Corten AI içinden seçilir)",
+            &self.ai.selected_model,
+        )
+        .on_input(Message::SetAiSelectedModel)
+        .padding([6, 10])
+        .width(Length::Fixed(280.0))
+        .size(Typography::BODY_SM);
+
+        let (reach_label, reach_color) = match self.ai_endpoint_reachable {
+            None => ("Kontrol ediliyor...", palette.text_muted),
+            Some(true) => ("Erişilebilir", palette.success),
+            Some(false) => ("Yanıt yok", palette.danger),
+        };
+
+        let test_conn_btn = button(
+            text("Bağlantıyı Test Et")
+                .size(Typography::CAPTION)
+                .color(palette.text_primary.to_iced()),
+        )
+        .padding([5, 10])
+        .style(move |_, status| {
+            let bg = match status {
+                button::Status::Hovered => palette.surface_hover.to_iced(),
+                _ => palette.surface.to_iced(),
+            };
+            button::Style {
+                background: Some(iced::Background::Color(bg)),
+                border: Border {
+                    color: palette.border.to_iced(),
+                    width: 1.0,
+                    radius: border::Radius::from(Radius::FULL),
+                },
+                ..Default::default()
+            }
+        })
+        .on_press(Message::CheckAiEndpoint);
+
         let bento_model = Self::bento_card(
             Icon::GAUGE,
-            "Model Profili & Donanım Tüketimi",
-            Some("Yerel GGUF"),
+            "Bağlantı & Dinamik Model Seçimi",
+            Some("UDS + TCP"),
             column![
                 Self::setting_item(
-                    "Yerel Model Profili & Kaynak Tüketimi",
-                    "Sistem donanımına göre seçilmiş yerel model kademesi (GGUF)",
-                    model_control,
+                    "Sunucu Adresi (UDS / TCP)",
+                    "Önce $XDG_RUNTIME_DIR/corten/aura.sock denenir; yoksa bu adres kullanılır",
+                    endpoint_input,
                     palette,
                 ),
                 Self::setting_item(
-                    "Yerel Motor Adresi",
-                    "Yerel LLM veya Ollama API adresi (ayarlar açıldığında bağlantı denenir)",
-                    {
-                        let (label, color) = match self.ai_endpoint_reachable {
-                            None => ("Kontrol ediliyor…", palette.text_muted),
-                            Some(true) => ("Erişilebilir", palette.success),
-                            Some(false) => ("Yanıt yok", palette.danger),
-                        };
+                    "Varsayılan Model",
+                    "Herhangi bir boyut (ör. qwen2.5:30b, qwen2.5:3b); boş bırakılırsa otomatik seçilir",
+                    model_input,
+                    palette,
+                ),
+                Self::setting_item(
+                    "Sunucu Durumu",
+                    "UDS soketi veya tanımlı TCP uç noktasının anlık erişilebilirlik durumu",
+                    row![
                         column![
-                            text(label).size(Typography::BODY_SM).color(color.to_iced()),
+                            text(reach_label)
+                                .size(Typography::BODY_SM)
+                                .color(reach_color.to_iced()),
                             text(endpoint_host_port(&self.ai.backend_url))
                                 .size(Typography::CAPTION)
                                 .color(palette.text_muted.to_iced()),
                         ]
                         .spacing(2)
-                        .align_x(Alignment::End)
-                    },
+                        .align_x(Alignment::End),
+                        test_conn_btn,
+                    ]
+                    .spacing(Spacing::SM)
+                    .align_y(Alignment::Center),
                     palette,
                 ),
             ]
@@ -6233,14 +6325,21 @@ impl CortenSettingsApp {
     }
 }
 
-/// Extracts `host:port` from an http(s) URL (defaults: 80 / 443).
+/// Extracts `host:port` from an http(s) URL (defaults: 80 / 443) or returns a UDS label.
 fn endpoint_host_port(url: &str) -> String {
-    let (rest, default_port) = if let Some(r) = url.strip_prefix("https://") {
+    let trimmed = url.trim();
+    if let Some(sock) = trimmed.strip_prefix("unix://") {
+        return sock.to_string();
+    }
+    if trimmed.starts_with('/') {
+        return trimmed.to_string();
+    }
+    let (rest, default_port) = if let Some(r) = trimmed.strip_prefix("https://") {
         (r, 443)
-    } else if let Some(r) = url.strip_prefix("http://") {
+    } else if let Some(r) = trimmed.strip_prefix("http://") {
         (r, 80)
     } else {
-        (url, 80)
+        (trimmed, 80)
     };
     let authority = rest.split('/').next().unwrap_or(rest);
     if authority.contains(':') {
@@ -6250,9 +6349,45 @@ fn endpoint_host_port(url: &str) -> String {
     }
 }
 
-/// Real reachability probe: TCP connect with a short timeout.
+/// Real reachability probe: checks default Corten AURA UDS socket first, then configured UDS/TCP.
 async fn check_endpoint_reachable(url: String) -> bool {
-    let addr = endpoint_host_port(&url);
+    let default_uds = corten_config::default_aura_socket_path();
+    if default_uds.exists()
+        && matches!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                tokio::net::UnixStream::connect(&default_uds),
+            )
+            .await,
+            Ok(Ok(_))
+        )
+    {
+        return true;
+    }
+
+    let trimmed = url.trim();
+    if let Some(sock) = trimmed.strip_prefix("unix://") {
+        return matches!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                tokio::net::UnixStream::connect(sock),
+            )
+            .await,
+            Ok(Ok(_))
+        );
+    }
+    if trimmed.starts_with('/') {
+        return matches!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                tokio::net::UnixStream::connect(trimmed),
+            )
+            .await,
+            Ok(Ok(_))
+        );
+    }
+
+    let addr = endpoint_host_port(trimmed);
     matches!(
         tokio::time::timeout(
             std::time::Duration::from_millis(800),

@@ -884,6 +884,77 @@ impl GlobalShortcutsPortal {
         (0, results)
     }
 
+    /// Fires `Activated` / `Deactivated` portal signals for any bound session shortcut whose
+    /// trigger matches `trigger` (called by the compositor / `cortenctl` when a global chord is pressed).
+    async fn trigger_shortcut(
+        &self,
+        #[zbus(signal_emitter)] emitter: zbus::object_server::SignalEmitter<'_>,
+        trigger: String,
+        pressed: bool,
+    ) -> u32 {
+        let needle = trigger.trim().to_ascii_uppercase();
+        if needle.is_empty() {
+            return 0;
+        }
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let sessions = self.sessions.lock().await;
+        let mut matched = 0u32;
+        for (session_path, list) in sessions.iter() {
+            let Ok(obj_path) = OwnedObjectPath::try_from(session_path.as_str()) else {
+                continue;
+            };
+            for sc in list {
+                if sc.preferred_trigger.trim().to_ascii_uppercase() == needle {
+                    let options: HashMap<String, OwnedValue> = HashMap::new();
+                    let res = if pressed {
+                        Self::activated(
+                            &emitter,
+                            obj_path.clone(),
+                            sc.id.clone(),
+                            timestamp,
+                            options,
+                        )
+                        .await
+                    } else {
+                        Self::deactivated(
+                            &emitter,
+                            obj_path.clone(),
+                            sc.id.clone(),
+                            timestamp,
+                            options,
+                        )
+                        .await
+                    };
+                    if res.is_ok() {
+                        matched += 1;
+                    }
+                }
+            }
+        }
+        matched
+    }
+
+    #[zbus(signal)]
+    async fn activated(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        session_handle: OwnedObjectPath,
+        shortcut_id: String,
+        timestamp: u64,
+        options: HashMap<String, OwnedValue>,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn deactivated(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        session_handle: OwnedObjectPath,
+        shortcut_id: String,
+        timestamp: u64,
+        options: HashMap<String, OwnedValue>,
+    ) -> zbus::Result<()>;
+
     #[zbus(property)]
     async fn version(&self) -> u32 {
         1

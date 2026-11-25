@@ -31,6 +31,7 @@ use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::xdg_activation::XdgActivationState;
+use smithay::wayland::xwayland_keyboard_grab::XWaylandKeyboardGrabState;
 use smithay::wayland::xwayland_shell::XWaylandShellState;
 use smithay::xwayland::X11Surface;
 use smithay::xwayland::xwm::X11Wm;
@@ -129,6 +130,8 @@ pub struct CortenCompositor {
     pub pending_screencopies: Vec<PendingScreencopy>,
     pub pending_screenshot: Option<PendingScreenshot>,
     pub xwayland_shell_state: XWaylandShellState,
+    pub xwayland_keyboard_grab_state: XWaylandKeyboardGrabState,
+    pub xwayland_keyboard_grab_surface: Option<WlSurface>,
     pub xwm: Option<X11Wm>,
     pub xwayland_client: Option<Client>,
     pub override_redirect_windows: Vec<X11Surface>,
@@ -215,6 +218,23 @@ pub struct CortenCompositor {
     pub a11y_bridge: corten_services::a11y::AtspiBridge,
     /// One-click Game Mode: disables blur/effects, enables tearing/VRR, inhibits idle & DND
     pub game_mode: bool,
+    /// Automatically activate Game Mode / VRR while a fullscreen window is focused
+    pub auto_fullscreen_game_mode: bool,
+    /// True if current `game_mode` was entered automatically by fullscreen detection
+    pub auto_game_mode_active: bool,
+    /// Configured baseline VRR / tearing flags to restore when leaving auto fullscreen Game Mode
+    pub configured_vrr: bool,
+    pub configured_allow_tearing: bool,
+    /// Signals udev backend to re-apply DRM `VRR_ENABLED` property on CRTCs
+    pub vrr_dirty: bool,
+    /// Whether any connected DRM output reports `vrr_capable == 1`
+    pub vrr_hardware_capable: bool,
+    /// Whether the most recent fullscreen DRM frame achieved zero-copy Primary Plane Direct Scanout
+    pub last_frame_direct_scanout: bool,
+    /// Last pointer movement timestamp for automatic inactivity cursor hiding during Game Mode
+    pub last_pointer_motion: Instant,
+    /// Power profile saved prior to entering Game Mode so it can be restored cleanly on exit
+    pub saved_power_profile: Option<String>,
     /// Compositor GPU screen magnifier current animated zoom factor (`1.0` = normal, up to `4.0`)
     pub zoom_level: f64,
     /// Target GPU screen magnifier zoom factor for smooth spring interpolation
@@ -272,9 +292,15 @@ impl CortenCompositor {
         let Some(focused) = kb.current_focus() else {
             return false;
         };
-        self.seat
+        let wayland_inhibit = self
+            .seat
             .keyboard_shortcuts_inhibitor_for_surface(&focused)
-            .is_some_and(|inhibitor| inhibitor.is_active())
+            .is_some_and(|inhibitor| inhibitor.is_active());
+        let xwayland_grab = self
+            .xwayland_keyboard_grab_surface
+            .as_ref()
+            .is_some_and(|grabbed| grabbed.is_alive() && *grabbed == focused);
+        wayland_inhibit || xwayland_grab
     }
 
     /// Enforces `zwp_pointer_constraints_v1` (`Locked` or `Confined`) for the currently focused surface.
@@ -1202,6 +1228,7 @@ impl CortenCompositor {
         let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
         let screencopy_state = ScreencopyManagerState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
+        let xwayland_keyboard_grab_state = XWaylandKeyboardGrabState::new::<Self>(&dh);
         let text_input_state =
             smithay::wayland::text_input::TextInputManagerState::new::<Self>(&dh);
         let idle_event_loop = smithay::reexports::calloop::EventLoop::<Self>::try_new()
@@ -1304,6 +1331,8 @@ impl CortenCompositor {
             pending_screencopies: Vec::new(),
             pending_screenshot: None,
             xwayland_shell_state,
+            xwayland_keyboard_grab_state,
+            xwayland_keyboard_grab_surface: None,
             xwm: None,
             xwayland_client: None,
             override_redirect_windows: Vec::new(),
@@ -1364,6 +1393,15 @@ impl CortenCompositor {
                 .unwrap_or_default(),
             a11y_bridge: corten_services::a11y::AtspiBridge::new("Corten Desktop"),
             game_mode: false,
+            auto_fullscreen_game_mode: true,
+            auto_game_mode_active: false,
+            configured_vrr: false,
+            configured_allow_tearing: false,
+            vrr_dirty: false,
+            vrr_hardware_capable: false,
+            last_frame_direct_scanout: false,
+            last_pointer_motion: Instant::now(),
+            saved_power_profile: None,
             zoom_level: 1.0,
             target_zoom_level: 1.0,
             xwayland_force_zero_scaling: corten_config::ConfigManager::<
@@ -1386,11 +1424,72 @@ impl CortenCompositor {
         }
     }
 
+    /// Records pointer activity so inactivity cursor hiding resets immediately on mouse movement.
+    pub fn note_pointer_motion(&mut self) {
+        self.last_pointer_motion = Instant::now();
+    }
+
+    /// Hides the cursor automatically after 4 seconds of pointer inactivity during Game Mode
+    /// (prevents a stray mouse pointer from sitting in the middle of the screen during gamepad play).
+    pub fn should_hide_idle_cursor(&self) -> bool {
+        self.game_mode && self.last_pointer_motion.elapsed() >= Duration::from_secs(4)
+    }
+
+    /// Releases GPU VRAM held by local AI assistant (`corten-ai`) when entering Game Mode
+    /// if `auto_gpu_release_on_game` is enabled in `ai.toml`.
+    fn release_ai_vram_if_configured() {
+        std::thread::spawn(|| {
+            let should_release =
+                corten_config::ConfigManager::<corten_config::AiSettingsConfig>::load_or_default(
+                    "ai",
+                )
+                .map(|c| c.get().auto_gpu_release_on_game)
+                .unwrap_or(true);
+            if should_release {
+                let _ = std::process::Command::new("pkill")
+                    .args(["-TERM", "-x", "corten-ai"])
+                    .status();
+            }
+        });
+    }
+
+    /// Switches `power-profiles-daemon` to `performance` when entering Game Mode and restores
+    /// the previous profile on exit (executed on a detached thread so compositor never blocks).
+    fn apply_game_mode_power_profile(&mut self, entering: bool) {
+        if entering {
+            Self::release_ai_vram_if_configured();
+            if self.saved_power_profile.is_none() {
+                let fallback = corten_config::ConfigManager::<corten_config::PowerSettingsConfig>::load_or_default("power")
+                    .map(|c| c.get().power_profile.clone())
+                    .unwrap_or_else(|_| "balanced".to_string());
+                self.saved_power_profile = Some(fallback);
+            }
+            std::thread::spawn(|| {
+                let _ = corten_services::power_profiles::set_active_profile("performance");
+            });
+        } else if let Some(prev) = self.saved_power_profile.take() {
+            std::thread::spawn(move || {
+                let _ = corten_services::power_profiles::set_active_profile(&prev);
+            });
+        }
+    }
+
     /// Toggles One-Click Game Mode (disables blur, enables VRR/tearing, toggles DND & notifies user).
     pub fn toggle_game_mode(&mut self) -> bool {
+        self.auto_game_mode_active = false;
         self.game_mode = !self.game_mode;
-        self.allow_tearing = self.game_mode;
-        self.vrr_enabled = self.game_mode;
+        self.allow_tearing = if self.game_mode {
+            true
+        } else {
+            self.configured_allow_tearing
+        };
+        self.vrr_enabled = if self.game_mode {
+            true
+        } else {
+            self.configured_vrr
+        };
+        self.vrr_dirty = true;
+        self.apply_game_mode_power_profile(self.game_mode);
         let _ = std::process::Command::new("busctl")
             .args([
                 "--user",
@@ -1417,6 +1516,111 @@ impl CortenCompositor {
             .args(["Corten Game Mode", msg])
             .spawn();
         self.game_mode
+    }
+
+    /// Returns `true` when the given surface explicitly advertises `wp_content_type_v1::Type::Game`
+    /// (used by Vulkan/DXVK/Proton/native Wayland games even in borderless-windowed mode).
+    pub fn surface_is_game_content(surface: &WlSurface) -> bool {
+        use smithay::reexports::wayland_protocols::wp::content_type::v1::server::wp_content_type_v1::Type as WpContentType;
+        use smithay::wayland::compositor::with_states;
+        use smithay::wayland::content_type::ContentTypeSurfaceCachedState;
+        with_states(surface, |states| {
+            let mut guard = states.cached_state.get::<ContentTypeSurfaceCachedState>();
+            *guard.current().content_type() == WpContentType::Game
+        })
+    }
+
+    /// Recognizes common Steam/Proton/Gamescope/emulator game `app_id` patterns so games that do
+    /// not emit `wp_content_type_v1::Type::Game` still trigger Auto Game Mode cleanly.
+    pub fn is_known_game_app_id(app_id: &str) -> bool {
+        let lower = app_id.trim().to_ascii_lowercase();
+        if lower.is_empty() {
+            return false;
+        }
+        lower.starts_with("steam_app_")
+            || lower == "gamescope"
+            || lower == "cs2"
+            || lower == "dota2"
+            || lower.contains("minecraft")
+            || lower.ends_with(".exe")
+            || matches!(
+                lower.as_str(),
+                "retroarch" | "rpcs3" | "dolphin-emu" | "pcsx2" | "ryujinx" | "cemu"
+            )
+    }
+
+    /// Returns `true` if the currently focused window advertises `ContentType::Game`
+    /// or matches a known Steam/Proton/emulator game `app_id`.
+    pub fn active_window_is_game_content(&self) -> bool {
+        let Some(active) = self.layout.active_window() else {
+            return false;
+        };
+        let by_protocol = crate::layout::window_wl_surface(active)
+            .is_some_and(|surf| Self::surface_is_game_content(&surf));
+        if by_protocol {
+            return true;
+        }
+        let (app_id, _) = crate::layout::window_metadata(active);
+        Self::is_known_game_app_id(&app_id)
+    }
+
+    /// Automatically enables Game Mode (VRR + tearing + blur bypass + idle inhibit) while a
+    /// fullscreen window or a `wp_content_type_v1::Type::Game` surface is active when
+    /// `auto_fullscreen_game_mode` is enabled, and restores the user's configured baseline when
+    /// leaving (never overriding manual `Super+G`).
+    pub fn sync_fullscreen_game_mode(&mut self, has_fullscreen: bool) {
+        if !self.auto_fullscreen_game_mode {
+            return;
+        }
+        let game_active = has_fullscreen || self.active_window_is_game_content();
+        if game_active && !self.game_mode {
+            self.game_mode = true;
+            self.auto_game_mode_active = true;
+            self.vrr_enabled = true;
+            self.allow_tearing = true;
+            self.vrr_dirty = true;
+            self.apply_game_mode_power_profile(true);
+            tracing::info!(
+                has_fullscreen,
+                content_type_game = self.active_window_is_game_content(),
+                "Auto Game Mode activated (VRR + tearing + blur bypass)"
+            );
+        } else if !game_active && self.auto_game_mode_active {
+            self.game_mode = false;
+            self.auto_game_mode_active = false;
+            self.vrr_enabled = self.configured_vrr;
+            self.allow_tearing = self.configured_allow_tearing;
+            self.vrr_dirty = true;
+            self.apply_game_mode_power_profile(false);
+            tracing::info!("Auto Game Mode deactivated (restored baseline display settings)");
+        }
+    }
+
+    /// Returns a human-readable multi-line summary of live compositor gaming readiness.
+    pub fn gaming_status_report(&self) -> String {
+        let mode = if !self.game_mode {
+            "off"
+        } else if self.auto_game_mode_active {
+            "auto-fullscreen"
+        } else {
+            "manual"
+        };
+        let xkb_grab = self
+            .xwayland_keyboard_grab_surface
+            .as_ref()
+            .is_some_and(|s| s.is_alive());
+        format!(
+            "explicit_sync={}\ndirect_scanout={}\nvrr_capable={}\nvrr_enabled={}\ntearing_allowed={}\ncontent_type_game={}\nxwayland_keyboard_grab_protocol=enabled\nxwayland_keyboard_grab_active={}\ngame_mode={}\nauto_fullscreen_game_mode={}",
+            self.syncobj_state.is_some(),
+            self.last_frame_direct_scanout,
+            self.vrr_hardware_capable,
+            self.vrr_enabled,
+            self.allow_tearing,
+            self.active_window_is_game_content(),
+            xkb_grab,
+            mode,
+            self.auto_fullscreen_game_mode,
+        )
     }
 
     /// Dispatches a user-configured 3-finger or 4-finger touchpad swipe action.
@@ -1549,6 +1753,15 @@ impl CortenCompositor {
             }
             "toggle-game-mode" => {
                 self.toggle_game_mode();
+            }
+            "gaming-status" => {
+                let report = self.gaming_status_report();
+                if let Ok(home) = std::env::var("HOME") {
+                    let dir = std::path::PathBuf::from(home).join(".cache/corten");
+                    let _ = std::fs::create_dir_all(&dir);
+                    let _ = std::fs::write(dir.join("gaming-status.txt"), &report);
+                }
+                tracing::info!("Gaming status snapshot:\n{}", report);
             }
             "scroll-left" => {
                 self.layout.scroll_column_step(-1, usable);
@@ -2212,5 +2425,66 @@ mod tests {
         let glow = compute_zoomed_glow_rect(win, 2.0, center_pan, 1.0);
         assert_eq!(glow.loc, Point::from((40, 60)));
         assert_eq!(glow.size, Size::from((800, 400)));
+    }
+
+    #[test]
+    fn test_auto_fullscreen_game_mode_and_status_report() {
+        let mut display = Display::<CortenCompositor>::new().expect("display");
+        let mut state = CortenCompositor::new(&mut display, Size::from((1920, 1080)));
+        state.configured_vrr = false;
+        state.configured_allow_tearing = false;
+        state.auto_fullscreen_game_mode = true;
+
+        // Entering fullscreen activates auto Game Mode + VRR + tearing
+        state.sync_fullscreen_game_mode(true);
+        assert!(state.game_mode);
+        assert!(state.auto_game_mode_active);
+        assert!(state.vrr_enabled);
+        assert!(state.allow_tearing);
+        assert!(state.vrr_dirty);
+        assert!(
+            state
+                .gaming_status_report()
+                .contains("game_mode=auto-fullscreen")
+        );
+
+        // Leaving fullscreen restores configured baseline
+        state.vrr_dirty = false;
+        state.sync_fullscreen_game_mode(false);
+        assert!(!state.game_mode);
+        assert!(!state.auto_game_mode_active);
+        assert!(!state.vrr_enabled);
+        assert!(!state.allow_tearing);
+        assert!(state.vrr_dirty);
+        assert!(state.gaming_status_report().contains("game_mode=off"));
+        let _ = display.flush_clients();
+    }
+
+    #[test]
+    fn test_game_mode_idle_cursor_hide() {
+        let mut display = Display::<CortenCompositor>::new().expect("display");
+        let mut state = CortenCompositor::new(&mut display, Size::from((1920, 1080)));
+        // Cursor stays visible outside Game Mode even after inactivity
+        state.last_pointer_motion = Instant::now() - Duration::from_secs(10);
+        assert!(!state.should_hide_idle_cursor());
+
+        // Inside Game Mode, cursor hides after 4s of inactivity and immediately reappears on motion
+        state.game_mode = true;
+        assert!(state.should_hide_idle_cursor());
+        state.note_pointer_motion();
+        assert!(!state.should_hide_idle_cursor());
+        let _ = display.flush_clients();
+    }
+
+    #[test]
+    fn test_known_game_app_id_matching() {
+        assert!(CortenCompositor::is_known_game_app_id("steam_app_730"));
+        assert!(CortenCompositor::is_known_game_app_id("gamescope"));
+        assert!(CortenCompositor::is_known_game_app_id("cs2"));
+        assert!(CortenCompositor::is_known_game_app_id("Cyberpunk2077.exe"));
+        assert!(CortenCompositor::is_known_game_app_id("rpcs3"));
+        assert!(!CortenCompositor::is_known_game_app_id("corten-files"));
+        assert!(!CortenCompositor::is_known_game_app_id("firefox"));
+        assert!(!CortenCompositor::is_known_game_app_id(""));
     }
 }

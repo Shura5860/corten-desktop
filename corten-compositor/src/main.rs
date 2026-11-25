@@ -454,7 +454,10 @@ pub(crate) fn apply_display_settings(state: &mut CortenCompositor) {
         state.set_night_light_enabled(display_config.night_light);
     }
     state.vrr_enabled = display_config.vrr;
+    state.configured_vrr = display_config.vrr;
     state.allow_tearing = display_config.allow_tearing;
+    state.configured_allow_tearing = display_config.allow_tearing;
+    state.auto_fullscreen_game_mode = display_config.auto_fullscreen_game_mode;
     state.hdr_enabled = display_config.hdr_enabled;
     state.color_space = display_config.color_space.clone();
     state.xwayland_force_zero_scaling = display_config.xwayland_force_zero_scaling;
