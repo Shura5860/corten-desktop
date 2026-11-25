@@ -37,6 +37,7 @@ corten-crash.log
 .env
 .env.*
 *.local
+SONRA_YAPILACAKLAR.md
 
 # OS / Editor directories
 .DS_Store

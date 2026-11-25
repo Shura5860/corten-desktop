@@ -34,7 +34,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.7.2"
+version = "0.7.3"
 edition = "2024"
 license = "GPL-3.0"
 authors = ["Corten Desktop Contributors"]
@@ -60,6 +60,7 @@ directories = "5.0"
 
 [patch.crates-io]
 iced_layershell = { path = "patches/iced_layershell" }
+iced_sessionlock = { path = "patches/iced_sessionlock" }
 iced_tiny_skia = { path = "patches/iced_tiny_skia" }
 
 [profile.release]

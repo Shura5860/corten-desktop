@@ -1,0 +1,11 @@
+post_install() {
+    if [ -x /usr/bin/corten-enable-greeter ]; then
+        /usr/bin/corten-enable-greeter --if-no-dm || true
+    fi
+}
+
+post_upgrade() {
+    if [ ! -f /etc/greetd/config.toml ] && [ -x /usr/bin/corten-enable-greeter ]; then
+        /usr/bin/corten-enable-greeter --if-no-dm || true
+    fi
+}

@@ -1,6 +1,6 @@
 # Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
 pkgname=corten-desktop-bin
-pkgver=0.7.2
+pkgver=0.7.3
 pkgrel=1
 pkgdesc="Wayland compositor and desktop environment written in Rust (Smithay + Iced, precompiled binary release)"
 arch=('x86_64')
@@ -28,7 +28,10 @@ depends=(
     'adwaita-cursors'
     'flatpak'
     'xorg-xwayland'
+    'greetd'
+    'cage'
 )
+install=corten-desktop.install
 optdepends=(
     'greetd: Display manager for Corten Greeter login screen (run: sudo corten-enable-greeter)'
     'cage: Wayland kiosk compositor for Corten Greeter'
@@ -120,5 +123,5 @@ Type=Application
 DesktopNames=corten
 EOF
     install -dm755 "${pkgdir}/etc/pam.d"
-    printf '#%%PAM-1.0\nauth include system-auth\n' > "${pkgdir}/etc/pam.d/corten-lock"
+    printf '#%%PAM-1.0\nauth include system-auth\naccount include system-auth\n' > "${pkgdir}/etc/pam.d/corten-lock"
 }

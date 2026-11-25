@@ -1,6 +1,6 @@
 # Maintainer: Corten Desktop Contributors <https://github.com/Shura5860/corten-desktop>
 pkgname=corten-desktop-git
-pkgver=0.7.2.r0.g0000000
+pkgver=0.7.3.r0.g0000000
 pkgrel=1
 pkgdesc="Wayland compositor and desktop environment written in Rust (Smithay + Iced)"
 arch=('x86_64' 'aarch64')
@@ -27,7 +27,10 @@ depends=(
     'hicolor-icon-theme'
     'adwaita-cursors'
     'flatpak'
+    'greetd'
+    'cage'
 )
+install=corten-desktop.install
 makedepends=(
     'cargo'
     'git'
@@ -48,7 +51,7 @@ sha256sums=('SKIP')
 
 pkgver() {
     cd "${srcdir}/corten-desktop"
-    printf "0.7.2.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    printf "0.7.3.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
@@ -138,6 +141,6 @@ package() {
         done
     fi
     install -dm755 "${pkgdir}/etc/pam.d"
-    printf '#%%PAM-1.0\nauth include system-auth\n' > "${pkgdir}/etc/pam.d/corten-lock"
+    printf '#%%PAM-1.0\nauth include system-auth\naccount include system-auth\n' > "${pkgdir}/etc/pam.d/corten-lock"
 }
 

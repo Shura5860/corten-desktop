@@ -2,14 +2,34 @@
 set -euo pipefail
 
 # Corten Desktop Greeter Enabler (greetd + cage + corten-greeter)
-# Configures /etc/greetd/config.toml and enables greetd.service automatically.
+# Configures /etc/greetd/config.toml (preserving system XKB keyboard layout)
+# and enables greetd.service automatically.
+
+IF_NO_DM=0
+if [[ "${1:-}" == "--if-no-dm" ]]; then
+    IF_NO_DM=1
+fi
 
 if [[ "${EUID}" -ne 0 ]]; then
     echo "Lütfen root yetkisiyle çalıştırın: sudo corten-enable-greeter"
     exit 1
 fi
 
+if [[ "${IF_NO_DM}" -eq 1 ]]; then
+    for dm in gdm sddm lightdm lxdm ly greetd; do
+        if systemctl is-enabled "${dm}.service" >/dev/null 2>&1; then
+            echo "==> Mevcut giriş yöneticisi (${dm}.service) korundu."
+            echo "    Corten Greeter'a geçmek için: sudo corten-enable-greeter"
+            exit 0
+        fi
+    done
+fi
+
 if ! command -v greetd >/dev/null 2>&1 || ! command -v cage >/dev/null 2>&1; then
+    if [[ "${IF_NO_DM}" -eq 1 ]]; then
+        echo "==> greetd veya cage kurulu değil; Corten Greeter için: sudo corten-enable-greeter"
+        exit 0
+    fi
     echo "==> greetd veya cage eksik; kuruluyor..."
     if command -v pacman >/dev/null 2>&1; then
         pacman -S --needed --noconfirm greetd cage
@@ -29,6 +49,29 @@ if [[ ! -x "${GREETER_BIN}" ]]; then
     exit 1
 fi
 
+detect_xkb_layout() {
+    local layout=""
+    if command -v localectl >/dev/null 2>&1; then
+        layout="$(localectl status 2>/dev/null | awk -F': ' '/X11 Layout/ {print $2; exit}' | tr -d '[:space:]')"
+    fi
+    if [[ -z "${layout}" && -f /etc/vconsole.conf ]]; then
+        local km
+        km="$(awk -F'=' '/^KEYMAP=/ {gsub(/["'\'']/, "", $2); print $2; exit}' /etc/vconsole.conf)"
+        case "${km}" in
+            tr*) layout="tr" ;;
+            de*) layout="de" ;;
+            fr*) layout="fr" ;;
+            es*) layout="es" ;;
+            uk*) layout="gb" ;;
+            us*) layout="us" ;;
+            *)   layout="${km%%-*}" ;;
+        esac
+    fi
+    echo "${layout:-us}"
+}
+
+XKB_LAYOUT="$(detect_xkb_layout)"
+
 install -d /etc/greetd
 if [[ -f /etc/greetd/config.toml ]]; then
     cp /etc/greetd/config.toml "/etc/greetd/config.toml.bak.$(date +%Y%m%d%H%M%S)"
@@ -39,18 +82,22 @@ cat > /etc/greetd/config.toml << EOF
 vt = 1
 
 [default_session]
-command = "cage -s -- ${GREETER_BIN}"
+command = "env XKB_DEFAULT_LAYOUT=${XKB_LAYOUT} cage -s -- ${GREETER_BIN}"
 user = "greeter"
 EOF
 
 # Disable conflicting display managers if active so greetd can own VT1
-for dm in gdm sddm lightdm lxdm ly; do
-    if systemctl is-enabled "${dm}.service" >/dev/null 2>&1; then
-        echo "==> Çakışan giriş yöneticisi devre dışı bırakılıyor: ${dm}.service"
-        systemctl disable "${dm}.service" || true
-    fi
-done
+if [[ "${IF_NO_DM}" -eq 0 ]]; then
+    for dm in gdm sddm lightdm lxdm ly; do
+        if systemctl is-enabled "${dm}.service" >/dev/null 2>&1; then
+            echo "==> Çakışan giriş yöneticisi devre dışı bırakılıyor: ${dm}.service"
+            systemctl disable "${dm}.service" || true
+        fi
+    done
+fi
 
 systemctl enable greetd.service
-echo "✓ Corten Greeter (greetd) başarıyla yapılandırıldı ve etkinleştirildi!"
-echo "  Değişikliğin etkili olması için sistemi yeniden başlatabilirsiniz: sudo reboot"
+echo "✓ Corten Greeter (greetd, klavye: ${XKB_LAYOUT}) yapılandırıldı ve etkinleştirildi!"
+if [[ "${IF_NO_DM}" -eq 0 ]]; then
+    echo "  Değişikliğin etkili olması için sistemi yeniden başlatabilirsiniz: sudo reboot"
+fi

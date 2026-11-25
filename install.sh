@@ -116,6 +116,7 @@ if [[ -d /etc/pam.d && ! -f /etc/pam.d/corten-lock ]]; then
     sudo tee /etc/pam.d/corten-lock > /dev/null << 'EOF'
 #%PAM-1.0
 auth include login
+account include login
 EOF
 fi
 

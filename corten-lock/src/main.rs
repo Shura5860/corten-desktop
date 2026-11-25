@@ -727,6 +727,7 @@ pub enum Message {
     SubmitPassword,
     AuthResult(AuthOutcome),
     Unlock,
+    MediaUpdated(Option<corten_services::mpris::MediaPlayer>),
     LockMediaPlayPause(String),
     LockMediaNext(String),
     LockMediaPrevious(String),
@@ -782,7 +783,6 @@ impl MultiApplication for CortenLockApp {
         };
 
         let avatar_handle = Self::resolve_user_avatar(&flags).map(image::Handle::from_path);
-        let media_track = Self::get_media_status();
         let battery_info = Self::get_battery_info();
         let network_state = Self::get_network_state();
         let caps_lock_on = Self::detect_caps_lock_led();
@@ -790,6 +790,16 @@ impl MultiApplication for CortenLockApp {
         let active_patina = ConfigManager::<AppearanceConfig>::load_or_default("appearance")
             .map(|c| PatinaVariant::from_code(&c.get().patina))
             .unwrap_or(PatinaVariant::Rust);
+
+        let media_task = Task::perform(
+            async {
+                tokio::task::spawn_blocking(Self::get_media_status)
+                    .await
+                    .ok()
+                    .flatten()
+            },
+            Message::MediaUpdated,
+        );
 
         let now_inst = Instant::now();
         (
@@ -805,7 +815,7 @@ impl MultiApplication for CortenLockApp {
                 keyboard_layout,
                 avatar_handle,
                 wallpaper_handle: initial_wp,
-                media_track,
+                media_track: None,
                 battery_info,
                 network_state,
                 pending_power_confirm: None,
@@ -817,7 +827,7 @@ impl MultiApplication for CortenLockApp {
                 last_status_poll: now_inst,
                 active_patina,
             },
-            blur_task,
+            Task::batch(vec![blur_task, media_task]),
         )
     }
 
@@ -880,7 +890,6 @@ impl MultiApplication for CortenLockApp {
                 // Poll external system state at most once every 5 seconds
                 if now_inst.duration_since(self.last_status_poll) >= STATUS_POLL_INTERVAL {
                     self.last_status_poll = now_inst;
-                    self.media_track = Self::get_media_status();
                     self.battery_info = Self::get_battery_info();
                     self.network_state = Self::get_network_state();
                     self.caps_lock_on = Self::detect_caps_lock_led();
@@ -892,6 +901,15 @@ impl MultiApplication for CortenLockApp {
                             self.active_patina = new_patina;
                         }
                     }
+                    return Task::perform(
+                        async {
+                            tokio::task::spawn_blocking(Self::get_media_status)
+                                .await
+                                .ok()
+                                .flatten()
+                        },
+                        Message::MediaUpdated,
+                    );
                 }
             }
             Message::WallpaperReady(Some(path)) => {
@@ -970,17 +988,50 @@ impl MultiApplication for CortenLockApp {
                     self.last_tick = Instant::now();
                 }
             }
+            Message::MediaUpdated(track) => {
+                self.media_track = track;
+            }
             Message::LockMediaPlayPause(bus) => {
-                let _ = corten_services::mpris::play_pause(&bus);
-                self.media_track = Self::get_media_status();
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let _ = corten_services::mpris::play_pause(&bus);
+                            Self::get_media_status()
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    },
+                    Message::MediaUpdated,
+                );
             }
             Message::LockMediaNext(bus) => {
-                let _ = corten_services::mpris::next(&bus);
-                self.media_track = Self::get_media_status();
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let _ = corten_services::mpris::next(&bus);
+                            Self::get_media_status()
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    },
+                    Message::MediaUpdated,
+                );
             }
             Message::LockMediaPrevious(bus) => {
-                let _ = corten_services::mpris::previous(&bus);
-                self.media_track = Self::get_media_status();
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let _ = corten_services::mpris::previous(&bus);
+                            Self::get_media_status()
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    },
+                    Message::MediaUpdated,
+                );
             }
             Message::RequestPowerAction(action) => {
                 if action.requires_confirmation() {
@@ -1010,7 +1061,9 @@ impl MultiApplication for CortenLockApp {
             Message::IcedEvent(
                 _window_id,
                 Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                    key,
                     modified_key,
+                    text,
                     modifiers,
                     ..
                 }),
@@ -1069,7 +1122,23 @@ impl MultiApplication for CortenLockApp {
                                 }
                             }
                         }
-                        _ => {}
+                        _ => {
+                            if let Some(ref txt) = text {
+                                for ch in txt.chars() {
+                                    if self.auth.push_char(ch) {
+                                        self.auth_error_msg = None;
+                                        self.caret_visible = true;
+                                    }
+                                }
+                            } else if let iced::keyboard::Key::Character(ref sm) = key {
+                                for ch in sm.chars() {
+                                    if self.auth.push_char(ch) {
+                                        self.auth_error_msg = None;
+                                        self.caret_visible = true;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1142,10 +1211,8 @@ impl MultiApplication for CortenLockApp {
             };
 
         let avatar = container(avatar_content)
-            .width(Length::Fixed(72.0))
-            .height(Length::Fixed(72.0))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
+            .center_x(Length::Fixed(72.0))
+            .center_y(Length::Fixed(72.0))
             .style(move |_| container::Style {
                 background: Some(iced::Background::Color(
                     palette.primary_container().to_iced(),
