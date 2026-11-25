@@ -1,45 +1,300 @@
-use crate::actions::{ActionExecutor, DesktopAction};
-use crate::aura::{
-    AuraMemoryEngine, AuraReActAgent, AuraToolRegistry, AuraWorkspaceRag, extract_math_candidate,
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
+use tokio::io::{
+    AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, ReadBuf,
 };
-use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UnixStream};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::timeout;
 use tracing::info;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HttpTransport {
+    Unix(PathBuf),
+    Tcp { host: String, port: u16 },
+}
+
+impl HttpTransport {
+    pub fn host_header(&self) -> String {
+        match self {
+            Self::Unix(_) => "localhost".to_string(),
+            Self::Tcp { host, port } => format!("{host}:{port}"),
+        }
+    }
+
+    pub fn display_label(&self) -> String {
+        match self {
+            Self::Unix(path) => format!(
+                "UDS ({})",
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("aura.sock")
+            ),
+            Self::Tcp { host, port } => format!("{host}:{port}"),
+        }
+    }
+}
+
+enum TransportStream {
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl AsyncRead for TransportStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            Self::Unix(s) => Pin::new(s).poll_read(cx, buf),
+            Self::Tcp(s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for TransportStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match &mut *self {
+            Self::Unix(s) => Pin::new(s).poll_write(cx, buf),
+            Self::Tcp(s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            Self::Unix(s) => Pin::new(s).poll_flush(cx),
+            Self::Tcp(s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            Self::Unix(s) => Pin::new(s).poll_shutdown(cx),
+            Self::Tcp(s) => Pin::new(s).poll_shutdown(cx),
+        }
+    }
+}
+
+async fn connect_transport(
+    transport: &HttpTransport,
+    connect_timeout: Duration,
+) -> Option<TransportStream> {
+    match transport {
+        HttpTransport::Unix(path) => {
+            if !path.exists() {
+                return None;
+            }
+            timeout(connect_timeout, UnixStream::connect(path))
+                .await
+                .ok()?
+                .ok()
+                .map(TransportStream::Unix)
+        }
+        HttpTransport::Tcp { host, port } => {
+            let addr = format!("{host}:{port}");
+            timeout(connect_timeout, TcpStream::connect(&addr))
+                .await
+                .ok()?
+                .ok()
+                .map(TransportStream::Tcp)
+        }
+    }
+}
+
+pub fn parse_endpoint(raw: &str) -> Option<HttpTransport> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(sock) = trimmed.strip_prefix("unix://") {
+        let p = sock.trim();
+        if !p.is_empty() {
+            return Some(HttpTransport::Unix(PathBuf::from(p)));
+        }
+        return None;
+    }
+    if trimmed.starts_with('/') {
+        return Some(HttpTransport::Unix(PathBuf::from(trimmed)));
+    }
+    let stripped = trimmed
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let host_port = stripped.split('/').next()?;
+    if let Some((host, port_str)) = host_port.split_once(':') {
+        let port = port_str.parse::<u16>().ok()?;
+        Some(HttpTransport::Tcp {
+            host: host.to_string(),
+            port,
+        })
+    } else if !host_port.is_empty() {
+        Some(HttpTransport::Tcp {
+            host: host_port.to_string(),
+            port: 80,
+        })
+    } else {
+        None
+    }
+}
+
+async fn http_json_request(
+    transport: &HttpTransport,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    io_timeout: Duration,
+) -> Option<(u16, String)> {
+    let mut stream = connect_transport(transport, Duration::from_millis(600)).await?;
+    let host_hdr = transport.host_header();
+    let payload = body.unwrap_or("");
+    let req = if body.is_some() {
+        format!(
+            "{method} {path} HTTP/1.1\r\nHost: {host_hdr}\r\nUser-Agent: CortenAI/0.8\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            payload.len()
+        )
+    } else {
+        format!(
+            "{method} {path} HTTP/1.1\r\nHost: {host_hdr}\r\nUser-Agent: CortenAI/0.8\r\nConnection: close\r\n\r\n"
+        )
+    };
+    timeout(io_timeout, stream.write_all(req.as_bytes()))
+        .await
+        .ok()?
+        .ok()?;
+    let mut buf = Vec::new();
+    timeout(io_timeout, stream.read_to_end(&mut buf))
+        .await
+        .ok()?
+        .ok()?;
+    let raw = String::from_utf8_lossy(&buf);
+    let (headers, body_part) = raw.split_once("\r\n\r\n")?;
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|c| c.parse::<u16>().ok())
+        .unwrap_or(0);
+    let decoded = if headers
+        .to_ascii_lowercase()
+        .contains("transfer-encoding: chunked")
+    {
+        decode_chunked_body(body_part)
+    } else {
+        body_part.to_string()
+    };
+    Some((status, decoded))
+}
+
+fn decode_chunked_body(raw: &str) -> String {
+    let mut out = String::new();
+    let mut rest = raw;
+    while let Some((size_hex, after)) = rest.split_once("\r\n") {
+        let Ok(len) = usize::from_str_radix(size_hex.trim(), 16) else {
+            break;
+        };
+        if len == 0 || after.len() < len {
+            break;
+        }
+        out.push_str(&after[..len]);
+        rest = after.get(len + 2..).unwrap_or("");
+    }
+    if out.is_empty() { raw.to_string() } else { out }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelEntry {
+    pub id: String,
+    pub label: String,
+    pub size_label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatMode {
+    Chat,
+    Agent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendType {
-    NativeGguf {
-        model_path: std::path::PathBuf,
-        model_name: String,
+    AuraCore {
+        transport: HttpTransport,
+        active_model: String,
+        models: Vec<ModelEntry>,
     },
     Ollama {
-        host: String,
-        port: u16,
-        model: String,
-        tier_label: String,
-        all_models: Vec<String>,
+        transport: HttpTransport,
+        active_model: String,
+        models: Vec<ModelEntry>,
         has_vision: bool,
     },
-    LlamaCpp {
-        host: String,
-        port: u16,
-        model: String,
-    },
-    AuraCore {
-        host: String,
-        port: u16,
+    OpenAiCompat {
+        transport: HttpTransport,
+        active_model: String,
+        models: Vec<ModelEntry>,
     },
     Offline,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
+impl BackendType {
+    pub fn active_model_name(&self) -> Option<&str> {
+        match self {
+            Self::AuraCore { active_model, .. }
+            | Self::Ollama { active_model, .. }
+            | Self::OpenAiCompat { active_model, .. } => Some(active_model.as_str()),
+            Self::Offline => None,
+        }
+    }
+
+    pub fn models(&self) -> &[ModelEntry] {
+        match self {
+            Self::AuraCore { models, .. }
+            | Self::Ollama { models, .. }
+            | Self::OpenAiCompat { models, .. } => models.as_slice(),
+            Self::Offline => &[],
+        }
+    }
+
+    pub fn supports_agent_mode(&self) -> bool {
+        matches!(self, Self::AuraCore { .. })
+    }
+
+    pub fn supports_vision(&self) -> bool {
+        matches!(
+            self,
+            Self::Ollama {
+                has_vision: true,
+                ..
+            }
+        )
+    }
+
+    pub fn status_label(&self) -> String {
+        match self {
+            Self::AuraCore { transport, .. } => {
+                format!("AURA-CORE · {}", transport.display_label())
+            }
+            Self::Ollama { transport, .. } => format!("Ollama · {}", transport.display_label()),
+            Self::OpenAiCompat { transport, .. } => {
+                format!("OpenAI API · {}", transport.display_label())
+            }
+            Self::Offline => "Bağlı yerel sunucu yok".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageRole {
     User,
     Assistant,
+    #[allow(dead_code)]
     System,
 }
 
@@ -54,13 +309,12 @@ pub struct ChatMessage {
 pub enum StreamChunk {
     Token(String),
     Thought(String),
-    ActionExecuted(String),
+    Metrics(f32),
     Done,
     Error(String),
 }
 
-/// Helper that filters out `<think>...</think>` tags from model token streams
-/// and cleanly isolates reasoning thoughts from actual assistant responses.
+/// Isolates `<think>...</think>` reasoning blocks from visible assistant text.
 pub struct ThoughtStreamFilter {
     in_think: bool,
 }
@@ -80,834 +334,535 @@ impl ThoughtStreamFilter {
                         let _ = tx.send(StreamChunk::Thought(thought_part.to_string()));
                     }
                     self.in_think = false;
-                    cur = &cur[pos + 8..]; // skip "</think>"
+                    cur = &cur[pos + 8..];
                 } else {
                     let _ = tx.send(StreamChunk::Thought(cur.to_string()));
                     break;
                 }
-            } else {
-                if let Some(pos) = cur.find("<think>") {
-                    let token_part = &cur[..pos];
-                    if !token_part.is_empty() {
-                        let _ = tx.send(StreamChunk::Token(token_part.to_string()));
-                    }
-                    self.in_think = true;
-                    cur = &cur[pos + 7..]; // skip "<think>"
-                } else {
-                    let _ = tx.send(StreamChunk::Token(cur.to_string()));
-                    break;
+            } else if let Some(pos) = cur.find("<think>") {
+                let token_part = &cur[..pos];
+                if !token_part.is_empty() {
+                    let _ = tx.send(StreamChunk::Token(token_part.to_string()));
                 }
+                self.in_think = true;
+                cur = &cur[pos + 7..];
+            } else {
+                let _ = tx.send(StreamChunk::Token(cur.to_string()));
+                break;
             }
         }
     }
 }
 
-pub struct AiEngine {
-    #[allow(dead_code)]
-    pub backend: BackendType,
-}
+pub struct AiEngine;
 
-impl Default for AiEngine {
-    fn default() -> Self {
-        Self {
-            backend: BackendType::Offline,
-        }
+fn format_bytes_gb(bytes: u64) -> String {
+    if bytes == 0 {
+        return String::new();
     }
-}
-
-fn parse_url_host_port(url_str: &str) -> Option<(String, u16)> {
-    let s = url_str
-        .trim()
-        .trim_start_matches("http://")
-        .trim_start_matches("https://");
-    let host_port = s.split('/').next()?;
-    if let Some((h, p)) = host_port.split_once(':') {
-        let port: u16 = p.parse().ok()?;
-        Some((h.to_string(), port))
+    let gb = bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+    if gb >= 1.0 {
+        format!("{gb:.1} GB")
     } else {
-        Some((host_port.to_string(), 80))
+        let mb = bytes as f64 / (1024.0 * 1024.0);
+        format!("{mb:.0} MB")
     }
+}
+
+pub(crate) fn parse_aura_models_json(raw: &str) -> Vec<ModelEntry> {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Vec::new();
+    };
+    let arr = val
+        .get("models")
+        .and_then(|m| m.as_array())
+        .or_else(|| val.as_array());
+    let Some(items) = arr else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let id = item
+                .get("id")
+                .or_else(|| item.get("model_id"))
+                .or_else(|| item.get("name"))
+                .and_then(|v| v.as_str())?
+                .to_string();
+            let label = item
+                .get("name")
+                .or_else(|| item.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(&id)
+                .to_string();
+            let size_label = item
+                .get("size_gb")
+                .and_then(|v| v.as_f64())
+                .map(|gb| format!("{gb:.1} GB"))
+                .or_else(|| {
+                    item.get("size_bytes")
+                        .or_else(|| item.get("size"))
+                        .and_then(|v| v.as_u64())
+                        .map(format_bytes_gb)
+                })
+                .unwrap_or_default();
+            Some(ModelEntry {
+                id,
+                label,
+                size_label,
+            })
+        })
+        .collect()
+}
+
+fn is_vision_model_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("vl")
+        || lower.contains("vision")
+        || lower.contains("llava")
+        || lower.contains("minicpm-v")
+        || lower.contains("moondream")
+        || lower.contains("gemma3")
 }
 
 impl AiEngine {
-    /// Detect which local AI backend is running, respecting user settings from `ai.toml`
-    pub async fn auto_detect() -> BackendType {
-        let cfg =
-            corten_config::ConfigManager::<corten_config::AiSettingsConfig>::load_or_default("ai")
-                .map(|c| c.get().clone())
-                .unwrap_or_default();
-        Self::auto_detect_with_config(Some(&cfg)).await
+    /// Probes an endpoint to see if it is a genuine AURA-CORE server (never misidentifies
+    /// unrelated developer servers on `:8000`).
+    async fn probe_aura(transport: &HttpTransport, preferred_model: &str) -> Option<BackendType> {
+        let (status, active_body) = http_json_request(
+            transport,
+            "GET",
+            "/models/active",
+            None,
+            Duration::from_millis(800),
+        )
+        .await?;
+        if status != 200 {
+            return None;
+        }
+        let active_val = serde_json::from_str::<serde_json::Value>(&active_body).ok()?;
+        let active_from_server = active_val
+            .get("id")
+            .or_else(|| active_val.get("model_id"))
+            .or_else(|| active_val.get("name"))
+            .or_else(|| active_val.get("active_model"))
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string)?;
+
+        let models = match http_json_request(
+            transport,
+            "GET",
+            "/models",
+            None,
+            Duration::from_millis(1000),
+        )
+        .await
+        {
+            Some((200, body)) => parse_aura_models_json(&body),
+            _ => Vec::new(),
+        };
+
+        let mut active_model = active_from_server;
+        if !preferred_model.is_empty()
+            && preferred_model != active_model
+            && models.iter().any(|m| m.id == preferred_model)
+        {
+            let body = serde_json::json!({ "model_id": preferred_model }).to_string();
+            if let Some((200, _)) = http_json_request(
+                transport,
+                "POST",
+                "/models/switch",
+                Some(&body),
+                Duration::from_secs(3),
+            )
+            .await
+            {
+                active_model = preferred_model.to_string();
+            }
+        }
+
+        info!(
+            endpoint = %transport.display_label(),
+            model = %active_model,
+            total_models = models.len(),
+            "Corten AI connected to AURA-CORE"
+        );
+        Some(BackendType::AuraCore {
+            transport: transport.clone(),
+            active_model,
+            models,
+        })
+    }
+
+    async fn probe_ollama(transport: &HttpTransport, preferred_model: &str) -> Option<BackendType> {
+        let (status, body) = http_json_request(
+            transport,
+            "GET",
+            "/api/tags",
+            None,
+            Duration::from_millis(800),
+        )
+        .await?;
+        if status != 200 {
+            return None;
+        }
+        let val = serde_json::from_str::<serde_json::Value>(&body).ok()?;
+        let models_arr = val.get("models")?.as_array()?;
+        let models: Vec<ModelEntry> = models_arr
+            .iter()
+            .filter_map(|m| {
+                let id = m.get("name")?.as_str()?.to_string();
+                let size_label = m
+                    .get("size")
+                    .and_then(|v| v.as_u64())
+                    .map(format_bytes_gb)
+                    .unwrap_or_default();
+                Some(ModelEntry {
+                    label: id.clone(),
+                    id,
+                    size_label,
+                })
+            })
+            .collect();
+        if models.is_empty() {
+            return None;
+        }
+        let active_model =
+            if !preferred_model.is_empty() && models.iter().any(|m| m.id == preferred_model) {
+                preferred_model.to_string()
+            } else {
+                models[0].id.clone()
+            };
+        let has_vision = is_vision_model_name(&active_model);
+        Some(BackendType::Ollama {
+            transport: transport.clone(),
+            active_model,
+            models,
+            has_vision,
+        })
+    }
+
+    async fn probe_openai_compat(
+        transport: &HttpTransport,
+        preferred_model: &str,
+    ) -> Option<BackendType> {
+        let (status, body) = http_json_request(
+            transport,
+            "GET",
+            "/v1/models",
+            None,
+            Duration::from_millis(800),
+        )
+        .await?;
+        if status != 200 {
+            return None;
+        }
+        let val = serde_json::from_str::<serde_json::Value>(&body).ok()?;
+        let data = val.get("data")?.as_array()?;
+        let models: Vec<ModelEntry> = data
+            .iter()
+            .filter_map(|m| {
+                let id = m.get("id")?.as_str()?.to_string();
+                Some(ModelEntry {
+                    label: id.clone(),
+                    id,
+                    size_label: String::new(),
+                })
+            })
+            .collect();
+        if models.is_empty() {
+            return None;
+        }
+        let active_model =
+            if !preferred_model.is_empty() && models.iter().any(|m| m.id == preferred_model) {
+                preferred_model.to_string()
+            } else {
+                models[0].id.clone()
+            };
+        Some(BackendType::OpenAiCompat {
+            transport: transport.clone(),
+            active_model,
+            models,
+        })
     }
 
     pub async fn auto_detect_with_config(
         config: Option<&corten_config::AiSettingsConfig>,
     ) -> BackendType {
-        let (enabled, target_tier, custom_path, backend_url) = if let Some(c) = config {
-            (
-                c.enabled,
-                c.model_tier.as_str(),
-                c.custom_model_path.as_str(),
-                c.backend_url.as_str(),
-            )
-        } else {
-            (true, "eco", "", "http://127.0.0.1:8000")
-        };
-
-        if !enabled {
-            info!("Corten AI: Disabled in system settings (`ai.toml`)");
+        let default_cfg = corten_config::AiSettingsConfig::default();
+        let cfg = config.unwrap_or(&default_cfg);
+        if !cfg.enabled {
             return BackendType::Offline;
         }
+        let preferred = cfg.selected_model.trim();
 
-        // 1. Check custom model path if specified in settings
-        if !custom_path.is_empty() {
-            let p = std::path::PathBuf::from(custom_path);
-            if p.exists() && p.is_file() {
-                let name = p
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("custom-gguf")
-                    .to_string();
-                info!("Corten AI: Using custom model path from settings: {:?}", p);
-                return BackendType::NativeGguf {
-                    model_path: p,
-                    model_name: name,
-                };
+        // 1. Prefer session Unix Domain Socket ($XDG_RUNTIME_DIR/corten/aura.sock — zero TCP ports)
+        let uds = HttpTransport::Unix(corten_config::default_aura_socket_path());
+        if let Some(found) = Self::probe_aura(&uds, preferred).await {
+            return found;
+        }
+
+        // 2. Configured backend_url from ai.toml (supports unix:// or http://host:port)
+        if let Some(custom) = parse_endpoint(&cfg.backend_url) {
+            if let Some(found) = Self::probe_aura(&custom, preferred).await {
+                return found;
+            }
+            if let Some(found) = Self::probe_ollama(&custom, preferred).await {
+                return found;
+            }
+            if let Some(found) = Self::probe_openai_compat(&custom, preferred).await {
+                return found;
             }
         }
 
-        // 2. Check in-process Native Rust GGUF models (0 external dependency, 100% pure Rust)
-        let local_ggufs = corten_llm::discover_local_gguf_models();
-        if let Some(first_gguf) = local_ggufs.first() {
-            let model_name = first_gguf
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("local-gguf")
-                .to_string();
-            info!(
-                "Corten AI: Discovered Native Rust GGUF model '{}'",
-                model_name
-            );
-            return BackendType::NativeGguf {
-                model_path: first_gguf.clone(),
-                model_name,
+        // 3. Dedicated Corten AURA TCP port (11435), then manually started AURA (8000, verified)
+        for port in [11435u16, 8000u16] {
+            let t = HttpTransport::Tcp {
+                host: "127.0.0.1".to_string(),
+                port,
             };
-        }
-
-        // 3. If configured backend_url points to a specific endpoint, probe it first
-        if let Some((host, port)) = parse_url_host_port(backend_url) {
-            if port == 8000 {
-                if let Ok(info) = Self::probe_aura_core(&host, port).await {
-                    return info;
-                }
-            } else if port == 11434 {
-                if let Ok(info) = Self::probe_ollama(&host, port, Some(target_tier)).await {
-                    return info;
-                }
-            } else if port == 8080
-                && let Ok(info) = Self::probe_llama_cpp(&host, port).await
-            {
-                return info;
+            if let Some(found) = Self::probe_aura(&t, preferred).await {
+                return found;
             }
         }
 
-        // 4. Probe Ollama on standard port (11434)
-        if let Ok(info) = Self::probe_ollama("127.0.0.1", 11434, Some(target_tier)).await {
-            return info;
+        // 4. Standard Ollama (11434) and llama-server (8080)
+        let ollama_t = HttpTransport::Tcp {
+            host: "127.0.0.1".to_string(),
+            port: 11434,
+        };
+        if let Some(found) = Self::probe_ollama(&ollama_t, preferred).await {
+            return found;
         }
 
-        // 5. Probe llama.cpp on standard port (8080)
-        if let Ok(info) = Self::probe_llama_cpp("127.0.0.1", 8080).await {
-            return info;
-        }
-
-        // 6. Probe AURA-CORE on standard port (8000)
-        if let Ok(info) = Self::probe_aura_core("127.0.0.1", 8000).await {
-            return info;
+        let llama_t = HttpTransport::Tcp {
+            host: "127.0.0.1".to_string(),
+            port: 8080,
+        };
+        if let Some(found) = Self::probe_openai_compat(&llama_t, preferred).await {
+            return found;
         }
 
         BackendType::Offline
     }
 
-    pub fn classify_model_tier(name: &str) -> &'static str {
-        let lower = name.to_lowercase();
-        if lower.contains("1.5b")
-            || lower.contains("1b")
-            || lower.contains("2b")
-            || lower.contains("tiny")
-            || lower.contains("mini")
-        {
-            "Eco (1.5B)"
-        } else if lower.contains("3b") || lower.contains("4b") || lower.contains("medium") {
-            "Dengeli (3B)"
-        } else if lower.contains("7b")
-            || lower.contains("8b")
-            || lower.contains("14b")
-            || lower.contains("large")
-        {
-            "Pro (7B)"
-        } else {
-            "Özel Model"
-        }
-    }
-
-    async fn probe_ollama(
-        host: &str,
-        port: u16,
-        target_tier: Option<&str>,
-    ) -> Result<BackendType, ()> {
-        let addr = format!("{}:{}", host, port);
-        let mut stream = timeout(Duration::from_millis(400), TcpStream::connect(&addr))
-            .await
-            .map_err(|_| ())?
-            .map_err(|_| ())?;
-
-        let req = format!(
-            "GET /api/tags HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\n\r\n",
-            host, port
-        );
-        stream.write_all(req.as_bytes()).await.map_err(|_| ())?;
-
-        let mut buf = Vec::new();
-        timeout(Duration::from_millis(600), stream.read_to_end(&mut buf))
-            .await
-            .map_err(|_| ())?
-            .map_err(|_| ())?;
-
-        let resp = String::from_utf8_lossy(&buf);
-        if let Some(pos) = resp.find("\r\n\r\n") {
-            let body = &resp[pos + 4..];
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(body)
-                && let Some(models) = json.get("models").and_then(|m| m.as_array())
-            {
-                let mut names = Vec::new();
-                let mut has_vision = false;
-                for m in models {
-                    if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
-                        let lower = name.to_lowercase();
-                        if lower.contains("llava")
-                            || lower.contains("moondream")
-                            || lower.contains("vision")
-                            || lower.contains("minicpm")
-                            || lower.contains("qwen2-vl")
-                        {
-                            has_vision = true;
-                        }
-                        names.push(name.to_string());
-                    }
-                }
-                if !names.is_empty() {
-                    let desired = target_tier.unwrap_or("eco");
-                    let chosen_idx = names
-                        .iter()
-                        .position(|n| {
-                            let tier_str = Self::classify_model_tier(n);
-                            match desired {
-                                "eco" => tier_str.contains("Eco"),
-                                "balanced" => tier_str.contains("Dengeli"),
-                                "pro" => tier_str.contains("Pro"),
-                                _ => false,
-                            }
-                        })
-                        .unwrap_or(0);
-
-                    let active = names[chosen_idx].clone();
-                    let tier_label = Self::classify_model_tier(&active).to_string();
-                    info!(
-                        "Corten AI: Found Ollama backend with model '{}' [{}] (requested tier: {})",
-                        active, tier_label, desired
-                    );
-                    return Ok(BackendType::Ollama {
-                        host: host.to_string(),
-                        port,
-                        model: active,
-                        tier_label,
-                        all_models: names,
-                        has_vision,
-                    });
-                }
-            }
-        }
-        Err(())
-    }
-
-    async fn probe_llama_cpp(host: &str, port: u16) -> Result<BackendType, ()> {
-        let addr = format!("{}:{}", host, port);
-        let mut stream = timeout(Duration::from_millis(300), TcpStream::connect(&addr))
-            .await
-            .map_err(|_| ())?
-            .map_err(|_| ())?;
-
-        let req = format!(
-            "GET /v1/models HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\n\r\n",
-            host, port
-        );
-        stream.write_all(req.as_bytes()).await.map_err(|_| ())?;
-
-        let mut buf = Vec::new();
-        timeout(Duration::from_millis(500), stream.read_to_end(&mut buf))
-            .await
-            .map_err(|_| ())?
-            .map_err(|_| ())?;
-
-        let resp = String::from_utf8_lossy(&buf);
-        if let Some(pos) = resp.find("\r\n\r\n") {
-            let body = &resp[pos + 4..];
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-                let model_name = json
-                    .get("data")
-                    .and_then(|d| d.as_array())
-                    .and_then(|arr| arr.first())
-                    .and_then(|m| m.get("id"))
-                    .and_then(|id| id.as_str())
-                    .unwrap_or("llama-server")
-                    .to_string();
-                return Ok(BackendType::LlamaCpp {
-                    host: host.to_string(),
-                    port,
-                    model: model_name,
-                });
-            }
-        }
-        Err(())
-    }
-
-    async fn probe_aura_core(host: &str, port: u16) -> Result<BackendType, ()> {
-        let addr = format!("{}:{}", host, port);
-        let _ = timeout(Duration::from_millis(300), TcpStream::connect(&addr))
-            .await
-            .map_err(|_| ())?
-            .map_err(|_| ())?;
-        Ok(BackendType::AuraCore {
-            host: host.to_string(),
-            port,
-        })
-    }
-
-    /// Stream queries with multi-turn history, screen understanding, and reflex actions
-    pub async fn stream_query(
-        backend: BackendType,
-        history: Vec<ChatMessage>,
-        query: String,
-        screen_image: Option<String>,
-        tx: UnboundedSender<StreamChunk>,
-    ) {
-        let trimmed = query.trim().to_string();
-        if trimmed.is_empty() {
-            let _ = tx.send(StreamChunk::Error(
-                "Lütfen bir komut veya soru girin.".into(),
-            ));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        // 0. AURA-CORE Long-Term Memory & Profile Learning Interceptor (`memory_router` parity)
-        if let Some(learned_msg) = AuraMemoryEngine::inspect_and_learn(&trimmed) {
-            let _ = tx.send(StreamChunk::Token(learned_msg));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        let lower_q = trimmed.to_lowercase();
-
-        // 0.1. Memory & Profile Status Inspection
-        if lower_q == "hafıza"
-            || lower_q == "profilim"
-            || lower_q == "anılarım"
-            || lower_q == "hafızayı göster"
-        {
-            let report = AuraMemoryEngine::format_memory_status();
-            let _ = tx.send(StreamChunk::Token(report));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        // 0.2. 20-Tool Registry Catalog Inspection (`agent/tools` parity)
-        if lower_q == "araçlar"
-            || lower_q == "tools"
-            || lower_q == "yetenekler"
-            || lower_q == "ajan araçları"
-        {
-            let catalog = AuraToolRegistry::format_tools_catalog();
-            let _ = tx.send(StreamChunk::Token(catalog));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        // 0.3. Pure-Rust Calculator Tool (`calculator` parity)
-        if let Some(math_expr) = extract_math_candidate(&trimmed) {
-            let calc_res = AuraToolRegistry::execute_tool("calculator", &math_expr);
-            let _ = tx.send(StreamChunk::Token(calc_res));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        // 0.4. Multi-Step Autonomous ReAct Agent Workflow (`agent/react` parity)
-        if lower_q.starts_with("react:")
-            || lower_q.starts_with("react ")
-            || lower_q.starts_with("ajan:")
-            || lower_q.starts_with("ajan ")
-            || lower_q.starts_with("otonom:")
-        {
-            let report = AuraReActAgent::execute_react_workflow(&trimmed);
-            let _ = tx.send(StreamChunk::Token(report));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        // 1. Reflex Action Interceptor
-        let intent = ActionExecutor::parse_intent(&trimmed);
-        if intent != DesktopAction::None
-            && let Some(feedback) = ActionExecutor::execute(intent).await
-        {
-            let _ = tx.send(StreamChunk::ActionExecuted(feedback.clone()));
-            let _ = tx.send(StreamChunk::Token(feedback));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        // 2. Local Heuristic Static Security Sentinel
-        if trimmed.contains("siber güvenlik")
-            || trimmed.contains("Güvenlik")
-            || trimmed.contains("güvenlik")
-            || trimmed.contains("audit")
-        {
-            let report = Self::heuristic_security_audit(&trimmed);
-            let _ = tx.send(StreamChunk::Token(report));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        // 3. In-Process Semantic Vector Search (`corten-vector` HNSW Engine)
-        if lower_q.starts_with("dosya ara")
-            || lower_q.starts_with("belge bul")
-            || lower_q.starts_with("kod ara")
-            || lower_q.starts_with("vektör ara")
-            || lower_q.contains("vektörel dosya ara")
-        {
-            let report = Self::semantic_desktop_search(&trimmed);
-            let _ = tx.send(StreamChunk::Token(report));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        // 4. Dispatch to Detected Local Engine
+    /// Hot-switches the active model on AURA-CORE or updates selection on Ollama/OpenAI.
+    pub async fn switch_model(backend: BackendType, model_id: String) -> BackendType {
         match backend {
-            BackendType::NativeGguf { model_path, .. } => {
-                Self::stream_native_gguf(&model_path, &trimmed, tx).await;
+            BackendType::AuraCore {
+                transport,
+                mut active_model,
+                models,
+            } => {
+                let body = serde_json::json!({ "model_id": model_id }).to_string();
+                if let Some((200, _)) = http_json_request(
+                    &transport,
+                    "POST",
+                    "/models/switch",
+                    Some(&body),
+                    Duration::from_secs(5),
+                )
+                .await
+                {
+                    active_model = model_id;
+                }
+                BackendType::AuraCore {
+                    transport,
+                    active_model,
+                    models,
+                }
             }
             BackendType::Ollama {
-                host,
-                port,
-                model,
-                has_vision,
+                transport, models, ..
+            } => {
+                let has_vision = is_vision_model_name(&model_id);
+                BackendType::Ollama {
+                    transport,
+                    active_model: model_id,
+                    models,
+                    has_vision,
+                }
+            }
+            BackendType::OpenAiCompat {
+                transport, models, ..
+            } => BackendType::OpenAiCompat {
+                transport,
+                active_model: model_id,
+                models,
+            },
+            BackendType::Offline => BackendType::Offline,
+        }
+    }
+
+    /// Starts the local AURA-CORE server bound to `$XDG_RUNTIME_DIR/corten/aura.sock` (zero TCP port usage).
+    pub fn launch_aura_daemon_uds() -> Result<PathBuf, String> {
+        let sock = corten_config::default_aura_socket_path();
+        if let Some(parent) = sock.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::remove_file(&sock);
+
+        let project_dir = std::env::var("AURA_PROJECT_DIR")
+            .ok()
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+            .or_else(|| {
+                let home = std::env::var("HOME").ok()?;
+                let candidate = PathBuf::from(home).join("Projects/AIProject");
+                candidate.exists().then_some(candidate)
+            });
+
+        if let Some(dir) = project_dir {
+            let venv_py = dir.join(".venv/bin/python");
+            let app_dir = dir.join("Rust-Python-Vector-Engine");
+            if venv_py.exists() && app_dir.exists() {
+                std::process::Command::new(&venv_py)
+                    .args([
+                        "-m",
+                        "uvicorn",
+                        "api_server.app.main:app",
+                        "--uds",
+                        &sock.to_string_lossy(),
+                        "--app-dir",
+                        &app_dir.to_string_lossy(),
+                    ])
+                    .env("AURA_TOOL_PROFILE", "corten")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .map_err(|e| format!("AURA sunucusu başlatılamadı: {e}"))?;
+                return Ok(sock);
+            }
+        }
+
+        Err(
+            "AIProject (.venv) bulunamadı. AURA_PROJECT_DIR veya Ollama/llama-server başlatın."
+                .into(),
+        )
+    }
+
+    pub async fn stream_query(
+        backend: BackendType,
+        mode: ChatMode,
+        history: Vec<ChatMessage>,
+        prompt: String,
+        cancel: Arc<AtomicBool>,
+        tx: UnboundedSender<StreamChunk>,
+    ) {
+        match backend {
+            BackendType::AuraCore {
+                transport,
+                active_model,
                 ..
             } => {
-                let use_image = if has_vision { screen_image } else { None };
-                Self::stream_ollama(&host, port, &model, &history, &trimmed, use_image, tx).await;
+                Self::stream_aura_core(
+                    &transport,
+                    &active_model,
+                    mode,
+                    &history,
+                    &prompt,
+                    cancel,
+                    tx,
+                )
+                .await;
             }
-            BackendType::LlamaCpp { host, port, model } => {
-                Self::stream_llama_cpp(&host, port, &model, &history, &trimmed, tx).await;
+            BackendType::Ollama {
+                transport,
+                active_model,
+                ..
+            } => {
+                Self::stream_ollama(&transport, &active_model, &history, cancel, tx).await;
             }
-            BackendType::AuraCore { host, port } => {
-                Self::stream_aura_core(&host, port, &trimmed, tx).await;
+            BackendType::OpenAiCompat {
+                transport,
+                active_model,
+                ..
+            } => {
+                Self::stream_openai_compat(&transport, &active_model, &history, cancel, tx).await;
             }
             BackendType::Offline => {
-                // In offline mode, provide a clear, helpful desktop assistant response instead of synthetic raw trace dumping
-                let response = Self::offline_assistant_response(&trimmed);
-                let _ = tx.send(StreamChunk::Token(response));
-                let _ = tx.send(StreamChunk::Done);
-            }
-        }
-    }
-
-    /// Clean, helpful assistant response when no external LLM or GGUF model is loaded
-    pub fn offline_assistant_response(query: &str) -> String {
-        format!(
-            "⚡ **Corten AI Sistem Asistanı (Yerel Mod)**\n\n\
-            *Sorgu:* \"{}\"\n\n\
-            Yerel nöral LLM motoru şu anda bağlı değil veya çevrimdışı modda. Sistem asistanı olarak doğrudan yapabileceğim masaüstü eylemleri:\n\n\
-            • 🔊 **Ses & Parlaklık:** `\"sesi %60 yap\"`, `\"ekran ışığını kıs\"`\n\
-            • 📸 **Ekran & Pencereler:** `\"ekran görüntüsü al\"`, `\"tam ekran yap\"`, `\"pencereleri küçült\"`\n\
-            • 📂 **Dosya Arama (Vektör):** `\"dosya ara: <kelime>\"`\n\
-            • 📊 **Sistem Telemetrisi:** `\"sistem durumu\"`, `\"en çok ram kullanan\"`\n\
-            • 🧮 **Hesap Makinesi:** `\"hesapla: (144 * 12) / 4\"`\n\
-            • 🧠 **Hafıza & Not:** `\"hatırla: API anahtarı yenilenecek\"`\n\n\
-            💡 *Tam metin sohbet ve kod üretimi için Sistem Ayarları'ndan (`Super+Alt+Space -> Ayarlar`) yerel Ollama veya GGUF modelini bağlayabilirsiniz.*",
-            query
-        )
-    }
-
-    async fn stream_native_gguf(
-        model_path: &std::path::Path,
-        prompt: &str,
-        tx: UnboundedSender<StreamChunk>,
-    ) {
-        let path_buf = model_path.to_path_buf();
-        let memory_ctx = AuraMemoryEngine::recall_context_for_prompt(prompt, 3);
-        let relevant_tools = AuraToolRegistry::get_relevant_tools(prompt, 6);
-        let tools_prompt = AuraToolRegistry::format_tools_prompt(&relevant_tools);
-        let rag_hits = AuraWorkspaceRag::retrieve_rag_context(prompt, 2, None);
-        let rag_ctx = if rag_hits.is_empty() {
-            String::new()
-        } else {
-            let docs = rag_hits
-                .iter()
-                .map(|r| {
-                    format!(
-                        "- {}: {}",
-                        r.metadata.get("name").cloned().unwrap_or_default(),
-                        r.metadata.get("snippet").cloned().unwrap_or_default()
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("\n[YEREL BELGE BAĞLAMI (RAG)]:\n{}", docs)
-        };
-        let prompt_str = format!(
-            "<|im_start|>system\nSen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Türkçe, net ve doğrudan eylem odaklı yanıt ver.\n[KULLANICI HAFIZASI]:\n{}\n[KULLANILABİLİR ARAÇLAR]:\n{}{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
-            memory_ctx, tools_prompt, rag_ctx, prompt
-        );
-        let tx_clone = tx.clone();
-
-        let _ = tokio::task::spawn_blocking(move || {
-            match corten_llm::ModelRunner::load_from_file(&path_buf) {
-                Ok(runner) => {
-                    let params = corten_llm::SamplerParams {
-                        temperature: 0.3,
-                        top_k: 40,
-                        top_p: 0.9,
-                        repetition_penalty: 1.1,
-                    };
-                    let (std_tx, std_rx) = std::sync::mpsc::channel();
-                    std::thread::spawn(move || {
-                        let _ = runner.generate_tui_stream(&prompt_str, 256, &params, &std_tx);
-                    });
-
-                    while let Ok(msg) = std_rx.recv() {
-                        match msg {
-                            corten_llm::InferenceMessage::Token(t) => {
-                                let _ = tx_clone.send(StreamChunk::Token(t));
-                            }
-                            corten_llm::InferenceMessage::Metrics { decode_tok_s, .. } => {
-                                let _ = tx_clone.send(StreamChunk::Token(format!(
-                                    "\n\n⚡ [Saf Rust GGUF Motoru: {:.1} token/sn]",
-                                    decode_tok_s
-                                )));
-                            }
-                            corten_llm::InferenceMessage::Finished => break,
-                            corten_llm::InferenceMessage::Error(e) => {
-                                let _ = tx_clone.send(StreamChunk::Error(e));
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = tx_clone.send(StreamChunk::Error(format!(
-                        "Yerel GGUF modeli yüklenemedi: {}",
-                        e
-                    )));
-                }
-            }
-            let _ = tx_clone.send(StreamChunk::Done);
-        })
-        .await;
-    }
-
-    /// Indexes desktop files into persistent WAL/bin index and performs sub-millisecond HNSW semantic search via `corten-vector`
-    pub fn semantic_desktop_search(raw_query: &str) -> String {
-        let clean_query = raw_query
-            .trim_start_matches("dosya ara:")
-            .trim_start_matches("dosya ara")
-            .trim_start_matches("belge bul:")
-            .trim_start_matches("belge bul")
-            .trim_start_matches("kod ara:")
-            .trim_start_matches("kod ara")
-            .trim_start_matches("vektör ara:")
-            .trim_start_matches("vektör ara")
-            .trim_start_matches("vektörel dosya ara")
-            .trim();
-
-        let search_term = if clean_query.is_empty() {
-            "wayland compositor rust"
-        } else {
-            clean_query
-        };
-
-        let total_indexed = AuraWorkspaceRag::ensure_indexed(false);
-        let results = AuraWorkspaceRag::retrieve_rag_context(search_term, 5, None);
-
-        if results.is_empty() {
-            return format!(
-                "🔍 Corten Vektör Motoru (`corten-vector`):\n'{}' sorgusu için eşleşen belge bulunamadı.",
-                search_term
-            );
-        }
-
-        let mut lines = Vec::new();
-        for (rank, res) in results.iter().enumerate() {
-            let path = res
-                .metadata
-                .get("path")
-                .cloned()
-                .unwrap_or_else(|| "Bilinmeyen dosya".into());
-            let name = res
-                .metadata
-                .get("name")
-                .cloned()
-                .unwrap_or_else(|| path.clone());
-            lines.push(format!(
-                "{}. 📄 **{}** (Benzerlik: %{:.1})\n   `{}`",
-                rank + 1,
-                name,
-                (res.similarity.clamp(0.0, 1.0)) * 100.0,
-                path
-            ));
-        }
-
-        format!(
-            "🧠 **Corten Saf Rust Vektör Arama Motoru (`corten-vector` HNSW + WAL Kalıcı İndeks):**\n\
-            Sorgu: *\"{}\"* ({} kalıcı belge indeksi)\n\n{}",
-            search_term,
-            total_indexed,
-            lines.join("\n\n")
-        )
-    }
-
-    async fn stream_ollama(
-        host: &str,
-        port: u16,
-        model: &str,
-        history: &[ChatMessage],
-        prompt: &str,
-        image_base64: Option<String>,
-        tx: UnboundedSender<StreamChunk>,
-    ) {
-        let addr = format!("{}:{}", host, port);
-        let stream = match timeout(Duration::from_millis(1500), TcpStream::connect(&addr)).await {
-            Ok(Ok(s)) => s,
-            _ => {
-                let _ = tx.send(StreamChunk::Error("Ollama bağlantısı kurulamadı.".into()));
-                let _ = tx.send(StreamChunk::Done);
-                return;
-            }
-        };
-
-        // Build messages payload for /api/chat
-        let mut messages = Vec::new();
-        let memory_ctx = AuraMemoryEngine::recall_context_for_prompt(prompt, 3);
-        let relevant_tools = AuraToolRegistry::get_relevant_tools(prompt, 6);
-        let tools_prompt = AuraToolRegistry::format_tools_prompt(&relevant_tools);
-        // System prompt establishing Corten Desktop identity and action protocol with dynamic tool pruning
-        let sys_prompt = format!(
-            "Sen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Kısa, teknik ve Türkçe yanıt ver.\n[KULLANICI HAFIZASI]:\n{}\n[KULLANILABİLİR ARAÇLAR]:\n{}\nKullanıcı sistem işlemi istediğinde cevabının sonuna gerekiyorsa [ACTION: intent] ekle.",
-            memory_ctx, tools_prompt
-        );
-        messages.push(serde_json::json!({
-            "role": "system",
-            "content": sys_prompt
-        }));
-
-        for h in history
-            .iter()
-            .rev()
-            .take(6)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-        {
-            let role_str = match h.role {
-                MessageRole::User => "user",
-                MessageRole::Assistant => "assistant",
-                MessageRole::System => "system",
-            };
-            messages.push(serde_json::json!({
-                "role": role_str,
-                "content": h.content
-            }));
-        }
-
-        let mut user_msg = serde_json::json!({
-            "role": "user",
-            "content": prompt
-        });
-
-        if let Some(img) = image_base64 {
-            user_msg["images"] = serde_json::json!([img]);
-        }
-        messages.push(user_msg);
-
-        let body = serde_json::json!({
-            "model": model,
-            "messages": messages,
-            "stream": true,
-            "options": {
-                "temperature": 0.4
-            }
-        })
-        .to_string();
-
-        let req = format!(
-            "POST /api/chat HTTP/1.1\r\n\
-            Host: {}:{}\r\n\
-            User-Agent: CortenDesktop-AI/0.2.0\r\n\
-            Content-Type: application/json\r\n\
-            Content-Length: {}\r\n\
-            Connection: close\r\n\
-            \r\n\
-            {}",
-            host,
-            port,
-            body.len(),
-            body
-        );
-
-        let mut stream = stream;
-        if stream.write_all(req.as_bytes()).await.is_err() {
-            let _ = tx.send(StreamChunk::Error("İstek gönderilemedi.".into()));
-            let _ = tx.send(StreamChunk::Done);
-            return;
-        }
-
-        let reader = BufReader::new(stream);
-        let mut lines = reader.lines();
-        let mut in_headers = true;
-        let mut filter = ThoughtStreamFilter::new();
-
-        while let Ok(Some(line)) = lines.next_line().await {
-            if in_headers {
-                if line.trim().is_empty() {
-                    in_headers = false;
-                }
-                continue;
-            }
-
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            // Skip hex chunk-length lines in HTTP/1.1 chunked transfer
-            if trimmed.chars().all(|c| c.is_ascii_hexdigit()) && trimmed.len() <= 8 {
-                continue;
-            }
-
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                if let Some(token) = val
-                    .get("message")
-                    .and_then(|m| m.get("content"))
-                    .and_then(|c| c.as_str())
-                    && !token.is_empty()
-                {
-                    filter.process(token, &tx);
-                }
-                if let Some(done) = val.get("done").and_then(|d| d.as_bool())
-                    && done
-                {
-                    break;
-                }
-            }
-        }
-
-        let _ = tx.send(StreamChunk::Done);
-    }
-
-    async fn stream_llama_cpp(
-        host: &str,
-        port: u16,
-        model: &str,
-        history: &[ChatMessage],
-        prompt: &str,
-        tx: UnboundedSender<StreamChunk>,
-    ) {
-        let addr = format!("{}:{}", host, port);
-        let stream = match timeout(Duration::from_millis(1500), TcpStream::connect(&addr)).await {
-            Ok(Ok(s)) => s,
-            _ => {
                 let _ = tx.send(StreamChunk::Error(
-                    "llama-server bağlantısı kurulamadı.".into(),
+                    "Yerel AI sunucusu bağlı değil. Üstteki 'Sunucuyu Başlat' ile AURA-CORE'u (UDS) açabilir veya Ollama başlatabilirsiniz."
+                        .into(),
                 ));
                 let _ = tx.send(StreamChunk::Done);
-                return;
             }
-        };
-
-        let mut messages = Vec::new();
-        let memory_ctx = AuraMemoryEngine::recall_context_for_prompt(prompt, 3);
-        let relevant_tools = AuraToolRegistry::get_relevant_tools(prompt, 6);
-        let tools_prompt = AuraToolRegistry::format_tools_prompt(&relevant_tools);
-        let sys_prompt = format!(
-            "Sen Corten Desktop sistem ve masaüstü otomasyon asistanısın (AURA-CORE). Türkçe, teknik ve doğrudan eylem odaklı yanıt ver.\n[KULLANICI HAFIZASI]:\n{}\n[KULLANILABİLİR ARAÇLAR]:\n{}",
-            memory_ctx, tools_prompt
-        );
-        messages.push(serde_json::json!({
-            "role": "system",
-            "content": sys_prompt
-        }));
-
-        for h in history
-            .iter()
-            .rev()
-            .take(6)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-        {
-            let role_str = match h.role {
-                MessageRole::User => "user",
-                MessageRole::Assistant => "assistant",
-                MessageRole::System => "system",
-            };
-            messages.push(serde_json::json!({
-                "role": role_str,
-                "content": h.content
-            }));
         }
+    }
 
-        messages.push(serde_json::json!({
-            "role": "user",
-            "content": prompt
-        }));
-
+    async fn stream_aura_core(
+        transport: &HttpTransport,
+        active_model: &str,
+        mode: ChatMode,
+        history: &[ChatMessage],
+        prompt: &str,
+        cancel: Arc<AtomicBool>,
+        tx: UnboundedSender<StreamChunk>,
+    ) {
+        let path = match mode {
+            ChatMode::Chat => "/agent/chat/stream",
+            ChatMode::Agent => "/agent/react/stream",
+        };
         let body = serde_json::json!({
-            "model": model,
-            "messages": messages,
-            "stream": true,
-            "max_tokens": 512,
-            "temperature": 0.3
+            "query": prompt,
+            "model": active_model,
+            "max_tokens": 1024
         })
         .to_string();
 
-        let req = format!(
-            "POST /v1/chat/completions HTTP/1.1\r\n\
-            Host: {}:{}\r\n\
-            User-Agent: CortenDesktop-AI/0.2.0\r\n\
-            Content-Type: application/json\r\n\
-            Content-Length: {}\r\n\
-            Connection: close\r\n\
-            \r\n\
-            {}",
-            host,
-            port,
-            body.len(),
-            body
-        );
-
-        let mut stream = stream;
-        if stream.write_all(req.as_bytes()).await.is_err() {
-            let _ = tx.send(StreamChunk::Error("İstek gönderilemedi.".into()));
+        if Self::stream_sse(transport, path, &body, &cancel, &tx).await {
             let _ = tx.send(StreamChunk::Done);
             return;
+        }
+        if cancel.load(Ordering::Relaxed) {
+            let _ = tx.send(StreamChunk::Done);
+            return;
+        }
+
+        // Fallback to AURA-CORE's OpenAI-compatible streaming endpoint with full history
+        Self::stream_openai_compat(transport, active_model, history, cancel, tx).await;
+    }
+
+    async fn stream_sse(
+        transport: &HttpTransport,
+        path: &str,
+        body: &str,
+        cancel: &Arc<AtomicBool>,
+        tx: &UnboundedSender<StreamChunk>,
+    ) -> bool {
+        let Some(mut stream) = connect_transport(transport, Duration::from_secs(2)).await else {
+            return false;
+        };
+        let host_hdr = transport.host_header();
+        let req = format!(
+            "POST {path} HTTP/1.1\r\nHost: {host_hdr}\r\nUser-Agent: CortenAI/0.8\r\nContent-Type: application/json\r\nAccept: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        if stream.write_all(req.as_bytes()).await.is_err() {
+            return false;
         }
 
         let reader = BufReader::new(stream);
         let mut lines = reader.lines();
         let mut in_headers = true;
+        let mut status_ok = false;
+        let mut got_any = false;
+        let mut token_count: u32 = 0;
+        let started = Instant::now();
         let mut filter = ThoughtStreamFilter::new();
 
-        while let Ok(Some(line)) = lines.next_line().await {
+        while let Ok(Ok(Some(line))) = timeout(Duration::from_secs(45), lines.next_line()).await {
+            if cancel.load(Ordering::Relaxed) {
+                return true;
+            }
             if in_headers {
+                if !status_ok && line.starts_with("HTTP/") {
+                    status_ok = line.contains(" 200 ");
+                }
                 if line.trim().is_empty() {
+                    if !status_ok {
+                        return false;
+                    }
                     in_headers = false;
                 }
                 continue;
@@ -920,393 +875,240 @@ impl AiEngine {
                 }
                 continue;
             }
-
             if trimmed.chars().all(|c| c.is_ascii_hexdigit()) && trimmed.len() <= 8 {
                 continue;
             }
 
-            if let Some(json_str) = trimmed.strip_prefix("data: ")
-                && let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str)
-                && let Some(token) = val
-                    .get("choices")
-                    .and_then(|c| c.as_array())
-                    .and_then(|arr| arr.first())
-                    .and_then(|choice| choice.get("delta"))
-                    .and_then(|delta| delta.get("content"))
-                    .and_then(|content| content.as_str())
-                && !token.is_empty()
-            {
-                filter.process(token, &tx);
+            let json_payload = trimmed.strip_prefix("data: ").unwrap_or(trimmed);
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_payload) {
+                if let Some(tok) = val
+                    .get("token")
+                    .or_else(|| val.get("content"))
+                    .or_else(|| val.get("delta"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    got_any = true;
+                    token_count += 1;
+                    filter.process(tok, tx);
+                } else if let Some(tok) = val
+                    .pointer("/choices/0/delta/content")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    got_any = true;
+                    token_count += 1;
+                    filter.process(tok, tx);
+                } else if let Some(thought) = val
+                    .get("thought")
+                    .or_else(|| val.get("reasoning"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    got_any = true;
+                    let _ = tx.send(StreamChunk::Thought(thought.to_string()));
+                } else if let Some(ans) = val
+                    .get("answer")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    got_any = true;
+                    filter.process(ans, tx);
+                }
+
+                let secs = started.elapsed().as_secs_f32();
+                if token_count > 0 && secs > 0.15 {
+                    let _ = tx.send(StreamChunk::Metrics(token_count as f32 / secs));
+                }
             }
         }
-
-        let _ = tx.send(StreamChunk::Done);
+        got_any
     }
 
-    async fn stream_aura_core(
-        host: &str,
-        port: u16,
-        prompt: &str,
+    async fn stream_openai_compat(
+        transport: &HttpTransport,
+        active_model: &str,
+        history: &[ChatMessage],
+        cancel: Arc<AtomicBool>,
         tx: UnboundedSender<StreamChunk>,
     ) {
-        let addr = format!("{}:{}", host, port);
-
-        // Try 1: Stream via AURA-CORE SSE endpoint (/agent/chat/stream)
-        if let Ok(mut stream) = TcpStream::connect(&addr).await {
-            let body = serde_json::json!({
-                "query": prompt,
-                "max_tokens": 512
-            })
-            .to_string();
-
-            let req = format!(
-                "POST /agent/chat/stream HTTP/1.1\r\n\
-                Host: {}:{}\r\n\
-                User-Agent: CortenDesktop-AI/0.2.0\r\n\
-                Content-Type: application/json\r\n\
-                Content-Length: {}\r\n\
-                Connection: close\r\n\
-                \r\n\
-                {}",
-                host,
-                port,
-                body.len(),
-                body
-            );
-
-            if stream.write_all(req.as_bytes()).await.is_ok() {
-                let reader = BufReader::new(stream);
-                let mut lines = reader.lines();
-                let mut in_headers = true;
-                let mut got_stream_token = false;
-                let mut filter = ThoughtStreamFilter::new();
-
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if in_headers {
-                        if line.trim().is_empty() {
-                            in_headers = false;
-                        }
-                        continue;
-                    }
-
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() || trimmed == "data: [DONE]" {
-                        if trimmed == "data: [DONE]" {
-                            break;
-                        }
-                        continue;
-                    }
-
-                    if trimmed.chars().all(|c| c.is_ascii_hexdigit()) && trimmed.len() <= 8 {
-                        continue;
-                    }
-
-                    if let Some(json_str) = trimmed.strip_prefix("data: ")
-                        && let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str)
-                        && let Some(token) = val.get("token").and_then(|t| t.as_str())
-                        && !token.is_empty()
-                    {
-                        got_stream_token = true;
-                        filter.process(token, &tx);
-                    }
-                }
-
-                if got_stream_token {
-                    let _ = tx.send(StreamChunk::Done);
-                    return;
-                }
-            }
+        let mut msgs = vec![serde_json::json!({
+            "role": "system",
+            "content": "Sen Corten Desktop masaüstü asistanısın. Net, doğru ve doğrudan yanıt ver."
+        })];
+        for m in history.iter().rev().take(12).rev() {
+            let role = match m.role {
+                MessageRole::User => "user",
+                MessageRole::Assistant => "assistant",
+                MessageRole::System => "system",
+            };
+            msgs.push(serde_json::json!({
+                "role": role,
+                "content": m.content,
+            }));
         }
+        let body = serde_json::json!({
+            "model": active_model,
+            "messages": msgs,
+            "stream": true,
+            "temperature": 0.4
+        })
+        .to_string();
 
-        // Try 2: AURA-CORE ReAct Agent with Tool Execution (/agent/chat)
-        if let Ok(mut stream) = TcpStream::connect(&addr).await {
-            let body = serde_json::json!({
-                "query": prompt,
-                "max_tokens": 512
-            })
-            .to_string();
-
-            let req = format!(
-                "POST /agent/chat HTTP/1.1\r\n\
-                Host: {}:{}\r\n\
-                User-Agent: CortenDesktop-AI/0.2.0\r\n\
-                Content-Type: application/json\r\n\
-                Content-Length: {}\r\n\
-                Connection: close\r\n\
-                \r\n\
-                {}",
-                host,
-                port,
-                body.len(),
-                body
-            );
-
-            if stream.write_all(req.as_bytes()).await.is_ok() {
-                let mut buffer = Vec::new();
-                if timeout(Duration::from_secs(15), stream.read_to_end(&mut buffer))
-                    .await
-                    .is_ok()
-                {
-                    let raw = String::from_utf8_lossy(&buffer);
-                    if let Some(pos) = raw.find("\r\n\r\n") {
-                        let body_json = &raw[pos + 4..];
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(body_json) {
-                            // Format tool execution if used
-                            if let Some(tool) = val.get("tool_used").and_then(|t| t.as_object()) {
-                                let tool_name =
-                                    tool.get("name").and_then(|n| n.as_str()).unwrap_or("tool");
-                                let tool_res = val
-                                    .get("tool_result")
-                                    .map(|r| r.to_string().trim_matches('"').to_string())
-                                    .unwrap_or_default();
-                                let tool_msg = format!(
-                                    "🛠️ AURA-CORE Ajan Eylemi: `{}`\n📊 Çıktı: {}\n\n",
-                                    tool_name, tool_res
-                                );
-                                let _ = tx.send(StreamChunk::Token(tool_msg));
-                            }
-                            if let Some(ans) = val.get("answer").and_then(|a| a.as_str()) {
-                                let _ = tx.send(StreamChunk::Token(ans.to_string()));
-                                let _ = tx.send(StreamChunk::Done);
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
+        if !Self::stream_sse(transport, "/v1/chat/completions", &body, &cancel, &tx).await
+            && !cancel.load(Ordering::Relaxed)
+        {
+            let _ = tx.send(StreamChunk::Error(
+                "Sunucudan yanıt alınamadı. Modelin yüklü ve sunucunun çalışır olduğunu kontrol edin."
+                    .into(),
+            ));
         }
-
-        // Try 3: Standard fallback (/api/generate)
-        if let Ok(mut stream) = TcpStream::connect(&addr).await {
-            let body = serde_json::json!({
-                "prompt": prompt,
-                "max_tokens": 512,
-                "temperature": 0.3
-            })
-            .to_string();
-
-            let req = format!(
-                "POST /api/generate HTTP/1.1\r\n\
-                Host: {}:{}\r\n\
-                User-Agent: CortenDesktop-AI/0.2.0\r\n\
-                Content-Type: application/json\r\n\
-                Content-Length: {}\r\n\
-                Connection: close\r\n\
-                \r\n\
-                {}",
-                host,
-                port,
-                body.len(),
-                body
-            );
-
-            if stream.write_all(req.as_bytes()).await.is_ok() {
-                let mut buffer = Vec::new();
-                if timeout(Duration::from_secs(12), stream.read_to_end(&mut buffer))
-                    .await
-                    .is_ok()
-                {
-                    let raw = String::from_utf8_lossy(&buffer);
-                    if let Some(pos) = raw.find("\r\n\r\n") {
-                        let body = &raw[pos + 4..];
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(body) {
-                            if let Some(text) = val
-                                .get("response")
-                                .or_else(|| val.get("text"))
-                                .or_else(|| val.get("output"))
-                                .and_then(|t| t.as_str())
-                            {
-                                let _ = tx.send(StreamChunk::Token(text.to_string()));
-                            } else {
-                                let _ = tx.send(StreamChunk::Token(body.trim().to_string()));
-                            }
-                        } else {
-                            let _ = tx.send(StreamChunk::Token(body.trim().to_string()));
-                        }
-                    }
-                }
-            }
-        }
-
         let _ = tx.send(StreamChunk::Done);
     }
 
-    /// Captures the full screen using grim (or corten-snipper fallback) into a user-private runtime path and encodes to base64
-    pub fn capture_screen_base64() -> Option<String> {
-        let base_dir = std::env::var("XDG_RUNTIME_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| crate::aura::aura_data_dir());
-        let tmp_path = base_dir.join(format!("corten_ai_screen_{}.png", std::process::id()));
-        let tmp_str = tmp_path.to_string_lossy().to_string();
-        let _ = std::fs::remove_file(&tmp_path);
-
-        // Try grim first (actual Wayland wlr-screencopy PNG capture)
-        if let Ok(status) = std::process::Command::new("grim").arg(&tmp_str).status()
-            && status.success()
-            && let Ok(bytes) = std::fs::read(&tmp_path)
-        {
-            let _ = std::fs::remove_file(&tmp_path);
-            return Some(base64_encode(&bytes));
-        }
-
-        // Try corten-snipper fullscreen capture if available
-        let snipper = crate::actions::resolve_corten_bin("corten-snipper");
-        if snipper.exists()
-            && let Ok(status) = std::process::Command::new(snipper)
-                .args(["--fullscreen", "--output", &tmp_str])
-                .status()
-            && status.success()
-            && let Ok(bytes) = std::fs::read(&tmp_path)
-        {
-            let _ = std::fs::remove_file(&tmp_path);
-            return Some(base64_encode(&bytes));
-        }
-
-        None
-    }
-
-    /// Offline heuristic static security auditor for scripts and code
-    pub fn heuristic_security_audit(query: &str) -> String {
-        let lower = query.to_lowercase();
-        let mut findings = Vec::new();
-        let mut risk_score = 0;
-
-        if lower.contains("curl ")
-            || lower.contains("wget ")
-            || lower.contains("http://")
-            || lower.contains("https://")
-        {
-            findings.push(
-                "⚠️ Ağ İletişimi: İnternet üzerinden dış sunuculara HTTP/ağ isteği gönderiyor.",
-            );
-            risk_score += 1;
-        }
-        if lower.contains(".ssh") || lower.contains("id_rsa") || lower.contains("authorized_keys") {
-            findings.push("🚨 Hassas Dizin: SSH anahtarlarına erişim teşebbüsü tespit edildi!");
-            risk_score += 3;
-        }
-        if lower.contains("sudo ") || lower.contains("pkexec ") || lower.contains("doas ") {
-            findings.push("⚠️ Yetki Yükseltme: Root / yönetici hakları talep ediyor.");
-            risk_score += 2;
-        }
-        if lower.contains("base64") && (lower.contains("-d") || lower.contains("--decode")) {
-            findings
-                .push("🚨 Gizli Yük: Base64 ile gizlenmiş (obfuscated) kod yürütme tespit edildi!");
-            risk_score += 3;
-        }
-        if lower.contains("systemd/user") || lower.contains(".bashrc") || lower.contains(".profile")
-        {
-            findings.push("⚠️ Kalıcılık (Persistence): Oturum başlangıç dosyalarına kalıcılık eklemeye çalışıyor.");
-            risk_score += 2;
-        }
-        if lower.contains("rm -rf") || lower.contains("mkfs") || lower.contains("dd if=") {
-            findings.push("🚨 Yıkıcı Eylem: Dosya sistemi silme veya disk yazma komutu!");
-            risk_score += 4;
-        }
-
-        let verdict = if risk_score >= 3 {
-            "⛔ YÜKSEK RİSK: Bu betik şüpheli/zararlı komutlar içeriyor! Çalıştırmanız önerilmez."
-        } else if risk_score > 0 {
-            "⚠️ ORTA RİSK: Dış ağ istekleri veya yetki talepleri içeriyor. İnceleyerek çalıştırın."
-        } else {
-            "✅ DÜŞÜK RİSK / TEMİZ: Herhangi bir belirgin saldırı veya zararlı kod örüntüsü tespit edilmedi."
+    async fn stream_ollama(
+        transport: &HttpTransport,
+        active_model: &str,
+        history: &[ChatMessage],
+        cancel: Arc<AtomicBool>,
+        tx: UnboundedSender<StreamChunk>,
+    ) {
+        let Some(mut stream) = connect_transport(transport, Duration::from_secs(2)).await else {
+            let _ = tx.send(StreamChunk::Error(
+                "Ollama sunucusuna bağlanılamadı.".into(),
+            ));
+            let _ = tx.send(StreamChunk::Done);
+            return;
         };
 
-        let details = if findings.is_empty() {
-            "• Bilinen saldırı imzaları, arka kapılar veya gizli ters kabuk tespit edilmedi.\n• Standart dosya ve işlem yürütme akışı."
-                .to_string()
-        } else {
-            findings.join("\n")
-        };
-
-        format!(
-            "🛡️ Corten AI Güvenlik Raporu (Statik / Heuristik Sentinel):\n\n\
-            {}\n\n\
-            Tespit Edilen Unsurlar:\n{}\n\n\
-            (Not: Bu değerlendirme Corten AI yerel güvenlik kalkanı tarafından çevrimdışı kurallarla üretilmiştir.)",
-            verdict, details
-        )
-    }
-}
-
-/// Pure Rust RFC-compliant Base64 encoder (zero external dependencies)
-pub fn base64_encode(data: &[u8]) -> String {
-    const CHARSET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).map(|&b| b as u32).unwrap_or(0);
-        let b2 = chunk.get(2).map(|&b| b as u32).unwrap_or(0);
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-
-        result.push(CHARSET[((triple >> 18) & 0x3F) as usize] as char);
-        result.push(CHARSET[((triple >> 12) & 0x3F) as usize] as char);
-        if chunk.len() > 1 {
-            result.push(CHARSET[((triple >> 6) & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
+        let mut msgs = vec![serde_json::json!({
+            "role": "system",
+            "content": "Sen Corten Desktop masaüstü asistanısın. Net, doğru ve doğrudan yanıt ver."
+        })];
+        for m in history.iter().rev().take(12).rev() {
+            let role = match m.role {
+                MessageRole::User => "user",
+                MessageRole::Assistant => "assistant",
+                MessageRole::System => "system",
+            };
+            msgs.push(serde_json::json!({ "role": role, "content": m.content }));
         }
-        if chunk.len() > 2 {
-            result.push(CHARSET[(triple & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
+        let body = serde_json::json!({
+            "model": active_model,
+            "messages": msgs,
+            "stream": true
+        })
+        .to_string();
+
+        let host_hdr = transport.host_header();
+        let req = format!(
+            "POST /api/chat HTTP/1.1\r\nHost: {host_hdr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        if stream.write_all(req.as_bytes()).await.is_err() {
+            let _ = tx.send(StreamChunk::Error("Ollama isteği gönderilemedi.".into()));
+            let _ = tx.send(StreamChunk::Done);
+            return;
+        }
+
+        let reader = BufReader::new(stream);
+        let mut lines = reader.lines();
+        let mut in_headers = true;
+        let mut token_count: u32 = 0;
+        let started = Instant::now();
+        let mut filter = ThoughtStreamFilter::new();
+
+        while let Ok(Ok(Some(line))) = timeout(Duration::from_secs(45), lines.next_line()).await {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            if in_headers {
+                if line.trim().is_empty() {
+                    in_headers = false;
+                }
+                continue;
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || (trimmed.chars().all(|c| c.is_ascii_hexdigit()) && trimmed.len() <= 8)
+            {
+                continue;
+            }
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                if let Some(tok) = val
+                    .pointer("/message/content")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    token_count += 1;
+                    filter.process(tok, &tx);
+                    let secs = started.elapsed().as_secs_f32();
+                    if secs > 0.15 {
+                        let _ = tx.send(StreamChunk::Metrics(token_count as f32 / secs));
+                    }
+                }
+                if val.get("done").and_then(|d| d.as_bool()) == Some(true) {
+                    break;
+                }
+            }
+        }
+        let _ = tx.send(StreamChunk::Done);
+    }
+
+    pub fn copy_to_clipboard(text: &str) {
+        if let Ok(mut child) = std::process::Command::new("wl-copy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            && let Some(mut stdin) = child.stdin.take()
+        {
+            use std::io::Write;
+            let _ = stdin.write_all(text.as_bytes());
         }
     }
-    result
+
+    #[allow(dead_code)]
+    pub fn socket_exists(path: &Path) -> bool {
+        path.exists()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{HttpTransport, parse_aura_models_json, parse_endpoint};
+    use std::path::PathBuf;
 
     #[test]
-    fn test_base64_encode() {
-        assert_eq!(base64_encode(b""), "");
-        assert_eq!(base64_encode(b"f"), "Zg==");
-        assert_eq!(base64_encode(b"fo"), "Zm8=");
-        assert_eq!(base64_encode(b"foo"), "Zm9v");
-        assert_eq!(base64_encode(b"Corten AI"), "Q29ydGVuIEFJ");
+    fn parses_uds_and_tcp_endpoints() {
+        assert_eq!(
+            parse_endpoint("unix:///run/user/1000/corten/aura.sock"),
+            Some(HttpTransport::Unix(PathBuf::from(
+                "/run/user/1000/corten/aura.sock"
+            )))
+        );
+        assert_eq!(
+            parse_endpoint("/tmp/corten-aura.sock"),
+            Some(HttpTransport::Unix(PathBuf::from("/tmp/corten-aura.sock")))
+        );
+        assert_eq!(
+            parse_endpoint("http://127.0.0.1:11435"),
+            Some(HttpTransport::Tcp {
+                host: "127.0.0.1".into(),
+                port: 11435
+            })
+        );
     }
 
     #[test]
-    fn test_classify_model_tier() {
-        assert_eq!(AiEngine::classify_model_tier("qwen2.5:1.5b"), "Eco (1.5B)");
-        assert_eq!(AiEngine::classify_model_tier("llama3.2:1b"), "Eco (1.5B)");
-        assert_eq!(AiEngine::classify_model_tier("qwen2.5:3b"), "Dengeli (3B)");
-        assert_eq!(AiEngine::classify_model_tier("phi3:mini"), "Eco (1.5B)");
-        assert_eq!(AiEngine::classify_model_tier("qwen2.5:7b"), "Pro (7B)");
-        assert_eq!(AiEngine::classify_model_tier("deepseek-r1:8b"), "Pro (7B)");
-    }
-
-    #[test]
-    fn test_thought_stream_filter_isolates_reasoning() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut filter = ThoughtStreamFilter::new();
-
-        filter.process("Ön bilgi ", &tx);
-        filter.process("<think>Düşünce süreci burada", &tx);
-        filter.process(" ve devam ediyor</think>Nihai cevap metni.", &tx);
-
-        let mut tokens = Vec::new();
-        let mut thoughts = Vec::new();
-
-        while let Ok(chunk) = rx.try_recv() {
-            match chunk {
-                StreamChunk::Token(t) => tokens.push(t),
-                StreamChunk::Thought(t) => thoughts.push(t),
-                _ => {}
-            }
-        }
-
-        assert_eq!(tokens.join(""), "Ön bilgi Nihai cevap metni.");
-        assert_eq!(thoughts.join(""), "Düşünce süreci burada ve devam ediyor");
-    }
-
-    #[test]
-    fn test_offline_assistant_response_has_guidance() {
-        let res = AiEngine::offline_assistant_response("merhaba");
-        assert!(res.contains("Corten AI Sistem Asistanı"));
-        assert!(res.contains("Ses & Parlaklık"));
-        assert!(res.contains("Dosya Arama"));
+    fn parses_dynamic_aura_models_of_any_size() {
+        let json = r#"{
+            "models": [
+                {"id": "qwen2.5-coder-3b", "name": "Qwen2.5 Coder 3B", "size_gb": 2.1},
+                {"id": "qwen2.5-32b-q4", "name": "Qwen2.5 32B Q4_K_M", "size_gb": 19.8}
+            ]
+        }"#;
+        let models = parse_aura_models_json(json);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[1].id, "qwen2.5-32b-q4");
+        assert_eq!(models[1].size_label, "19.8 GB");
     }
 }

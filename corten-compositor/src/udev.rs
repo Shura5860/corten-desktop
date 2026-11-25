@@ -69,11 +69,14 @@ pub struct DrmBackendState {
     pub secondary_gpus: Vec<MultiGpuDevice>,
 }
 
-fn try_enable_vrr<D: ControlDevice>(
+/// Returns `true` when the connected DRM output advertises `vrr_capable == 1`.
+/// When `enable` is `true`, sets `VRR_ENABLED = 1` on the CRTC; when `false`, sets `VRR_ENABLED = 0`.
+fn set_drm_vrr<D: ControlDevice>(
     drm: &D,
     conn_handle: connector::Handle,
     crtc_handle: smithay::reexports::drm::control::crtc::Handle,
-) {
+    enable: bool,
+) -> bool {
     let mut vrr_supported = false;
     if let Ok(props) = drm.get_properties(conn_handle) {
         let (ids, vals) = props.as_props_and_values();
@@ -88,7 +91,7 @@ fn try_enable_vrr<D: ControlDevice>(
         }
     }
     if !vrr_supported {
-        return;
+        return false;
     }
     if let Ok(props) = drm.get_properties(crtc_handle) {
         let (ids, _) = props.as_props_and_values();
@@ -96,16 +99,37 @@ fn try_enable_vrr<D: ControlDevice>(
             if let Ok(info) = drm.get_property(id)
                 && info.name().to_bytes() == b"VRR_ENABLED"
             {
-                if drm.set_property(crtc_handle, id, 1).is_ok() {
+                let target_val = if enable { 1 } else { 0 };
+                if drm.set_property(crtc_handle, id, target_val).is_ok() {
                     info!(
                         ?conn_handle,
                         ?crtc_handle,
-                        "Enabled Adaptive Sync / VRR (FreeSync) on DRM CRTC"
+                        enabled = enable,
+                        "Updated Adaptive Sync / VRR (FreeSync) on DRM CRTC"
                     );
                 }
                 break;
             }
         }
+    }
+    true
+}
+
+fn try_enable_vrr<D: ControlDevice>(
+    drm: &D,
+    conn_handle: connector::Handle,
+    crtc_handle: smithay::reexports::drm::control::crtc::Handle,
+) -> bool {
+    set_drm_vrr(drm, conn_handle, crtc_handle, true)
+}
+
+/// Suppresses non-interactive shell overlays (dock, desktop widgets, and notifications during Game Mode)
+/// while a fullscreen window is active so games stay unobstructed and eligible for DRM Direct Scanout.
+pub(crate) fn should_suppress_layer_for_fullscreen(namespace: &str, game_mode: bool) -> bool {
+    match namespace {
+        "corten-panel" | "corten-widgets" => true,
+        "corten-notify" => game_mode,
+        _ => false,
     }
 }
 
@@ -720,6 +744,71 @@ impl DrmBackendState {
     }
 }
 
+/// Reads the calling Linux thread ID from `/proc/thread-self/stat` without requiring `unsafe` or extra crates.
+fn current_linux_tid() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/thread-self/stat").ok()?;
+    stat.split_whitespace().next()?.parse::<u64>().ok()
+}
+
+/// Requests real-time (`SCHED_RR`) or high-priority scheduling for the main DRM compositor thread
+/// via `org.freedesktop.RealtimeKit1` (same mechanism used by KWin, Mutter, and Gamescope) so
+/// shader compilation or 100% CPU game loads never cause input or frame-pacing microstutter.
+fn try_enable_realtime_scheduling() {
+    let Some(tid) = current_linux_tid() else {
+        return;
+    };
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return;
+    };
+    rt.block_on(async move {
+        let Ok(conn) = zbus::Connection::system().await else {
+            tracing::debug!("RTKit unavailable: could not connect to system D-Bus");
+            return;
+        };
+        let rt_res = conn
+            .call_method(
+                Some("org.freedesktop.RealtimeKit1"),
+                "/org/freedesktop/RealtimeKit1",
+                Some("org.freedesktop.RealtimeKit1"),
+                "MakeThreadRealtime",
+                &(tid, 5u32),
+            )
+            .await;
+        if rt_res.is_ok() {
+            info!(
+                tid,
+                priority = 5,
+                "Compositor thread promoted to RTKit SCHED_RR"
+            );
+            return;
+        }
+        let hp_res = conn
+            .call_method(
+                Some("org.freedesktop.RealtimeKit1"),
+                "/org/freedesktop/RealtimeKit1",
+                Some("org.freedesktop.RealtimeKit1"),
+                "MakeThreadHighPriority",
+                &(tid, -11i32),
+            )
+            .await;
+        if hp_res.is_ok() {
+            info!(
+                tid,
+                nice = -11,
+                "Compositor thread promoted to RTKit high priority"
+            );
+        } else {
+            tracing::debug!(
+                tid,
+                "RTKit priority promotion skipped (daemon unavailable or policy denied)"
+            );
+        }
+    });
+}
+
 /// Runs the compositor directly on Linux TTY via DRM/KMS, GBM and Libinput.
 pub fn run_drm(
     mut drm_state: DrmBackendState,
@@ -730,6 +819,7 @@ pub fn run_drm(
     event_broadcaster: tokio::sync::mpsc::UnboundedSender<String>,
 ) -> Result<()> {
     info!("Starting Corten Compositor Standalone DRM/KMS engine...");
+    try_enable_realtime_scheduling();
 
     // 1. Open the DRM node only through LibSeat. A direct /dev/dri fallback
     // breaks session ownership and can make CRTC restore fail with EACCES when
@@ -927,11 +1017,22 @@ pub fn run_drm(
     let primary_crtc = initialized_crtc.ok_or_else(|| {
         anyhow::anyhow!("Initialized DRM output did not yield a valid primary CRTC handle")
     })?;
-    try_enable_vrr(output_manager.device(), conn_handle, primary_crtc);
     let init_disp_config =
         ConfigManager::<corten_config::DisplaySettingsConfig>::load_or_default("displays")
             .map(|c| c.get().clone())
             .unwrap_or_default();
+    let primary_vrr_capable = set_drm_vrr(
+        output_manager.device(),
+        conn_handle,
+        primary_crtc,
+        init_disp_config.vrr,
+    );
+    state.vrr_hardware_capable = primary_vrr_capable;
+    state.configured_vrr = init_disp_config.vrr;
+    state.configured_allow_tearing = init_disp_config.allow_tearing;
+    state.vrr_enabled = init_disp_config.vrr;
+    state.allow_tearing = init_disp_config.allow_tearing;
+    state.auto_fullscreen_game_mode = init_disp_config.auto_fullscreen_game_mode;
     apply_drm_hdr_and_color_management(output_manager.device(), conn_handle, &init_disp_config);
     let mut used_crtcs = vec![primary_crtc];
     let mut active_connectors = vec![conn_handle];
@@ -2035,6 +2136,7 @@ pub fn run_drm(
                             loc.y = (loc.y + dy).clamp(0.0, max_y);
                             let loc = state.apply_pointer_constraint(loc);
                             state.cursor_location = loc;
+                            state.note_pointer_motion();
                             if let Some((_, ref mut end_pt)) = state.selection_box {
                                 *end_pt = loc;
                             }
@@ -2074,6 +2176,7 @@ pub fn run_drm(
                                 .clamp(0.0, max_y);
                             let loc = state.apply_pointer_constraint(loc);
                             state.cursor_location = loc;
+                            state.note_pointer_motion();
                             handle_pointer_motion_interactions(&mut state, loc);
 
                             let serial = SERIAL_COUNTER.next_serial();
@@ -3061,7 +3164,7 @@ pub fn run_drm(
         // Immediately flush Wayland client socket buffers so input events (keys, mouse) reach corten-lock without delay
         let _ = display.flush_clients();
 
-        // Frame pacing: while a page-flip is pending, do not render. Wait for the VBlank event.
+        // Per-CRTC independent VBlank pacing so mixed-Hz monitors (e.g. 144Hz + 60Hz) never stall each other
         let completed_crtcs = std::mem::take(&mut *vblank_crtcs.borrow_mut());
         let vblank_got = !completed_crtcs.is_empty();
         if vblank_got {
@@ -3074,11 +3177,23 @@ pub fn run_drm(
                 pending_crtcs.retain(|pending| *pending != crtc);
             }
         }
-        let tearing_allowed = state.is_tearing_allowed_for_output(&state.output);
-        if !pending_crtcs.is_empty() && !tearing_allowed {
-            std::thread::sleep(std::time::Duration::from_millis(3));
+        let any_output_ready = drm_outputs.iter().enumerate().any(|(idx, drm_out)| {
+            let crtc = drm_out.crtc();
+            let output_ref = if idx == 0 {
+                &state.output
+            } else {
+                state
+                    .additional_outputs
+                    .get(idx - 1)
+                    .unwrap_or(&state.output)
+            };
+            !pending_crtcs.contains(&crtc) || state.is_tearing_allowed_for_output(output_ref)
+        });
+        if !drm_outputs.is_empty() && !any_output_ready {
+            std::thread::sleep(std::time::Duration::from_millis(2));
             continue;
         }
+        let tearing_allowed = state.is_tearing_allowed_for_output(&state.output);
         let mut send_callbacks = vblank_got || tearing_allowed;
 
         // Arrange tiled windows with spring physics animations
@@ -3093,6 +3208,39 @@ pub fn run_drm(
         } else {
             state.layout.arrange_animated(usable_area)
         };
+
+        // Detect active fullscreen window early so shell layers can be suppressed for true Direct Scanout
+        let active_window = state.layout.active_window().cloned();
+        let active_fullscreen = layouts
+            .iter()
+            .find(|(w, _)| {
+                state.layout.is_fullscreen(w)
+                    && (active_window.as_ref() == Some(w) || layouts.len() == 1)
+            })
+            .cloned();
+        let has_fullscreen = active_fullscreen.is_some();
+        state.sync_fullscreen_game_mode(has_fullscreen);
+
+        // Dynamically apply VRR changes on DRM CRTCs when Game Mode or fullscreen state transitions
+        if state.vrr_dirty {
+            state.vrr_dirty = false;
+            let mut any_vrr_capable = false;
+            for (idx, drm_out) in drm_outputs.iter().enumerate() {
+                if let Some(&ch) = active_connectors.get(idx)
+                    && set_drm_vrr(
+                        output_manager.device(),
+                        ch,
+                        drm_out.crtc(),
+                        state.vrr_enabled,
+                    )
+                {
+                    any_vrr_capable = true;
+                }
+            }
+            if any_vrr_capable {
+                state.vrr_hardware_capable = true;
+            }
+        }
 
         // Build render elements for display frame in FRONT-TO-BACK order
         // (Smithay's OutputDamageTracker requires front-to-back ordering for correct occlusion culling)
@@ -3123,7 +3271,7 @@ pub fn run_drm(
             elements.extend(dnd_elements.into_iter().map(CustomRenderElement::from));
         }
 
-        if !state.is_pointer_locked() {
+        if !state.is_pointer_locked() && !state.should_hide_idle_cursor() {
             match state.cursor_status {
                 CursorImageStatus::Hidden => {}
                 CursorImageStatus::Surface(ref cursor_surface) => {
@@ -3316,6 +3464,14 @@ pub fn run_drm(
                 if state.session_locked {
                     continue;
                 }
+                if has_fullscreen
+                    && should_suppress_layer_for_fullscreen(
+                        layer_surface.namespace(),
+                        state.game_mode,
+                    )
+                {
+                    continue;
+                }
                 let loc = layer_map
                     .layer_geometry(layer_surface)
                     .map(|g| g.loc.to_physical_precise_round(fractional_scale) + zoom_pan)
@@ -3356,6 +3512,15 @@ pub fn run_drm(
         {
             let layer_map = layer_map_for_output(&state.output);
             for layer_surface in layer_map.layers_on(Layer::Top) {
+                if has_fullscreen
+                    && !state.session_locked
+                    && should_suppress_layer_for_fullscreen(
+                        layer_surface.namespace(),
+                        state.game_mode,
+                    )
+                {
+                    continue;
+                }
                 let loc = layer_map
                     .layer_geometry(layer_surface)
                     .map(|g| g.loc.to_physical_precise_round(fractional_scale) + zoom_pan)
@@ -3410,15 +3575,6 @@ pub fn run_drm(
         // 3. Windows with 1:1 Touchpad Gesture tracking, Kinetic Momentum & Direct Scanout optimization
         state.step_gesture_kinetic();
         let gesture_offset_x = (state.gesture_swipe_dx * 1.4).round() as i32;
-        let active_window = state.layout.active_window().cloned();
-        let active_fullscreen = layouts
-            .iter()
-            .find(|(w, _)| {
-                state.layout.is_fullscreen(w)
-                    && (active_window.as_ref() == Some(w) || layouts.len() == 1)
-            })
-            .cloned();
-        let has_fullscreen = active_fullscreen.is_some();
 
         for (window, rect) in layouts.iter().rev() {
             if !crate::layout::is_window_mapped(window) {
@@ -3871,7 +4027,7 @@ pub fn run_drm(
             }
         }
 
-        // Render hardware frame to DRM Output
+        // Render hardware frame to DRM Output (per-CRTC independent pacing)
         for (output_index, drm_output) in drm_outputs.iter_mut().enumerate() {
             if state.screen_asleep {
                 if let Err(error) = drm_output.with_compositor(|compositor| compositor.clear()) {
@@ -3879,7 +4035,22 @@ pub fn run_drm(
                 }
                 continue;
             }
-            if output_index == 0 && state.night_light_enabled {
+            let output_ref = if output_index == 0 {
+                &state.output
+            } else {
+                state
+                    .additional_outputs
+                    .get(output_index - 1)
+                    .unwrap_or(&state.output)
+            };
+            let out_tearing = state.is_tearing_allowed_for_output(output_ref);
+            if pending_crtcs.contains(&drm_output.crtc()) && !out_tearing {
+                continue;
+            }
+            if output_index == 0
+                && state.night_light_enabled
+                && !(has_fullscreen && state.game_mode)
+            {
                 let out_size = state
                     .output
                     .current_mode()
@@ -3955,18 +4126,28 @@ pub fn run_drm(
 
             match render_res {
                 Ok(ref frame_res) => {
-                    if let Some((ref fs_window, _)) = active_fullscreen
-                        && let Some(surface) = crate::layout::window_wl_surface(fs_window)
-                    {
-                        smithay::wayland::compositor::with_states(&surface, |surface_data| {
-                            smithay::desktop::utils::update_surface_primary_scanout_output(
+                    if output_index == 0 {
+                        let mut direct_scanout_hit = false;
+                        if let Some((ref fs_window, _)) = active_fullscreen
+                            && let Some(surface) = crate::layout::window_wl_surface(fs_window)
+                        {
+                            smithay::wayland::compositor::with_states(&surface, |surface_data| {
+                                smithay::desktop::utils::update_surface_primary_scanout_output(
                                     &surface,
                                     &state.output,
                                     surface_data,
                                     &frame_res.states,
                                     smithay::backend::renderer::element::default_primary_scanout_output_compare,
                                 );
-                        });
+                            });
+                            direct_scanout_hit = frame_res.states.states.values().any(|st| {
+                                matches!(
+                                    st.presentation_state,
+                                    smithay::backend::renderer::element::RenderElementPresentationState::ZeroCopy
+                                )
+                            });
+                        }
+                        state.last_frame_direct_scanout = direct_scanout_hit;
                     }
                     match drm_output.queue_frame(()) {
                         Ok(()) => {
@@ -4448,5 +4629,37 @@ mod tests {
         } else {
             assert!(!std::path::Path::new("/dev/dri/nonexistent_drm_card_fallback").exists());
         }
+    }
+
+    #[test]
+    fn test_fullscreen_direct_scanout_layer_suppression() {
+        // Dock and desktop widgets must always be suppressed over fullscreen games
+        assert!(should_suppress_layer_for_fullscreen("corten-panel", false));
+        assert!(should_suppress_layer_for_fullscreen(
+            "corten-widgets",
+            false
+        ));
+        // Notifications stay visible unless Game Mode (DND) is active
+        assert!(!should_suppress_layer_for_fullscreen(
+            "corten-notify",
+            false
+        ));
+        assert!(should_suppress_layer_for_fullscreen("corten-notify", true));
+        // Interactive system overlays (lock, launcher, snipper, polkit) are never suppressed
+        assert!(!should_suppress_layer_for_fullscreen("corten-lock", true));
+        assert!(!should_suppress_layer_for_fullscreen(
+            "corten-launcher",
+            true
+        ));
+        assert!(!should_suppress_layer_for_fullscreen(
+            "corten-snipper",
+            true
+        ));
+    }
+
+    #[test]
+    fn test_current_linux_tid_reads_valid_thread_id() {
+        let tid = current_linux_tid();
+        assert!(tid.is_some_and(|id| id > 0));
     }
 }

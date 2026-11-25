@@ -124,6 +124,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     comp.reload_config().await?;
                     println!("Compositor config reloaded");
                 }
+                "gaming-status" => {
+                    let _ = comp.dispatch_action("gaming-status").await?;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
+                    let status_path = std::env::var("HOME")
+                        .map(|h| {
+                            std::path::PathBuf::from(h).join(".cache/corten/gaming-status.txt")
+                        })
+                        .ok();
+                    if let Some(path) = status_path
+                        && let Ok(content) = std::fs::read_to_string(&path)
+                    {
+                        println!("{}", content);
+                    } else {
+                        println!("Gaming status requested (check compositor logs)");
+                    }
+                }
                 "toggle-scratchpad"
                 | "move-to-scratchpad"
                 | "toggle-sticky"

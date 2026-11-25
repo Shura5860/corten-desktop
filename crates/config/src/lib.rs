@@ -625,6 +625,8 @@ pub struct DisplaySettingsConfig {
     pub max_luminance_nits: Option<u32>,
     #[serde(default = "default_true_bool")]
     pub xwayland_force_zero_scaling: bool,
+    #[serde(default = "default_true_bool")]
+    pub auto_fullscreen_game_mode: bool,
 }
 
 fn default_true_bool() -> bool {
@@ -651,6 +653,7 @@ impl Default for DisplaySettingsConfig {
             color_space: "srgb".into(),
             max_luminance_nits: Some(400),
             xwayland_force_zero_scaling: true,
+            auto_fullscreen_game_mode: true,
         }
     }
 }
@@ -677,7 +680,9 @@ impl Default for PowerSettingsConfig {
 #[serde(default)]
 pub struct AiSettingsConfig {
     pub enabled: bool,
-    pub model_tier: String, // "eco", "balanced", "pro", "custom"
+    pub model_tier: String, // legacy field kept for config backwards-compatibility
+    #[serde(default)]
+    pub selected_model: String,
     pub backend_url: String,
     pub custom_model_path: String,
     pub auto_gpu_release_on_game: bool,
@@ -688,13 +693,27 @@ impl Default for AiSettingsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            model_tier: "eco".into(),
-            backend_url: "http://127.0.0.1:8000".into(),
+            model_tier: "custom".into(),
+            selected_model: String::new(),
+            backend_url: "http://127.0.0.1:11435".into(),
             custom_model_path: String::new(),
             auto_gpu_release_on_game: true,
             idle_unload_mins: 5,
         }
     }
+}
+
+/// Default Unix Domain Socket path for AURA-CORE (`$XDG_RUNTIME_DIR/corten/aura.sock`)
+/// so the local AI daemon never occupies developer TCP ports such as `:8000`.
+pub fn default_aura_socket_path() -> std::path::PathBuf {
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR")
+        && !runtime_dir.trim().is_empty()
+    {
+        return std::path::PathBuf::from(runtime_dir)
+            .join("corten")
+            .join("aura.sock");
+    }
+    std::path::PathBuf::from("/tmp/corten-aura.sock")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
