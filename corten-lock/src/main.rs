@@ -822,7 +822,7 @@ impl MultiApplication for CortenLockApp {
                 primary_window: None,
                 caret_visible: true,
                 shake_transition: Transition::completed(360),
-                entrance_transition: Transition::new(Motion::DURATION_EMPHASIZED_DECELERATE),
+                entrance_transition: Transition::completed(Motion::DURATION_EMPHASIZED_DECELERATE),
                 last_tick: now_inst,
                 last_status_poll: now_inst,
                 active_patina,
@@ -843,13 +843,18 @@ impl MultiApplication for CortenLockApp {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        let events = event::listen_with(|ev, _status, id| Some(Message::IcedEvent(id, ev)));
-        let animating =
-            !self.shake_transition.is_complete() || !self.entrance_transition.is_complete();
-        let interval = if animating {
-            Duration::from_millis(16)
+        // CRITICAL: Filter strictly to KeyPressed and Window::Opened!
+        // Listening to all events (especially Window::RedrawRequested and CursorMoved)
+        // causes an infinite 100% CPU redraw loop in iced_sessionlock that freezes the lock screen.
+        let events = event::listen_with(|ev, _status, id| match ev {
+            Event::Keyboard(iced::keyboard::Event::KeyPressed { .. })
+            | Event::Window(iced::window::Event::Opened { .. }) => Some(Message::IcedEvent(id, ev)),
+            _ => None,
+        });
+        let interval = if !self.shake_transition.is_complete() {
+            Duration::from_millis(33)
         } else {
-            Duration::from_millis(1000)
+            Duration::from_secs(1)
         };
         let timer = iced::time::every(interval).map(|_| Message::Tick);
         Subscription::batch(vec![events, timer])

@@ -229,7 +229,12 @@ impl CortenGreeterApp {
 
     fn subscription(&self) -> Subscription<Message> {
         let tick = iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick);
-        let events = event::listen().map(Message::IcedEvent);
+        let events = event::listen_with(|ev, _status, _id| match ev {
+            Event::Keyboard(iced::keyboard::Event::KeyPressed { .. }) => {
+                Some(Message::IcedEvent(ev))
+            }
+            _ => None,
+        });
         Subscription::batch(vec![tick, events])
     }
 

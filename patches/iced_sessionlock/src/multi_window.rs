@@ -239,7 +239,7 @@ where
                 let mut pending_mouse = None;
                 let mut pending_redraw_window = None;
                 let mut redraw_all = false;
-                while let Ok(Some(flow)) = control_receiver.try_next() {
+                while let Ok(flow) = control_receiver.try_recv() {
                     match flow {
                         SessionShellActions::Mouse(mouse) => {
                             pending_mouse = Some(mouse);
